@@ -72,7 +72,7 @@ aws servicediscovery create-private-dns-namespace \
 |---------|----------|-------|------------|
 | Auth | 3 | sha-befc22... | HikariCP pool 10, Secrets Manager, startPeriod 180s |
 | Items | 4 | sha-ba7905d | HikariCP pool 10, Actuator health, startPeriod 180s |
-| API Gateway | 7 | sha-ba7905d | Redis sidecar, rate-limit disabled, SPRING_APPLICATION_JSON with Auth IP |
+| API Gateway | 12 | sha-ba7905d | Redis sidecar, rate-limit disabled, Service Connect DNS (`auth`/`items`) |
 
 ## 8. ALB + Target Group + Listener
 
@@ -116,7 +116,7 @@ aws ecs create-service --service-name onlineshop-api-gateway --task-def onlinesh
 
 ### Service Connect DNS Not Resolving
 **Symptom:** `java.nio.channels.UnresolvedAddressException` for `auth.onlineshop.local`  
-**Status:** UNRESOLVED. Workaround: using Auth private IP (172.31.23.124) in SPRING_APPLICATION_JSON
+**Status:** RESOLVED (2026-07-26). Service Connect was never enabled on the ECS services — only the Cloud Map namespace existed. Fixed by enabling Service Connect on all three services and updating gateway `SPRING_APPLICATION_JSON` to use `http://auth:9001` and `http://items:9000`.
 
 ### API Gateway → Auth Traversal Blocked
 **Symptom:** Request times out when API Gateway forwards to Auth on port 9001  
@@ -135,17 +135,15 @@ All three services: **RUNNING** (1 each), **HEALTHY**
 |---------|----------|-------|--------|
 | Auth | 3 | sha-befc22... | DB connected, pool 10 |
 | Items | 4 | sha-ba7905d | DB connected, Actuator |
-| API Gateway | 11 | sha-ba7905d | Redis UP, No rate-limit |
+| API Gateway | 12 | sha-ba7905d | Redis UP, No rate-limit, Service Connect |
 
 **ALB:** `http://onlineshop-alb-199112777.eu-north-1.elb.amazonaws.com`
 
 **Issues Resolved:**
 - SG self-referencing rules added (ports 9000-9001, 6379)
 - Resilience4j TimeLimiter: 3s → 5s
-- Service Connect DNS: hardcoded IPs as workaround
+- Service Connect DNS: enabled on all 3 services (2026-07-26), gateway uses `auth`/`items` hostnames
 - Rate limiting: disabled (`GATEWAY_RATELIMIT_ENABLED=false`)
 
 **Remaining tech debt (Pass 2):**
-- Service Connect DNS resolution
 - Rate limiter lazy Redis connection
-- Dynamic service discovery (hardcoded IPs break on restart)

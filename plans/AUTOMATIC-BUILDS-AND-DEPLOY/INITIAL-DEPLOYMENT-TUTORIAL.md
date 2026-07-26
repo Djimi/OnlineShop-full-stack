@@ -248,7 +248,7 @@ aws ecs create-service \
   --network-configuration "awsvpcConfiguration={subnets=[...],securityGroups=[$ECS_SG],assignPublicIp=ENABLED}"
 ```
 
-**Service Connect** — enables DNS-based service discovery between tasks:
+**Service Connect** — enables DNS-based service discovery between tasks. Each task gets an Envoy proxy sidecar that handles DNS resolution of short names to task IPs automatically:
 ```json
 {
   "enabled": true,
@@ -259,7 +259,7 @@ aws ecs create-service \
   }]
 }
 ```
-This should make `auth.onlineshop.local` resolve to the Auth task's IP, but it's currently not working.
+This makes `auth` resolve to the Auth task's IP (port 9001) and `items` to the Items task's IP (port 9000) from within any task in the `onlineshop.local` namespace. No `.onlineshop.local` suffix needed — the Envoy proxy resolves bare names.
 
 **UI:** ECS → Cluster → Create Service → Fargate
 
@@ -303,33 +303,57 @@ Connection initialization timed out after 100 millisecond(s)
 
 ---
 
-## 10. Service Connect DNS Issue (WORKAROUND)
+## 10. Service Connect DNS (FIXED)
 
 ### Problem
-`auth.onlineshop.local` doesn't resolve from within the API Gateway task. Service Connect creates the Cloud Map services but DNS resolution fails.
+`auth.onlineshop.local` didn't resolve from within the API Gateway task. The Cloud Map namespace existed but Service Connect was never enabled on the ECS services — no Envoy proxy sidecar was running, so DNS resolution failed.
 
 ### Error
 ```
 java.nio.channels.UnresolvedAddressException: http://auth.onlineshop.local:9001/api/v1/auth/login
 ```
 
-### Workaround
-Hardcode both services' private IPs in `SPRING_APPLICATION_JSON`:
-```json
-{"gateway":{"auth":{"service-url":"http://<AUTH_IP>:9001"},"items":{"service-url":"http://<ITEMS_IP>:9000"}}}
-```
-**Caveat:** IPs change on task restart. Needs real Service Discovery in Pass 2.
+### Root Cause
+`serviceConnectConfiguration` was `null` on all three ECS services. The Cloud Map namespace (`onlineshop.local`) and service entries existed as orphaned artifacts from a previous attempt, but were not connected to the running ECS tasks.
 
-### How to get task private IPs (CLI)
+### Fix (2026-07-26)
+Enabled Service Connect via `update-service` on all three services:
+
 ```bash
-TASK_ARN=$(aws ecs list-tasks --profile dpm-profile --region eu-north-1 \
-  --cluster onlineshop-cluster --service-name onlineshop-auth \
-  --query 'taskArns[0]' --output text)
-aws ecs describe-tasks --profile dpm-profile --region eu-north-1 \
-  --cluster onlineshop-cluster --tasks $TASK_ARN \
-  --query 'tasks[0].attachments[0].details[?name==`privateIPv4Address`]|[0].value' --output text
+# Auth — expose itself as "auth" on port 9001
+aws ecs update-service --profile dpm-profile --region eu-north-1 \
+  --cluster onlineshop-cluster --service onlineshop-auth \
+  --service-connect-configuration '{
+    "enabled": true, "namespace": "onlineshop.local",
+    "services": [{"portName": "auth-port", "clientAliases": [{"port": 9001, "dnsName": "auth"}]}]
+  }'
+
+# Items — expose itself as "items" on port 9000
+aws ecs update-service --profile dpm-profile --region eu-north-1 \
+  --cluster onlineshop-cluster --service onlineshop-items \
+  --service-connect-configuration '{
+    "enabled": true, "namespace": "onlineshop.local",
+    "services": [{"portName": "items-port", "clientAliases": [{"port": 9000, "dnsName": "items"}]}]
+  }'
+
+# API Gateway — client only (no exposed port)
+aws ecs update-service --profile dpm-profile --region eu-north-1 \
+  --cluster onlineshop-cluster --service onlineshop-api-gateway \
+  --service-connect-configuration '{"enabled": true, "namespace": "onlineshop.local"}'
 ```
-**UI:** ECS → Cluster → onlineshop-cluster → Tasks → click task → Networking → Private IP
+
+Updated `SPRING_APPLICATION_JSON` in the gateway task definition (revision 12) to use DNS names:
+```json
+{"gateway":{"auth":{"service-url":"http://auth:9001"},"items":{"service-url":"http://items:9000"}}}
+```
+
+**Key insight:** Service Connect injects an Envoy proxy sidecar into each task. The sidecar handles DNS resolution of short names (`auth`, `items`) → task IPs automatically.
+
+### Previous Workaround (deprecated)
+The old workaround hardcoded private IPs in `SPRING_APPLICATION_JSON`, which broke on every task restart:
+```json
+{"gateway":{"auth":{"service-url":"http://172.31.23.124:9001"},"items":{"service-url":"http://172.31.26.229:9000"}}}
+```
 
 ---
 
@@ -407,9 +431,10 @@ curl -s $ALB/auth/validate -H "Authorization: Bearer $TOKEN"
 |-----------|-------|
 | ALB (public) | `onlineshop-alb-199112777.eu-north-1.elb.amazonaws.com` |
 | ECS Cluster | `onlineshop-cluster` |
+| Service Connect | `onlineshop.local` (auth→`auth:9001`, items→`items:9000`) |
 | Auth | rev 3, image sha-befc22... |
 | Items | rev 4, image sha-ba7905d |
-| API Gateway | rev 11, image sha-ba7905d |
+| API Gateway | rev 12, image sha-ba7905d |
 | RDS | `onlineshop-postgres-db.cf2gikqaqh9f.eu-north-1.rds.amazonaws.com:5432` |
 
 ---

@@ -37,19 +37,23 @@ All requirements come from these three documents in this directory:
 
 ## Cost Trajectory
 
-| After Pass | Estimated Monthly Cost |
-|---|---|
-| 1 — MVP | ~$2–4 |
-| 2 — + Staging | ~$3–5 |
-| 3 — + Production + Release infra | ~$4–5 (staging on-demand keeps it in budget) |
-| 4 — + Monitoring/notifications | ~$4–5 (no incremental AWS cost) |
+**Note:** The original Pass 1 estimate (~$2-4) was overly optimistic — it assumed Fargate Spot pricing but did not account for the ALB ($24.19/month) or the minimum baseline cost of Secrets + ECR + Cloud Map (~$1.25/month; KMS keys are AWS-managed = free). After switching to Spot on 2026-07-25, the real costs are:
 
-The $5/month ceiling is respected throughout by:
-- Using Fargate Spot pricing
+| After Pass | Estimated Monthly Cost | Notes |
+|---|---|---|
+| 1 — MVP (running 24/7 Spot) | ~$17–42 | Spot + ALB 24/7 = $41.66; Spot + ALB daily pause = ~$17 |
+| 2 — + Staging | ~$20–45 | Staging adds duplicate infra when active |
+| 3 — + Production + Release infra | ~$22–47 | Production adds ALB + extra tasks when active |
+| 4 — + Monitoring/notifications | ~$22–47 | No incremental AWS cost |
+
+The original $5/month ceiling required both Spot AND pausing the ALB when idle. See [COST-EXPLANATION.md](./explanations/COST-EXPLANATION.md) for detailed analysis.
+
+Cost control strategies:
+- Fargate Spot pricing (switched 2026-07-25 — saves ~60% on compute)
+- Pause scripts: `pause-playground.sh` / `resume-playground.sh` (cuts idle cost to ~$1.25/month)
 - Making staging on-demand (scale to 0 or tear down when idle)
-- Leveraging RDS Free Tier (12 months)
+- Leveraging RDS Free Tier (12 months, expires July 2027)
 - Using GitHub Actions free tier (2000 min/month)
-- Relying on built-in dashboards (no custom tooling)
 
 ---
 
@@ -65,9 +69,22 @@ The $5/month ceiling is respected throughout by:
 
 ---
 
+## Execution Traceability
+
+Every step executed in this plan **MUST** update [`executed/INFO.md`](./executed/INFO.md) with:
+- Every AWS resource created (ARNs, IDs, security groups, policies, secrets)
+- Every command run (with full parameters)
+- Every configuration change (files, env vars, overrides)
+- Every issue encountered and its resolution
+- Every credential/secret placeholder (never the actual secret value)
+
+**Purpose:** When the entire plan is executed, `INFO.md` must contain everything needed to replicate the environment from scratch — pipelines, infrastructure, databases, networking, and all. No tribal knowledge, no forgotten steps.
+
+---
+
 ## Progress
 
-- [ ] **Pass 1** — MVP: Running on AWS
+- [ ] **Pass 1** — MVP: Running on AWS (IN PROGRESS — ECS + ALB + RDS + CI/CD working, frontend not deployed)
 - [ ] **Pass 2** — CI Pipeline Hardening & Staging
 - [ ] **Pass 3** — Release, Traceability & Promotion
 - [ ] **Pass 4** — Operational Maturity

@@ -92,3 +92,7 @@ api-gateway/
 ## Development Notes
 
 - In this workspace, VS Code Spring Boot live-information auto-JMX is disabled via `.vscode/settings.json` so IDE launches do not compete with the gateway's HTTP port `10000`.
+
+## AWS CLI Conventions
+
+For AWS CLI commands (infrastructure queries, deployments, etc.), see the root [AGENTS.md](../AGENTS.md) — all AWS commands MUST include `--profile dpm-profile --region eu-north-1`.

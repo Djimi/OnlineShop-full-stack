@@ -5,6 +5,19 @@
 Microservices-based e-commerce learning platform
 
 
+## AWS CLI Commands — MANDATORY
+
+**ALL AWS CLI commands MUST include `--profile dpm-profile --region eu-north-1`. NO exceptions — even for seemingly harmless commands like `sts get-caller-identity`.**
+
+```bash
+# Always verify identity before any AWS work:
+aws sts get-caller-identity --profile dpm-profile --region eu-north-1
+```
+
+- The profile uses IAM user credentials (not SSO). Without `--profile dpm-profile`, commands fail with "session expired" or unauthorized errors.
+- If commands fail with `Your session has expired`, tell the user to re-authenticate. Do NOT retry.
+- Every `create`/`put`/`delete` MUST be followed by a `describe`/`get`/`list` to confirm the change took effect.
+
 ## Your role
 
 You are staff engineer with a lot of experience and always propose modern architectural and technological approaches. When there are multiple solutions which are all great, you explain them and ask which one should be used.
@@ -66,8 +79,8 @@ When using Maven commands you MUST use the Maven wrapper (`./mvnw`) inside the s
 See [docs/CI_CD_GOTCHAS.md](./docs/CI_CD_GOTCHAS.md) for the full pitfall checklist. Always read that file before working on CI/CD or AWS infra.
 
 ### Before any AWS work
-- Always run `aws sts get-caller-identity` first in any new terminal session
-- Always pass `--region eu-north-1` explicitly; AWS resources are region-scoped and invisible across regions
+- Always run `aws sts get-caller-identity --profile dpm-profile --region eu-north-1` first in any new terminal session
+- Always pass `--profile dpm-profile --region eu-north-1` explicitly on every command; AWS resources are region-scoped and invisible across regions
 - Every `create`/`put`/`delete` MUST be followed by a `describe`/`get`/`list` to confirm the change took effect
 
 ### GitHub Actions development rules
@@ -84,6 +97,28 @@ PowerShell's default UTF-8-with-BOM encoding confuses AWS IAM. When creating JSO
 # DO use explicit ASCII encoding
 [System.IO.File]::WriteAllText("path.json", $jsonString, [System.Text.Encoding]::ASCII)
 ```
+
+## Playground Start/Stop
+
+When not actively developing, pause the AWS playground to save ~$38/month:
+
+```bash
+# Stop the playground (scale ECS to 0 + delete ALB) — reduces to ~$3.25/month
+bash plans/AUTOMATIC-BUILDS-AND-DEPLOY/scripts/pause-playground.sh
+
+# Start the playground (recreate ALB + scale ECS to 1) — wait ~3-5 min for startup
+bash plans/AUTOMATIC-BUILDS-AND-DEPLOY/scripts/resume-playground.sh
+```
+
+**Cost summary:**
+
+| State | Monthly Cost |
+|---|---|
+| Running (Spot 24/7) | ~$41.66 |
+| Running (Spot 8hr/day + ALB paused) | ~$17-18 |
+| Paused | ~$3.25 |
+
+Both scripts are self-contained with hardcoded infrastructure IDs — no `jq` required. See `plans/AUTOMATIC-BUILDS-AND-DEPLOY/explanations/COST-EXPLANATION.md` for breakdown.
 
 ## Maven Build Dependencies & Parallel Builds
 

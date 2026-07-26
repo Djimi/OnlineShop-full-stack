@@ -122,3 +122,7 @@ Packages excluded from coverage (no unit-testable logic):
 ## Configuration
 
 Main configuration: [src/main/resources/application.yml](./src/main/resources/application.yml)
+
+## AWS CLI Conventions
+
+For AWS CLI commands (infrastructure queries, deployments, etc.), see the root [AGENTS.md](../AGENTS.md) — all AWS commands MUST include `--profile dpm-profile --region eu-north-1`.

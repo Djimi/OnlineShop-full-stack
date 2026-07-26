@@ -63,3 +63,7 @@ Optional threshold overrides:
 --auth.troubleshooting.hibernate.slow-query-threshold-ms=100
 --auth.troubleshooting.datasource.acquire-slow-threshold-ms=2
 ```
+
+## AWS CLI Conventions
+
+For AWS CLI commands (infrastructure queries, deployments, etc.), see the root [AGENTS.md](../AGENTS.md) — all AWS commands MUST include `--profile dpm-profile --region eu-north-1`.

@@ -124,7 +124,7 @@ Master user: `dbadmin`, password stored in local `.env` (`POSTGRES_AWS_SECRET`).
 |---------|------------|-------|-------|
 | Auth | 3 | sha-befc22... | HikariCP 10, Secrets Manager |
 | Items | 4 | sha-ba7905d | Actuator, HikariCP 10 |
-| API Gateway | 7 | sha-ba7905d | Redis sidecar, rate-limit off, Auth IP hardcoded |
+| API Gateway | 12 | sha-ba7905d | Redis sidecar, rate-limit off, Service Connect (`auth`/`items`) |
 
 ### ALB
 - `onlineshop-alb` → DNS: `onlineshop-alb-199112777.eu-north-1.elb.amazonaws.com`
@@ -137,7 +137,7 @@ All 3: 1 running, HEALTHY, Service Connect enabled
 ### Fixes Applied During Deployment
 
 1. **Self-referencing SG rules** — Added inbound tcp:9000-9001 + tcp:6379 on `sg-0b209104a6b15b157` from itself → API Gateway now reaches Auth/Items/Redis
-2. **Service Connect DNS** — `auth.onlineshop.local` still not resolving. Hardcoded private IPs in `SPRING_APPLICATION_JSON` as workaround
+2. **Service Connect DNS** — FIXED (2026-07-26). Enabled Service Connect on all 3 services, gateway uses `http://auth:9001` and `http://items:9000`
 3. **Resilience4j TimeLimiter** — Auth validation timeout: 3s → 5s in `ResilienceConfig.java` (ECS task-to-task latency higher than localhost)
 4. **Rate limiting disabled** — `GATEWAY_RATELIMIT_ENABLED=false` because `RateLimitConfig.bucket4jProxyManager` connects to Redis eagerly
 5. **HikariCP pool** — Auth: 100 → 10 connections (RDS `db.t4g.micro` max ~25 connections)
@@ -151,8 +151,6 @@ All 3: 1 running, HEALTHY, Service Connect enabled
 - API Gateway rev 11 (sha-ba7905d), Auth rev 3, Items rev 4
 
 ### Remaining Tech Debt
-- Service Connect DNS (pass 2)
 - Rate limiter lazy Redis connection (pass 2)
-- Items task private IP changes on restart will break Gateway routing (need dynamic discovery)
 - Frontend not deployed yet (step 1.6)
 
