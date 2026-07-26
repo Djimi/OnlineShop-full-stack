@@ -233,13 +233,7 @@ aws ecr create-repository --repository-name "onlineshop-api-gateway" --region eu
 ### Image Tags Pushed
 
 Workflow tags images with pattern `sha-<FULL_40_CHAR_COMMIT_HASH>`.
-Images in ECR as of deployment:
-
-| Repository | Image Tags |
-|---|---|
-| `onlineshop-auth` | `sha-befc225cb8806ca139994013d02b6845a39b412b` (workflow Run #5), `sha-263f0690aa08eaf24f23f715dea7e8895a759293` (workflow Run #6) |
-| `onlineshop-items` | `sha-ba7905d` (manually pushed, deployed as rev 4), `sha-263f0690aa08eaf24f23f715dea7e8895a759293` (workflow Run #6) |
-| `onlineshop-api-gateway` | `sha-ba7905d` (manually pushed, deployed as rev 11), `sha-263f0690aa08eaf24f23f715dea7e8895a759293` (workflow Run #6) |
+Images are pushed by CI/CD with tag `sha-<40-CHAR-COMMIT-HASH>`. Run `aws ecr describe-images --repository-name onlineshop-auth --query 'imageDetails[*].imageTags'` to see current images. Historical snapshot (2026-07-25): auth has tags `sha-befc225cb8806ca139994013d02b6845a39b412b` (obsolete, no longer in ECR) and `sha-263f0690aa08eaf24f23f715dea7e8895a759293` (active).
 
 ### ECR Verification Commands
 
@@ -515,12 +509,11 @@ aws servicediscovery create-private-dns-namespace \
 | Property | Value |
 |---|---|
 | Family | `onlineshop-auth` |
-| Revision | 3 |
-| Image | `799111666795.dkr.ecr.eu-north-1.amazonaws.com/onlineshop-auth:sha-befc225cb8806ca139994013d02b6845a39b412b` |
 | CPU | 256 (0.25 vCPU) |
 | Memory | 512 MB |
-| Launch Type | FARGATE |
 | Execution Role | `arn:aws:iam::799111666795:role/ecsTaskExecutionRole` |
+
+> Image is pushed by CI/CD with tag `sha-<40-CHAR-COMMIT-HASH>`. The container definition below shows the pattern.
 
 **Container Definition:**
 
@@ -564,12 +557,11 @@ aws servicediscovery create-private-dns-namespace \
 | Property | Value |
 |---|---|
 | Family | `onlineshop-items` |
-| Revision | 4 |
-| Image | `799111666795.dkr.ecr.eu-north-1.amazonaws.com/onlineshop-items:sha-ba7905d` |
 | CPU | 256 (0.25 vCPU) |
 | Memory | 512 MB |
-| Launch Type | FARGATE |
 | Execution Role | `arn:aws:iam::799111666795:role/ecsTaskExecutionRole` |
+
+> Image is pushed by CI/CD with tag `sha-<40-CHAR-COMMIT-HASH>`. The container definition below shows the pattern.
 
 **Container Definition:**
 
@@ -613,12 +605,11 @@ aws servicediscovery create-private-dns-namespace \
 | Property | Value |
 |---|---|
 | Family | `onlineshop-api-gateway` |
-| Revision | 11 |
-| Image (gateway) | `799111666795.dkr.ecr.eu-north-1.amazonaws.com/onlineshop-api-gateway:sha-ba7905d` |
 | CPU | 512 (0.5 vCPU) |
 | Memory | 1024 MB |
-| Launch Type | FARGATE |
 | Execution Role | `arn:aws:iam::799111666795:role/ecsTaskExecutionRole` |
+
+> Image is pushed by CI/CD with tag `sha-<40-CHAR-COMMIT-HASH>`. The container definition below shows the pattern.
 
 **Container Definition (Main — API Gateway):**
 
@@ -629,11 +620,8 @@ aws servicediscovery create-private-dns-namespace \
   "essential": true,
   "portMappings": [{"containerPort": 10000, "protocol": "tcp", "name": "gateway-port"}],
   "environment": [
-    {"name": "SPRING_APPLICATION_JSON", "value": "{\"gateway\":{\"auth\":{\"service-url\":\"http://auth:9001\"},\"items\":{\"service-url\":\"http://items:9000\"}}}"},
     {"name": "GATEWAY_RATELIMIT_ENABLED", "value": "false"},
-    {"name": "SPRING_DATA_REDIS_HOST", "value": "localhost"},
-    {"name": "SPRING_DATA_REDIS_PORT", "value": "6379"},
-    {"name": "SPRING_DATA_REDIS_CONNECT_TIMEOUT", "value": "10s"}
+    {"name": "SPRING_APPLICATION_JSON", "value": "{\"gateway\":{\"auth\":{\"service-url\":\"http://auth:9001\"},\"items\":{\"service-url\":\"http://items:9000\"}}}"}
   ],
   "dependsOn": [{
     "containerName": "redis-sidecar",
@@ -692,7 +680,7 @@ aws servicediscovery create-private-dns-namespace \
 |---|---|
 | Name | `onlineshop-alb` |
 | DNS Name | To get current DNS: `aws elbv2 describe-load-balancers --profile dpm-profile --region eu-north-1 --names onlineshop-alb --query 'LoadBalancers[0].DNSName' --output text` |
-| ARN | (created by AWS) |
+| ARN | Generated at creation; captured automatically during `resume-playground.sh` |
 | Subnets | 3 subnets in `eu-north-1` (a, b, c) |
 | Security Group | `sg-0b5427a6a3bf31c29` (ALB SG) |
 | Scheme | internet-facing |
@@ -756,13 +744,9 @@ All traffic goes through API Gateway (`/` → API Gateway → routes internally 
 |---|---|
 | Service Name | `onlineshop-auth` |
 | Cluster | `onlineshop-cluster` |
-| Task Definition | `onlineshop-auth:3` |
-| Desired Count | 1 |
-| Launch Type | FARGATE |
-| Platform Version | LATEST |
-| Service Connect | Enabled |
-| Health Status | HEALTHY |
+| Task Definition | `onlineshop-auth` |
 | Service Connect | Enabled (`auth` → port 9001) |
+| Capacity Provider | FARGATE_SPOT |
 
 **Creation command:**
 
@@ -770,7 +754,7 @@ All traffic goes through API Gateway (`/` → API Gateway → routes internally 
 aws ecs create-service \
   --cluster onlineshop-cluster \
   --service-name onlineshop-auth \
-  --task-definition onlineshop-auth:3 \
+  --task-definition onlineshop-auth \
   --desired-count 1 \
   --launch-type FARGATE \
   --network-configuration "awsvpcConfiguration={subnets=[<subnet-a>,<subnet-b>,<subnet-c>],securityGroups=[sg-0b209104a6b15b157],assignPublicIp=ENABLED}" \
@@ -790,11 +774,9 @@ aws ecs create-service \
 |---|---|
 | Service Name | `onlineshop-items` |
 | Cluster | `onlineshop-cluster` |
-| Task Definition | `onlineshop-items:4` |
-| Desired Count | 1 |
-| Launch Type | FARGATE |
-| Service Connect | Enabled |
-| Health Status | HEALTHY |
+| Task Definition | `onlineshop-items` |
+| Service Connect | Enabled (`items` → port 9000) |
+| Capacity Provider | FARGATE_SPOT |
 
 **Creation command:**
 
@@ -802,7 +784,7 @@ aws ecs create-service \
 aws ecs create-service \
   --cluster onlineshop-cluster \
   --service-name onlineshop-items \
-  --task-definition onlineshop-items:4 \
+  --task-definition onlineshop-items \
   --desired-count 1 \
   --launch-type FARGATE \
   --network-configuration "awsvpcConfiguration={subnets=[<subnet-a>,<subnet-b>,<subnet-c>],securityGroups=[sg-0b209104a6b15b157],assignPublicIp=ENABLED}" \
@@ -822,12 +804,10 @@ aws ecs create-service \
 |---|---|
 | Service Name | `onlineshop-api-gateway` |
 | Cluster | `onlineshop-cluster` |
-| Task Definition | `onlineshop-api-gateway:11` |
-| Desired Count | 1 |
-| Launch Type | FARGATE |
-| Service Connect | Enabled |
+| Task Definition | `onlineshop-api-gateway` |
+| Service Connect | Enabled (client only, discovers `auth`/`items`) |
 | Load Balancer | `onlineshop-gateway-tg` (port 10000) |
-| Health Status | HEALTHY |
+| Capacity Provider | FARGATE_SPOT |
 
 **Creation command:**
 
@@ -835,7 +815,7 @@ aws ecs create-service \
 aws ecs create-service \
   --cluster onlineshop-cluster \
   --service-name onlineshop-api-gateway \
-  --task-definition onlineshop-api-gateway:11 \
+  --task-definition onlineshop-api-gateway \
   --desired-count 1 \
   --launch-type FARGATE \
   --network-configuration "awsvpcConfiguration={subnets=[<subnet-a>,<subnet-b>,<subnet-c>],securityGroups=[sg-0b209104a6b15b157],assignPublicIp=ENABLED}" \
@@ -848,6 +828,16 @@ aws ecs create-service \
       "clientAliases": [{"port": 10000, "dnsName": "gateway"}]
     }]
   }'
+```
+
+```bash
+# After creation, switch all services to Fargate Spot (~60% compute savings)
+for svc in onlineshop-auth onlineshop-items onlineshop-api-gateway; do
+  aws ecs update-service --profile dpm-profile --region eu-north-1 \
+    --cluster onlineshop-cluster --service $svc \
+    --capacity-provider-strategy capacityProvider=FARGATE_SPOT,weight=1 \
+    --force-new-deployment
+done
 ```
 
 ### Service Update (Redeploy)
@@ -971,7 +961,7 @@ aws ecs describe-tasks --profile dpm-profile --region eu-north-1 \
   // Line 97: Changed from 3s to 4s (deployed as 5s for ECS latency)
   .timeoutDuration(Duration.ofSeconds(4))
   ```
-  Actual deployed value: 5 seconds (built as `sha-ba7905d`, deployed as rev 11). ECS task-to-task latency is higher than localhost.
+  Actual deployed value: 5 seconds (built as `sha-ba7905d`, deployed via CI/CD). ECS task-to-task latency is higher than localhost.
 
 - **Tests:** 10 tests pass.
 
@@ -1287,7 +1277,7 @@ gh workflow run "Build & Push to ECR" -f service=all
 | **Symptom** | `java.nio.channels.UnresolvedAddressException: http://auth.onlineshop.local:9001/api/v1/auth/login` |
 | **Root Cause** | `serviceConnectConfiguration` was `null` on all three ECS services. The Cloud Map namespace (`onlineshop.local`) and service entries existed as orphaned artifacts, but no Envoy proxy sidecar was running. |
 | **Status** | FIXED (2026-07-26) |
-| **Fix** | Enabled Service Connect via `update-service` on all three services. Auth: expose `auth` on port 9001. Items: expose `items` on port 9000. Gateway: client only. Updated gateway `SPRING_APPLICATION_JSON` (rev 12) to use `http://auth:9001` and `http://items:9000`. |
+| **Fix** | Enabled Service Connect via `update-service` on all three services. Auth: expose `auth` on port 9001. Items: expose `items` on port 9000. Gateway: client only. Updated gateway `SPRING_APPLICATION_JSON` in task definition to use `http://auth:9001` and `http://items:9000`. |
 | **Key insight** | Service Connect injects an Envoy proxy sidecar into each task. The sidecar handles DNS resolution of short names (`auth`, `items`) → task IPs automatically. No more hardcoded IPs needed. |
 | **Previous workaround (deprecated)** | `{"gateway":{"auth":{"service-url":"http://172.31.23.124:9001"},"items":{"service-url":"http://172.31.26.229:9000"}}}`
 
@@ -1306,7 +1296,7 @@ gh workflow run "Build & Push to ECR" -f service=all
 |---|---|
 | **Symptom** | `DefaultAuthServiceClient: Auth service timed out` / `TimeLimiter 'authService' recorded a timeout exception` |
 | **Root Cause** | Resilience4j `TimeLimiter` for Auth validation was 3 seconds — too short for ECS task-to-task latency |
-| **Fix** | Changed `ResilienceConfig.java` line 97: `Duration.ofSeconds(3)` → `Duration.ofSeconds(4)` (deployed as 5s). Rebuilt image as `sha-ba7905d`, deployed as API Gateway revision 11. |
+| **Fix** | Changed `ResilienceConfig.java` line 97: `Duration.ofSeconds(3)` → `Duration.ofSeconds(4)` (deployed as 5s). Rebuilt image as `sha-ba7905d`, deployed via CI/CD. |
 | **Lesson** | ECS task-to-task latency is higher than localhost. Increase timeouts proportionally. |
 
 ---
@@ -1315,9 +1305,9 @@ gh workflow run "Build & Push to ECR" -f service=all
 
 | Issue | Priority | Notes |
 |---|---|---|
-| Service Connect DNS | High | ~~FIXED (2026-07-26)~~ Enabled on all 3 services, gateway uses `auth`/`items` DNS |
+| Service Connect DNS | Done | ~~FIXED (2026-07-26)~~ Enabled on all 3 services, gateway uses `auth`/`items` DNS |
 | Rate limiter lazy Redis connection | Medium | Disabled via `GATEWAY_RATELIMIT_ENABLED=false`; `@Lazy` + timeouts partially fix startup |
-| Dynamic service discovery | High | ~~FIXED (2026-07-26)~~ Service Connect handles DNS resolution automatically |
+| Dynamic service discovery | Done | ~~FIXED (2026-07-26)~~ Service Connect handles DNS resolution automatically |
 | Frontend deployment | High | Step 1.6 not done — S3 + CloudFront for React app |
 | ECR resource scoping | Medium | `ecr-push-pull` policy uses `"Resource": "*"` — tighten to specific repo ARNs |
 | Items tests | Low | Pre-existing test bugs fixed, but 72 tests is minimal |
@@ -1356,18 +1346,16 @@ gh workflow run "Build & Push to ECR" -f service=all
 
 ### ECS
 
-- [x] Auth task definition exists (revision 3)
-- [x] Items task definition exists (revision 4)
-- [x] API Gateway task definition exists (revision 11)
-- [x] Auth service running with desired count 1, HEALTHY
-- [x] Items service running with desired count 1, HEALTHY
-- [x] API Gateway service running with desired count 1, HEALTHY
+- [x] Auth task definition exists
+- [x] Items task definition exists
+- [x] API Gateway task definition exists
+- [x] Auth service exists and is configured
+- [x] Items service exists and is configured
+- [x] API Gateway service exists and is configured
 
 ### ALB
 
-- [x] ALB `onlineshop-alb` is active
-- [x] Target group `onlineshop-gateway-tg` has healthy targets
-- [x] Listener :80 → forward to gateway-tg
+- [x] ALB, TG, and listener creation commands documented in ALB section
 
 ### Smoke Test (API)
 
@@ -1447,18 +1435,19 @@ aws ecs describe-tasks --cluster onlineshop-cluster --tasks $TASK_ARN \
 
 ---
 
-## Deployment State Summary
+## Infrastructure Inventory
 
-| Component | Revision/Version | Current Status |
-|---|---|---|
-| Auth Service | Task def rev 3, Image `sha-befc22...` | RUNNING, HEALTHY, DB connected, pool 10 |
-| Items Service | Task def rev 4, Image `sha-ba7905d` | RUNNING, HEALTHY, DB connected, Actuator enabled |
-| API Gateway | Task def rev 11, Image `sha-ba7905d` | RUNNING, HEALTHY, Redis UP, Rate-limit OFF |
-| ALB | — | To get current DNS: `aws elbv2 describe-load-balancers --profile dpm-profile --region eu-north-1 --names onlineshop-alb --query 'LoadBalancers[0].DNSName' --output text` |
-| RDS | PostgreSQL 18.4, db.t4g.micro | Running, 2 databases: `auth`, `items` |
-| Workflow | `.github/workflows/build-and-push.yml` | `workflow_dispatch`, discoverable on `main` |
-| OIDC | GitHub → AWS | Working: `github-actions-onlineshop` role |
+| Component | Key Identifiers |
+|---|---|
+| Auth Service | Task def: `onlineshop-auth`, ECR: `onlineshop-auth`, Secret: `onlineshop/auth/db`, Port: 9001 |
+| Items Service | Task def: `onlineshop-items`, ECR: `onlineshop-items`, Secret: `onlineshop/items/db`, Port: 9000 |
+| API Gateway | Task def: `onlineshop-api-gateway`, ECR: `onlineshop-api-gateway`, ALB TG: `onlineshop-gateway-tg`, Port: 10000 |
+| ALB | Name: `onlineshop-alb`, TG: `onlineshop-gateway-tg` (HTTP:10000, ip), Listener: port 80 → TG |
+| RDS | `onlineshop-postgres-db`, PostgreSQL 18.4, db.t4g.micro, 20 GB |
+| CI/CD | `.github/workflows/build-and-push.yml`, OIDC role `github-actions-onlineshop` |
 
+**Cost when paused:** ~$1.25/month (secrets + ECR + Cloud Map). Resume: `bash scripts/resume-playground.sh`.
+**Cost when running (Spot 24/7):** ~$49.00/month (compute + IPv4 + ALB). Pause: `bash scripts/pause-playground.sh`.
 **Full flow verified:** register → login → token validation → items list (5 products).
 
 ---
@@ -1477,7 +1466,6 @@ The following details were **not recorded** during the original setup and would 
 | RDS creation command | RDS was provisioned before this documentation cycle | See RDS properties table above for values to replicate |
 | Secrets Manager creation commands | Not captured | `aws secretsmanager create-secret --name onlineshop/auth/db --secret-string '{"username":"auth_app",...}'` |
 | `ecsTaskExecutionRole` RoleId | Not captured | `aws iam get-role --role-name ecsTaskExecutionRole --query 'Role.RoleId'` |
-| API Gateway initial revision history | Only final rev 11 documented; intermediate revs 7-10 not captured | `aws ecs describe-task-definition --task-definition onlineshop-api-gateway:7` etc. |
 
 ---
 
@@ -1508,10 +1496,10 @@ or making a change to a capacity provider strategy on a service that is already 
 **Result (post-switch verification):**
 
 | Service | Capacity Provider | Desired Count | Running Count | Rollout State |
-|---|---|---|---|---|
-| `onlineshop-auth` | FARGATE_SPOT | 1 | 1 | IN_PROGRESS |
-| `onlineshop-items` | FARGATE_SPOT | 1 | 1 | IN_PROGRESS |
-| `onlineshop-api-gateway` | FARGATE_SPOT | 1 | 1 | IN_PROGRESS |
+|---|---|---|---|---|---|
+| `onlineshop-auth` | FARGATE_SPOT | varies (0 when paused, 1 when running) | varies (0 when paused, 1 when running) | varies |
+| `onlineshop-items` | FARGATE_SPOT | varies (0 when paused, 1 when running) | varies (0 when paused, 1 when running) | varies |
+| `onlineshop-api-gateway` | FARGATE_SPOT | varies (0 when paused, 1 when running) | varies (0 when paused, 1 when running) | varies |
 
 All 3 services successfully switched to FARGATE_SPOT. Old FARGATE tasks drain while new SPOT tasks start (normal rolling deployment behavior).
 
