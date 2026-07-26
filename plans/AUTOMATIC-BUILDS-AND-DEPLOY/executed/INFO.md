@@ -691,7 +691,7 @@ aws servicediscovery create-private-dns-namespace \
 | Property | Value |
 |---|---|
 | Name | `onlineshop-alb` |
-| DNS Name | `onlineshop-alb-199112777.eu-north-1.elb.amazonaws.com` |
+| DNS Name | To get current DNS: `aws elbv2 describe-load-balancers --profile dpm-profile --region eu-north-1 --names onlineshop-alb --query 'LoadBalancers[0].DNSName' --output text` |
 | ARN | (created by AWS) |
 | Subnets | 3 subnets in `eu-north-1` (a, b, c) |
 | Security Group | `sg-0b5427a6a3bf31c29` (ALB SG) |
@@ -1372,7 +1372,8 @@ gh workflow run "Build & Push to ECR" -f service=all
 ### Smoke Test (API)
 
 ```bash
-ALB="http://onlineshop-alb-199112777.eu-north-1.elb.amazonaws.com"
+ALB_DNS=$(aws elbv2 describe-load-balancers --profile dpm-profile --region eu-north-1 --names onlineshop-alb --query 'LoadBalancers[0].DNSName' --output text)
+ALB="http://$ALB_DNS"
 
 # 1. Register — expected 201
 curl -s -X POST $ALB/auth/register -H "Content-Type: application/json" \
@@ -1453,7 +1454,7 @@ aws ecs describe-tasks --cluster onlineshop-cluster --tasks $TASK_ARN \
 | Auth Service | Task def rev 3, Image `sha-befc22...` | RUNNING, HEALTHY, DB connected, pool 10 |
 | Items Service | Task def rev 4, Image `sha-ba7905d` | RUNNING, HEALTHY, DB connected, Actuator enabled |
 | API Gateway | Task def rev 11, Image `sha-ba7905d` | RUNNING, HEALTHY, Redis UP, Rate-limit OFF |
-| ALB | — | `onlineshop-alb-199112777.eu-north-1.elb.amazonaws.com` |
+| ALB | — | To get current DNS: `aws elbv2 describe-load-balancers --profile dpm-profile --region eu-north-1 --names onlineshop-alb --query 'LoadBalancers[0].DNSName' --output text` |
 | RDS | PostgreSQL 18.4, db.t4g.micro | Running, 2 databases: `auth`, `items` |
 | Workflow | `.github/workflows/build-and-push.yml` | `workflow_dispatch`, discoverable on `main` |
 | OIDC | GitHub → AWS | Working: `github-actions-onlineshop` role |
@@ -1516,7 +1517,7 @@ All 3 services successfully switched to FARGATE_SPOT. Old FARGATE tasks drain wh
 
 **Cost Impact:**
 - Before (On-Demand 24/7): ~$62.98/month
-- After (Spot 24/7): ~$41.66/month
+- After (Spot 24/7): ~$49.00/month
 - Savings: ~$21.32/month (34% reduction)
 
 ### Pause/Resume Scripts
@@ -1525,7 +1526,7 @@ Created `plans/AUTOMATIC-BUILDS-AND-DEPLOY/scripts/` with two self-contained bas
 
 | Script | Path | What It Does |
 |---|---|---|
-| `pause-playground.sh` | `scripts/pause-playground.sh` | Scales all 3 ECS services to 0, deletes ALB listener, target group, and ALB. Cost when paused: ~$3.25/month |
+| `pause-playground.sh` | `scripts/pause-playground.sh` | Scales all 3 ECS services to 0, deletes ALB listener, target group, and ALB. Cost when paused: ~$1.25/month |
 | `resume-playground.sh` | `scripts/resume-playground.sh` | Creates ALB, target group `onlineshop-gateway-tg` (HTTP:10000, ip, health `/actuator/health`), listener (port 80 → TG), wires API Gateway service to new TG, scales all 3 services to 1, waits for steady state |
 
 **Hardcoded infrastructure IDs:**

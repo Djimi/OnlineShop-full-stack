@@ -78,7 +78,7 @@ aws servicediscovery create-private-dns-namespace \
 
 ```bash
 aws elbv2 create-load-balancer --name onlineshop-alb --subnets <3-subnets> --sg sg-0b5427a6a3bf31c29
-# → DNS: onlineshop-alb-199112777.eu-north-1.elb.amazonaws.com
+# → DNS: To get current DNS: `aws elbv2 describe-load-balancers --profile dpm-profile --region eu-north-1 --names onlineshop-alb --query 'LoadBalancers[0].DNSName' --output text`
 
 aws elbv2 create-target-group --name onlineshop-gateway-tg --port 10000 --target-type ip
 aws elbv2 create-listener --port 80 --default-actions forward to gateway-tg
@@ -137,7 +137,7 @@ All three services: **RUNNING** (1 each), **HEALTHY**
 | Items | 4 | sha-ba7905d | DB connected, Actuator |
 | API Gateway | 12 | sha-ba7905d | Redis UP, No rate-limit, Service Connect |
 
-**ALB:** `http://onlineshop-alb-199112777.eu-north-1.elb.amazonaws.com`
+**ALB:** To get current DNS: `aws elbv2 describe-load-balancers --profile dpm-profile --region eu-north-1 --names onlineshop-alb --query 'LoadBalancers[0].DNSName' --output text`
 
 **Issues Resolved:**
 - SG self-referencing rules added (ports 9000-9001, 6379)

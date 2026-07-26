@@ -24,7 +24,7 @@ done
 
 **Impact:**
 - Fargate compute costs reduced by ~60-70%
-- Old projection: ~$62.98/month → New projection: ~$41.66/month (running 24/7)
+- Old projection: ~$62.98/month → New projection: ~$49.00/month (running 24/7)
 - With pause scripts: ~$17-40/month (depends on usage pattern)
 
 ### 2. Pause/Resume Scripts Created
@@ -33,7 +33,7 @@ Created `scripts/` directory with two self-contained bash scripts:
 
 | Script | Path | Purpose | Paused Cost |
 |---|---|---|---|
-| `pause-playground.sh` | `plans/AUTOMATIC-BUILDS-AND-DEPLOY/scripts/pause-playground.sh` | Scale ECS to 0 + delete ALB infrastructure | ~$3.25/month |
+| `pause-playground.sh` | `plans/AUTOMATIC-BUILDS-AND-DEPLOY/scripts/pause-playground.sh` | Scale ECS to 0 + delete ALB infrastructure | ~$1.25/month |
 | `resume-playground.sh` | `plans/AUTOMATIC-BUILDS-AND-DEPLOY/scripts/resume-playground.sh` | Recreate ALB + TG + listener, scale ECS to 1, wire up API Gateway | Running cost |
 
 **Hardcoded IDs embedded in scripts:**
@@ -74,7 +74,8 @@ aws elbv2 describe-load-balancers --profile dpm-profile --region eu-north-1 \
 
 ### Smoke Test
 ```bash
-ALB="http://onlineshop-alb-199112777.eu-north-1.elb.amazonaws.com"
+ALB_DNS=$(aws elbv2 describe-load-balancers --profile dpm-profile --region eu-north-1 --names onlineshop-alb --query 'LoadBalancers[0].DNSName' --output text)
+ALB="http://$ALB_DNS"
 curl -s $ALB/items
 ```
 
@@ -91,9 +92,9 @@ bash plans/AUTOMATIC-BUILDS-AND-DEPLOY/scripts/resume-playground.sh
 
 | Scenario | Monthly Cost |
 |---|---|
-| Running 24/7 on Spot (current) | ~$41.66 |
+| Running 24/7 on Spot (current) | ~$49.00 |
 | Running 8hr/day, 5 days/week on Spot + pause ALB | ~$17-18 |
-| Fully paused | ~$3.25 |
+| Fully paused | ~$1.25 |
 
 ## What Was NOT Done
 

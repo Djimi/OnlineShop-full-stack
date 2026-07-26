@@ -213,7 +213,7 @@ Entry point for internet traffic. Receives HTTP requests and forwards them to EC
 aws elbv2 create-load-balancer --name onlineshop-alb \
   --subnets subnet-xxx subnet-yyy subnet-zzz \
   --security-groups sg-alb
-# → DNS: onlineshop-alb-199112777.eu-north-1.elb.amazonaws.com
+# → DNS: To get current DNS: `aws elbv2 describe-load-balancers --profile dpm-profile --region eu-north-1 --names onlineshop-alb --query 'LoadBalancers[0].DNSName' --output text`
 ```
 
 **Target group** — the backend that ALB sends traffic to:
@@ -404,7 +404,8 @@ Rebuilt image `onlineshop-api-gateway:sha-ba7905d`, pushed to ECR, deployed as r
 ## 13. Full Smoke Test — VERIFIED WORKING
 
 ```bash
-ALB="http://onlineshop-alb-199112777.eu-north-1.elb.amazonaws.com"
+ALB_DNS=$(aws elbv2 describe-load-balancers --profile dpm-profile --region eu-north-1 --names onlineshop-alb --query 'LoadBalancers[0].DNSName' --output text)
+ALB="http://$ALB_DNS"
 
 # 1. Register
 curl -s -X POST $ALB/auth/register -H "Content-Type: application/json" \
@@ -429,7 +430,7 @@ curl -s $ALB/auth/validate -H "Authorization: Bearer $TOKEN"
 ### Current Deployed Resources
 | Component | Value |
 |-----------|-------|
-| ALB (public) | `onlineshop-alb-199112777.eu-north-1.elb.amazonaws.com` |
+| ALB (public) | To get current DNS: `aws elbv2 describe-load-balancers --profile dpm-profile --region eu-north-1 --names onlineshop-alb --query 'LoadBalancers[0].DNSName' --output text` |
 | ECS Cluster | `onlineshop-cluster` |
 | Service Connect | `onlineshop.local` (auth→`auth:9001`, items→`items:9000`) |
 | Auth | rev 3, image sha-befc22... |

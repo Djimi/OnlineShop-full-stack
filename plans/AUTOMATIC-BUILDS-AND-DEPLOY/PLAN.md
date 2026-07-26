@@ -41,7 +41,7 @@ All requirements come from these three documents in this directory:
 
 | After Pass | Estimated Monthly Cost | Notes |
 |---|---|---|
-| 1 — MVP (running 24/7 Spot) | ~$17–42 | Spot + ALB 24/7 = $41.66; Spot + ALB daily pause = ~$17 |
+| 1 — MVP (running 24/7 Spot) | ~$17–42 | Spot + ALB 24/7 = $49.00; Spot + ALB daily pause = ~$17 |
 | 2 — + Staging | ~$20–45 | Staging adds duplicate infra when active |
 | 3 — + Production + Release infra | ~$22–47 | Production adds ALB + extra tasks when active |
 | 4 — + Monitoring/notifications | ~$22–47 | No incremental AWS cost |

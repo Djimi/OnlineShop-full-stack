@@ -103,7 +103,7 @@ PowerShell's default UTF-8-with-BOM encoding confuses AWS IAM. When creating JSO
 When not actively developing, pause the AWS playground to save ~$38/month:
 
 ```bash
-# Stop the playground (scale ECS to 0 + delete ALB) — reduces to ~$3.25/month
+# Stop the playground (scale ECS to 0 + delete ALB) — reduces to ~$1.25/month
 bash plans/AUTOMATIC-BUILDS-AND-DEPLOY/scripts/pause-playground.sh
 
 # Start the playground (recreate ALB + scale ECS to 1) — wait ~3-5 min for startup
@@ -114,9 +114,9 @@ bash plans/AUTOMATIC-BUILDS-AND-DEPLOY/scripts/resume-playground.sh
 
 | State | Monthly Cost |
 |---|---|
-| Running (Spot 24/7) | ~$41.66 |
+| Running (Spot 24/7) | ~$49.00 |
 | Running (Spot 8hr/day + ALB paused) | ~$17-18 |
-| Paused | ~$3.25 |
+| Paused | ~$1.25 |
 
 Both scripts are self-contained with hardcoded infrastructure IDs — no `jq` required. See `plans/AUTOMATIC-BUILDS-AND-DEPLOY/explanations/COST-EXPLANATION.md` for breakdown.
 

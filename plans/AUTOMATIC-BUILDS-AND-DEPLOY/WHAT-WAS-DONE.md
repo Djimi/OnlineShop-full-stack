@@ -127,7 +127,7 @@ Master user: `dbadmin`, password stored in local `.env` (`POSTGRES_AWS_SECRET`).
 | API Gateway | 12 | sha-ba7905d | Redis sidecar, rate-limit off, Service Connect (`auth`/`items`) |
 
 ### ALB
-- `onlineshop-alb` → DNS: `onlineshop-alb-199112777.eu-north-1.elb.amazonaws.com`
+- `onlineshop-alb` → DNS: To get current DNS: `aws elbv2 describe-load-balancers --profile dpm-profile --region eu-north-1 --names onlineshop-alb --query 'LoadBalancers[0].DNSName' --output text`
 - Target group: `onlineshop-gateway-tg` (port 10000, IP type)
 - Listener: :80 → forward to gateway-tg
 

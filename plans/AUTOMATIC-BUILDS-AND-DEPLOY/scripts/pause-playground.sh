@@ -38,8 +38,30 @@ for svc in "${SERVICES[@]}"; do
   fi
 done
 
-echo "Waiting for services to drain tasks (up to 60s)..."
-sleep 10
+echo "Waiting for tasks to drain (up to 60s)..."
+MAX_WAIT=60
+WAITED=0
+INTERVAL=5
+while [ $WAITED -lt $MAX_WAIT ]; do
+  ALL_DRAINED=true
+  for svc in "${SERVICES[@]}"; do
+    RUNNING=$(aws ecs describe-services --profile dpm-profile --region eu-north-1 \
+      --cluster "$CLUSTER" --services "$svc" \
+      --query 'services[0].runningCount' --output text 2>/dev/null || echo "0")
+    if [ "$RUNNING" != "0" ]; then
+      ALL_DRAINED=false
+    fi
+  done
+  if [ "$ALL_DRAINED" = true ]; then
+    echo "  All tasks drained."
+    break
+  fi
+  sleep $INTERVAL
+  WAITED=$((WAITED + INTERVAL))
+done
+if [ "$ALL_DRAINED" != true ]; then
+  echo "  WARNING: Not all tasks drained after ${MAX_WAIT}s. Proceeding anyway."
+fi
 
 # --- Step 2: Delete listener ---
 echo ""
