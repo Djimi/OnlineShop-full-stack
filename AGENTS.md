@@ -74,6 +74,26 @@ When using Maven commands you MUST use the Maven wrapper (`./mvnw`) inside the s
 | Frontend | 5173 | — | No | — |
 | E2E Tests | — | — | Yes | — |
 
+## Starting Services Locally
+
+```bash
+# 1. Build common library (only needed once, or when common changes)
+cd common && ./mvnw clean install -DskipTests
+
+# 2. Build JARs for all services (run from root, builds in parallel)
+cd Auth && ./mvnw clean package -DskipTests &
+cd Items && ./mvnw clean package -DskipTests &
+cd api-gateway && ./mvnw clean package -DskipTests &
+wait
+
+# 3. Start everything (infrastructure + services + frontend)
+docker compose up -d --build
+```
+
+All services, databases, Redis, Kafka, and the frontend are defined in `docker-compose.yml`. The frontend auto-connects to the API gateway inside the Docker network via `VITE_API_URL=http://api-gateway:10000`.
+
+> Steps 1 and 2 are only needed **after code changes**. For simple stop/restart without changes, just `docker compose down` / `docker compose up -d`.
+
 ## CI/CD & AWS Infrastructure
 
 See [docs/CI_CD_GOTCHAS.md](./docs/CI_CD_GOTCHAS.md) for the full pitfall checklist. Always read that file before working on CI/CD or AWS infra.
