@@ -4,10 +4,13 @@ set -euo pipefail
 ###############################################################################
 # pause-playground.sh
 # Scales ECS services to 0, then deletes ALB + listener + target group.
-# Cost when paused: ~\$1.25/month (Secrets + ECR + Cloud Map + RDS free tier; KMS keys are AWS-managed = free)
+#
+# Usage:  bash pause-playground.sh
+#
+# Cost when paused: ~$1.25/month
+#   (Secrets + ECR + Cloud Map + RDS free tier; KMS keys are AWS-managed = free)
 ###############################################################################
 
-PROFILE="--profile dpm-profile --region eu-north-1"
 CLUSTER="onlineshop-cluster"
 ALB_NAME="onlineshop-alb"
 TG_NAME="onlineshop-gateway-tg"
@@ -33,7 +36,8 @@ for svc in "${SERVICES[@]}"; do
   else
     ALREADY_SCALED=false
     aws ecs update-service --profile dpm-profile --region eu-north-1 \
-      --cluster "$CLUSTER" --service "$svc" --desired-count 0
+      --cluster "$CLUSTER" --service "$svc" --desired-count 0 \
+      || echo "  WARNING: failed to scale $svc, continuing..."
     echo "  $svc: scaled to 0"
   fi
 done
