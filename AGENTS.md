@@ -94,6 +94,17 @@ All services, databases, Redis, Kafka, and the frontend are defined in `docker-c
 
 > Steps 1 and 2 are only needed **after code changes**. For simple stop/restart without changes, just `docker compose down` / `docker compose up -d`.
 
+> **Items multi-stage note:** Since Items' Dockerfile now uses a multi-stage build (Maven runs inside Docker), step 2 is unnecessary for Items — `docker compose build items-service` handles the full build. Steps 1-2 are still needed for Auth and api-gateway (they use host-side Maven).
+
+## Dockerfile Conventions
+
+1. **Multi-stage builds** — Use when a service depends on another project (e.g., Items → common). The Dockerfile does the full build inside Docker, eliminating the host-side `./mvnw package` step.
+2. **Cache mounts** — Always use `--mount=type=cache,target=/root/.m2,id=maven-repo` on RUN lines that invoke Maven. Use an explicit `id=` so mounts are shared across RUN steps.
+3. **Base image tags** — Pin to a specific Alpine version (e.g., `eclipse-temurin:25.0.1_8-jre-alpine-3.23`), not a floating tag.
+4. **COPY granularity** — When a RUN step processes an entire directory tree, use `COPY dir/ dir/` (directory-level) not file-level COPY. File-level COPY is only justified when it creates a distinct layer that can be cached independently of sibling RUN steps. If all files feed a single RUN, use the simplest COPY possible.
+5. **Healthchecks** — Use `curl -f <actuator-endpoint> || exit 1`, not raw `curl` and not business endpoints.
+6. **`hadolint`** — Run `hadolint` on any changed Dockerfile before committing. Configuration is in `.hadolint.yaml`.
+
 ## CI/CD & AWS Infrastructure
 
 See [docs/CI_CD_GOTCHAS.md](./docs/CI_CD_GOTCHAS.md) for the full pitfall checklist. Always read that file before working on CI/CD or AWS infra.

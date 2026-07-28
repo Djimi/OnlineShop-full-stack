@@ -71,32 +71,12 @@ jobs:
 
       - uses: aws-actions/amazon-ecr-login@v2
 
-      - uses: actions/setup-java@v4
-        with:
-          java-version: '25'
-          distribution: 'temurin'
-
-      - uses: actions/cache@v4
-        with:
-          path: ~/.m2/repository
-          key: ${{ runner.os }}-maven-items-${{ hashFiles('Items/pom.xml', 'common/pom.xml') }}
-          restore-keys: |
-            ${{ runner.os }}-maven-items-
-            ${{ runner.os }}-maven-
-
-      - name: Build common dependency
-        working-directory: common
-        run: chmod +x mvnw && ./mvnw install -DskipTests
-
-      - name: Build with Maven
-        working-directory: Items
-        run: chmod +x mvnw && ./mvnw clean package -DskipTests
-
       - uses: docker/setup-buildx-action@v3
 
       - uses: docker/build-push-action@v6
         with:
-          context: Items
+          context: .
+          file: Items/Dockerfile
           push: true
           tags: 799111666795.dkr.ecr.eu-north-1.amazonaws.com/onlineshop-items:sha-${{ github.sha }}
           cache-from: type=gha

@@ -162,8 +162,8 @@ services:
 
   items-service:
     build:
-      context: ./Items
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: Items/Dockerfile
     container_name: items-service
     ports:
       - "9000:9000"
@@ -177,10 +177,10 @@ services:
     networks:
       - onlineshop-network
     healthcheck:
-      test: ["CMD-SHELL", "curl http://localhost:9000/api/v1/items 2>&1"]
+      test: ["CMD-SHELL", "curl -f http://localhost:9000/actuator/health || exit 1"]
       interval: 10s
       timeout: 5s
-      retries: 10
+      retries: 3
       start_period: 30s
 
   api-gateway:
