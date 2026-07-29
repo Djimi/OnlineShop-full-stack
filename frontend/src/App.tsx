@@ -2,13 +2,11 @@ import { BrowserRouter } from 'react-router';
 import { Navbar } from './components/layout/Navbar';
 import { AppRoutes } from './routes';
 import { Toaster } from 'react-hot-toast';
-import { useEffect } from 'react';
 import { useAuthStore } from './store/authStore';
 
+useAuthStore.getState().loadFromStorage();
+
 function App() {
-  useEffect(() => {
-    useAuthStore.getState().loadFromStorage();
-  }, []);
 
   return (
     <BrowserRouter>

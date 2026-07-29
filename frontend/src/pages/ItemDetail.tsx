@@ -24,7 +24,7 @@ export default function ItemDetail() {
       try {
         setIsLoading(true);
         setError(null);
-        const data = await itemsService.getItemById(Number(id));
+        const data = await itemsService.getItemById(id);
         setItem(data);
       } catch (error: any) {
         const errorMessage =
@@ -42,6 +42,10 @@ export default function ItemDetail() {
     };
 
     fetchItem();
+
+    return () => {
+      toast.dismiss();
+    };
   }, [id]);
 
   const isOutOfStock = item && item.quantity === 0;

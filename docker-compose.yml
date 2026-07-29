@@ -213,7 +213,7 @@ services:
     ports:
       - "5173:5173"
     environment:
-      VITE_API_URL: http://api-gateway:10000
+      VITE_API_URL: http://localhost:10000
     volumes:
       - ./frontend/src:/app/src
     depends_on:
