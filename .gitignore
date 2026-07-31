@@ -7,3 +7,4 @@ logs/
 tests/performance/reports/
 
 .env
+.playwright-mcp/
