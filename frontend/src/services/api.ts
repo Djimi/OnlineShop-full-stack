@@ -35,7 +35,8 @@ api.interceptors.response.use(
     if (error.response?.status === 401) {
       useAuthStore.getState().logout();
       window.location.href = '/login';
-      return new Promise(() => {});
+      // Page is about to unload; suppress downstream error handling
+      return Promise.reject(new axios.CanceledError('Redirecting to login'));
     }
 
     // Log error details
