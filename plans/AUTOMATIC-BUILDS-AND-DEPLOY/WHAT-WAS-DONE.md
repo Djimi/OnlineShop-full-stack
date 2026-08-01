@@ -150,7 +150,111 @@ All 3: 1 running, HEALTHY, Service Connect enabled
 - ALB health check: `GET /actuator/health` → 200 UP
 - API Gateway rev 11 (sha-ba7905d), Auth rev 3, Items rev 4
 
+## Step 1.6 — Frontend: S3 + CloudFront ✅
+
+### S3 Bucket
+| Property | Value |
+|---|---|
+| Bucket name | `onlineshop-frontend-799111666795` |
+| Bucket ARN | `arn:aws:s3:::onlineshop-frontend-799111666795` |
+| Region | `eu-north-1` |
+| Website endpoint | `onlineshop-frontend-799111666795.s3-website.eu-north-1.amazonaws.com` |
+| Access | Public read (bucket policy allows `s3:GetObject` from `*`) |
+
+**Commands:**
+```bash
+aws s3api create-bucket --bucket onlineshop-frontend-799111666795 --region eu-north-1 --create-bucket-configuration LocationConstraint=eu-north-1
+aws s3api delete-public-access-block --bucket onlineshop-frontend-799111666795 --region eu-north-1
+aws s3api put-bucket-policy --bucket onlineshop-frontend-799111666795 --policy '{...PublicReadGetObject...}'
+aws s3api put-bucket-website --bucket onlineshop-frontend-799111666795 --website-configuration '{"IndexDocument":{"Suffix":"index.html"},"ErrorDocument":{"Key":"index.html"}}'
+aws s3 sync frontend/dist s3://onlineshop-frontend-799111666795/ --delete
+```
+
+### CloudFront Distribution
+| Property | Value |
+|---|---|
+| Distribution ID | `EPS8MI3FV3B7X` |
+| Domain Name | `d2akuwv5pxgajc.cloudfront.net` |
+| Status | `Deployed` |
+| Price Class | `PriceClass_All` |
+| HTTPS | Enabled (CloudFront default certificate) |
+
+**Origins:**
+| ID | Type | Domain | Protocol |
+|---|---|---|---|
+| `s3-frontend` | Custom (S3 website) | `onlineshop-frontend-799111666795.s3-website.eu-north-1.amazonaws.com` | HTTP |
+| `alb-api` | Custom (ALB) | `onlineshop-alb-1163734147.eu-north-1.elb.amazonaws.com` | HTTP |
+
+**Cache Behaviors:**
+| Path Pattern | Origin | TTL | Methods | Headers Forwarded |
+|---|---|---|---|---|
+| `Default (*)` | `s3-frontend` | 86400 | GET, HEAD, OPTIONS | None |
+| `/auth*` | `alb-api` | 0 (no cache) | ALL | Authorization, Content-Type |
+| `/items*` | `alb-api` | 0 (no cache) | ALL | Authorization, Content-Type |
+
+**Custom Error Response:**
+- 404 → 200 with `/index.html` (enables SPA deep-linking)
+
+### Frontend Build Configuration
+- Built with `VITE_API_URL=''` so API calls use relative URLs (same-origin through CloudFront)
+- Fixed `frontend/src/services/api.ts` to use `??` instead of `||` so empty string is preserved:
+  ```ts
+  const API_BASE_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:10000';
+  ```
+
+## Step 1.7 — Smoke Test ✅
+
+### Verified via CloudFront
+```bash
+CF="https://d2akuwv5pxgajc.cloudfront.net"
+
+# 1. Frontend loads
+curl -s -o /dev/null -w "%{http_code}" "$CF/"
+# → 200 OK (text/html)
+
+# 2. API: register
+curl -s -X POST "$CF/auth/register" -H "Content-Type: application/json" -d '{"username":"finaltest","password":"finaltest123"}'
+# → 201 Created
+
+# 3. API: login
+curl -s -X POST "$CF/auth/login" -H "Content-Type: application/json" -d '{"username":"finaltest","password":"finaltest123"}'
+# → 200 OK + Bearer token
+
+# 4. API: items with auth
+curl -s "$CF/items" -H "Authorization: Bearer $TOKEN"
+# → 200 OK, 5 products
+
+# 5. CORS preflight
+curl -s -o /dev/null -w "%{http_code}" -X OPTIONS "$CF/auth/login" -H "Origin: https://d2akuwv5pxgajc.cloudfront.net" -H "Access-Control-Request-Method: POST"
+# → 200 OK
+```
+
+### Verified via Browser (Playwright)
+1. Navigate to `https://d2akuwv5pxgajc.cloudfront.net/login` → page loads
+2. Fill username/password → click Sign in
+3. Redirects to `/items` → catalog renders with 5 products (Laptop, Mouse, Keyboard, Monitor, Headphones)
+4. No console errors after login
+
+## Fixes Applied During Frontend Deployment
+
+### CORS Fix
+**Problem:** Browser login requests to CloudFront origin returned 403 "Invalid CORS request" because Spring Boot gateway only allowed `localhost` origins.
+
+**Fix:**
+- `api-gateway/src/main/java/com/onlineshop/gateway/config/CorsConfig.java`: changed `allowedOrigins` to `"*"`, `allowCredentials(false)`
+- `api-gateway/src/main/resources/application.yml`: changed `allowed-origins` to `["*"]`, `allow-credentials: false`
+- Rebuilt gateway JAR, built Docker image `cors-fix`, pushed to ECR
+- Registered new task definition revision 13, deployed to ECS
+
+**Result:** CORS preflight and cross-origin requests now succeed.
+
+### CloudFront Path Pattern Fix
+**Problem:** `/items` (exact path) was falling through to S3 origin because `/items/*` only matched paths with additional segments.
+
+**Fix:** Changed CloudFront cache behaviors from `/auth/*` and `/items/*` to `/auth*` and `/items*` so exact paths also route to ALB.
+
 ### Remaining Tech Debt
 - Rate limiter lazy Redis connection (pass 2)
-- Frontend not deployed yet (step 1.6)
+- API path prefixing (`/api/*`) to separate frontend routes from API endpoints (fixes direct-navigation collision on `/items`)
+- CloudFront cache invalidation is manual — integrate into CI/CD pipeline
 

@@ -93,6 +93,19 @@ api-gateway/
 
 - In this workspace, VS Code Spring Boot live-information auto-JMX is disabled via `.vscode/settings.json` so IDE launches do not compete with the gateway's HTTP port `10000`.
 
+## CORS Configuration
+
+### AWS Deployment
+
+For production deployment behind CloudFront (or any non-localhost origin), CORS must allow the frontend origin:
+
+- **`CorsConfig.java`**: `allowedOrigins("*")` with `allowCredentials(false)` for CloudFront integration
+- **`application.yml`**: `allowed-origins: ["*"]` with `allow-credentials: false`
+
+**Note:** `allow-credentials: true` is incompatible with `allowed-origins: "*"` in browsers. Since this service uses Bearer tokens (not cookies), `allow-credentials: false` is safe.
+
+For tighter security in production, replace `"*"` with the explicit CloudFront domain (e.g., `https://d2akuwv5pxgajc.cloudfront.net`).
+
 ## AWS CLI Conventions
 
 For AWS CLI commands (infrastructure queries, deployments, etc.), see the root [AGENTS.md](../AGENTS.md) — all AWS commands MUST include `--profile dpm-profile --region eu-north-1`.

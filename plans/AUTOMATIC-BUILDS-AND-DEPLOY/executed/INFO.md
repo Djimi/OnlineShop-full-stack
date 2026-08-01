@@ -1441,14 +1441,134 @@ aws ecs describe-tasks --cluster onlineshop-cluster --tasks $TASK_ARN \
 |---|---|
 | Auth Service | Task def: `onlineshop-auth`, ECR: `onlineshop-auth`, Secret: `onlineshop/auth/db`, Port: 9001 |
 | Items Service | Task def: `onlineshop-items`, ECR: `onlineshop-items`, Secret: `onlineshop/items/db`, Port: 9000 |
-| API Gateway | Task def: `onlineshop-api-gateway`, ECR: `onlineshop-api-gateway`, ALB TG: `onlineshop-gateway-tg`, Port: 10000 |
+| API Gateway | Task def: `onlineshop-api-gateway:13`, ECR: `onlineshop-api-gateway`, ALB TG: `onlineshop-gateway-tg`, Port: 10000 |
 | ALB | Name: `onlineshop-alb`, TG: `onlineshop-gateway-tg` (HTTP:10000, ip), Listener: port 80 → TG |
 | RDS | `onlineshop-postgres-db`, PostgreSQL 18.4, db.t4g.micro, 20 GB |
+| Frontend S3 | Bucket: `onlineshop-frontend-799111666795`, Website endpoint, Public read |
+| CloudFront | Distribution: `EPS8MI3FV3B7X`, Domain: `d2akuwv5pxgajc.cloudfront.net`, S3 + ALB origins |
 | CI/CD | `.github/workflows/build-and-push.yml`, OIDC role `github-actions-onlineshop` |
 
 **Cost when paused:** ~$1.25/month (secrets + ECR + Cloud Map). Resume: `bash scripts/resume-playground.sh`.
 **Cost when running (Spot 24/7):** ~$49.00/month (compute + IPv4 + ALB). Pause: `bash scripts/pause-playground.sh`.
 **Full flow verified:** register → login → token validation → items list (5 products).
+
+---
+
+## Frontend Hosting (S3 + CloudFront)
+
+### S3 Bucket
+
+| Property | Value |
+|---|---|
+| Bucket Name | `onlineshop-frontend-799111666795` |
+| Bucket ARN | `arn:aws:s3:::onlineshop-frontend-799111666795` |
+| Region | `eu-north-1` |
+| Website Endpoint | `onlineshop-frontend-799111666795.s3-website.eu-north-1.amazonaws.com` |
+| Access Policy | Public read (`s3:GetObject` allowed from `*`) |
+
+**Creation commands:**
+```bash
+aws s3api create-bucket --profile dpm-profile --region eu-north-1 \
+  --bucket onlineshop-frontend-799111666795 \
+  --create-bucket-configuration LocationConstraint=eu-north-1
+
+aws s3api delete-public-access-block --profile dpm-profile --region eu-north-1 \
+  --bucket onlineshop-frontend-799111666795
+
+aws s3api put-bucket-policy --profile dpm-profile --region eu-north-1 \
+  --bucket onlineshop-frontend-799111666795 \
+  --policy '{
+    "Version": "2012-10-17",
+    "Statement": [{
+      "Sid": "PublicReadGetObject",
+      "Effect": "Allow",
+      "Principal": "*",
+      "Action": "s3:GetObject",
+      "Resource": "arn:aws:s3:::onlineshop-frontend-799111666795/*"
+    }]
+  }'
+
+aws s3api put-bucket-website --profile dpm-profile --region eu-north-1 \
+  --bucket onlineshop-frontend-799111666795 \
+  --website-configuration '{"IndexDocument":{"Suffix":"index.html"},"ErrorDocument":{"Key":"index.html"}}'
+```
+
+**Upload command:**
+```bash
+aws s3 sync /path/to/frontend/dist s3://onlineshop-frontend-799111666795/ \
+  --profile dpm-profile --region eu-north-1 --delete
+```
+
+### CloudFront Distribution
+
+| Property | Value |
+|---|---|
+| Distribution ID | `EPS8MI3FV3B7X` |
+| ARN | `arn:aws:cloudfront::799111666795:distribution/EPS8MI3FV3B7X` |
+| Domain Name | `d2akuwv5pxgajc.cloudfront.net` |
+| Status | `Deployed` |
+| Price Class | `PriceClass_All` |
+| Viewer Certificate | CloudFront default certificate (`*.cloudfront.net`) |
+
+**Origins:**
+| ID | Domain Name | Protocol |
+|---|---|---|
+| `s3-frontend` | `onlineshop-frontend-799111666795.s3-website.eu-north-1.amazonaws.com` | HTTP (port 80) |
+| `alb-api` | `onlineshop-alb-1163734147.eu-north-1.elb.amazonaws.com` | HTTP (port 80) |
+
+**Cache Behaviors:**
+| Path Pattern | Origin | TTL | Forwarded Values |
+|---|---|---|---|
+| `Default (*)` | `s3-frontend` | Min:0, Default:86400, Max:31536000 | QueryString:false, Cookies:none |
+| `/auth*` | `alb-api` | Min:0, Default:0, Max:0 | QueryString:true, Cookies:all, Headers:Authorization,Content-Type |
+| `/items*` | `alb-api` | Min:0, Default:0, Max:0 | QueryString:true, Cookies:all, Headers:Authorization,Content-Type |
+
+**Custom Error Response:**
+- ErrorCode: 404 → ResponseCode: 200, ResponsePagePath: `/index.html` (SPA routing support)
+
+**Invalidation:**
+```bash
+aws cloudfront create-invalidation --profile dpm-profile --region us-east-1 \
+  --distribution-id EPS8MI3FV3B7X --paths "/*"
+```
+
+### Frontend Build Notes
+
+- Build command: `VITE_API_URL='' npm run build` (from `frontend/` directory)
+- `VITE_API_URL=''` makes API calls relative (same-origin through CloudFront)
+- Code fix: `frontend/src/services/api.ts` uses `??` instead of `||` to preserve empty string:
+  ```ts
+  const API_BASE_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:10000';
+  ```
+
+### Verified Public URLs
+
+| Component | URL | Status |
+|---|---|---|
+| Frontend (CloudFront) | `https://d2akuwv5pxgajc.cloudfront.net` | ✅ 200, SPA loads |
+| API: register | `POST https://d2akuwv5pxgajc.cloudfront.net/auth/register` | ✅ 201 |
+| API: login | `POST https://d2akuwv5pxgajc.cloudfront.net/auth/login` | ✅ 200 + token |
+| API: items | `GET https://d2akuwv5pxgajc.cloudfront.net/items` | ✅ 200 (with auth) |
+| API: validate | `GET https://d2akuwv5pxgajc.cloudfront.net/auth/validate` | ✅ 200 |
+| CORS preflight | `OPTIONS https://d2akuwv5pxgajc.cloudfront.net/auth/login` | ✅ 200 |
+
+---
+
+## Code Changes for AWS Deployment
+
+### CORS Fix (API Gateway)
+
+**Files changed:**
+- `api-gateway/src/main/java/com/onlineshop/gateway/config/CorsConfig.java`
+- `api-gateway/src/main/resources/application.yml`
+
+**Changes:**
+- `allowedOrigins`: localhost-only → `"*"`
+- `allowCredentials`: `true` → `false` (required for `*` origin)
+
+**Deployed as:**
+- ECR image tag: `cors-fix`
+- ECS task definition: `onlineshop-api-gateway:13`
 
 ---
 

@@ -96,7 +96,7 @@ Every step executed in this plan **MUST** update [`executed/INFO.md`](./executed
 
 ## Progress
 
-- [ ] **Pass 1** — MVP: Running on AWS (IN PROGRESS — ECS + RDS + CI/CD done, ALB paused, frontend not deployed)
+- [x] **Pass 1** — MVP: Running on AWS (DONE — ECS + RDS + CI/CD + S3 + CloudFront + frontend deployed; ALB active during verification, now paused)
 - [ ] **Pass 2** — CI Pipeline Hardening & Staging (basic caching from Pass 1, nothing else started)
 - [ ] **Pass 3** — Release, Traceability & Promotion
 - [ ] **Pass 4** — Operational Maturity

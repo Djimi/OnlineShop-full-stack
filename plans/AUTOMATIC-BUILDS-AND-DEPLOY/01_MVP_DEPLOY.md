@@ -63,16 +63,16 @@
 
 ### 1.6 Frontend — S3 + CloudFront
 
-- [ ] Create S3 bucket for frontend static assets
-- [ ] Build frontend (`npm run build`) and upload `dist/` to S3
-- [ ] Create CloudFront distribution pointing to S3 origin
-- [ ] Configure CloudFront to forward `/api/*` requests to the ALB (origin for backend)
-- [ ] Verify frontend loads and can communicate with backend APIs
+- [x] Create S3 bucket for frontend static assets
+- [x] Build frontend (`npm run build`) and upload `dist/` to S3
+- [x] Create CloudFront distribution pointing to S3 origin
+- [x] Configure CloudFront to forward `/auth/*` and `/items/*` requests to the ALB (origin for backend)
+- [x] Verify frontend loads and can communicate with backend APIs
 
 ### 1.7 Smoke Test
 
-- [ ] Manually verify: frontend loads, login works, items list renders
-- [ ] Document the public URL(s) in the project README or a dedicated `DEPLOYED.md`
+- [x] Manually verify: frontend loads, login works, items list renders
+- [x] Document the public URL(s) in `executed/INFO.md` and `WHAT-WAS-DONE.md`
 
 ---
 
