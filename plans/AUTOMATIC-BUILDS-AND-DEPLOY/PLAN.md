@@ -80,6 +80,18 @@ Every step executed in this plan **MUST** update [`executed/INFO.md`](./executed
 
 **Purpose:** When the entire plan is executed, `INFO.md` must contain everything needed to replicate the environment from scratch — pipelines, infrastructure, databases, networking, and all. No tribal knowledge, no forgotten steps.
 
+## Cross-Plan Maintenance Contract
+
+> **Every plan** that touches deployment or infrastructure (e.g., `plans/DDDItemsImprovement/PLAN.md`) **MUST** update these files whenever making changes that affect runtime behavior:
+
+| File | When to Update |
+|------|---------------|
+| [`WHAT-WAS-DONE.md`](./WHAT-WAS-DONE.md) | Any infrastructure change, deployment fix, configuration update, or code change that affects runtime |
+| [`scripts/resume-playground.sh`](./scripts/resume-playground.sh) | If services, ports, security groups, or task definitions change |
+| [`scripts/pause-playground.sh`](./scripts/pause-playground.sh) | If services, ports, or ALB configuration changes |
+
+**Why:** These files are the source of truth for automation. Drift = broken automation = manual work.
+
 ---
 
 ## Progress
