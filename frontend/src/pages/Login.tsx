@@ -39,7 +39,7 @@ export default function Login() {
 
       setAuth(response.token, response.userId, response.username);
       toast.success(`Welcome back, ${response.username}.`);
-      setTimeout(() => navigate('/items'), 500);
+      setTimeout(() => navigate('/items', { replace: true }), 500);
     } catch (error: any) {
       const errorMessage =
         error.response?.data?.detail ||

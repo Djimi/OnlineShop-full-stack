@@ -107,6 +107,22 @@ The service has solid DDD scaffolding — proper aggregate roots, value objects,
 
 ---
 
+## Deployment Maintenance Requirements
+
+> **MANDATORY:** Every change in this plan that affects deployment, infrastructure, or runtime configuration MUST update the following files in `plans/AUTOMATIC-BUILDS-AND-DEPLOY/`:
+
+1. **`WHAT-WAS-DONE.md`** — Log every action taken: AWS resource changes, configuration updates, code changes that affect deployment, fixes applied during deployment. This file enables future automation by tracking every step needed to reproduce the environment.
+
+2. **`scripts/resume-playground.sh`** and **`scripts/pause-playground.sh`** — If any infrastructure changes affect the pause/resume flow (new services, changed ports, new security groups, different task definitions), these scripts MUST be updated to remain functional. Verify after every infrastructure change:
+   - Hardcoded IDs (VPC, subnets, security groups) are still valid
+   - Service names match current ECS services
+   - Target group configuration matches current API Gateway setup
+   - Health check endpoints are correct
+
+**Why:** These scripts are the foundation for cost optimization (pausing when idle saves ~$47/month). If they drift from reality, the automation breaks and manual intervention is required.
+
+---
+
 ## Issues (Post-Implementation Tracking)
 
 | # | Issue | Status |

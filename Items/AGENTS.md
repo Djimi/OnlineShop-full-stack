@@ -38,6 +38,22 @@ cd Items
 
 > **CRITICAL:** Never run `./mvnw -f ../Items/pom.xml` from a sibling directory. Always `cd` into `Items/` first.
 
+## Dev Mode (Hot Restart with DevTools)
+
+Items has `spring-boot-devtools` for fast development. Edit a Java file, save, and DevTools restarts the application context automatically (~2 seconds).
+
+```bash
+# 1. Start infrastructure only (databases, Redis, Kafka)
+docker compose up -d items-postgres redis kafka
+
+# 2. Run Items in dev mode
+./run-dev.sh
+```
+
+The script installs `common` to the local Maven repo, then starts Items via `./mvnw spring-boot:run`. DevTools monitors `target/classes` — when your IDE recompiles a modified `.java` file, the app context reloads without a full JVM restart.
+
+> **Note:** DevTools is auto-excluded from the fat JAR by `spring-boot-maven-plugin`, so the production Docker image is unaffected.
+
 ## Spring Boot 4.X Important Notes
 
 - `@WebMvcTest` and `@AutoConfigureMockMvc` were **removed** in Spring Boot 4.0.2. Use `@SpringBootTest(webEnvironment = RANDOM_PORT)` with `RestTemplate` for controller integration tests, or `MockMvcBuilders.standaloneSetup()` for lightweight controller tests.
@@ -122,3 +138,7 @@ Packages excluded from coverage (no unit-testable logic):
 ## Configuration
 
 Main configuration: [src/main/resources/application.yml](./src/main/resources/application.yml)
+
+## AWS CLI Conventions
+
+For AWS CLI commands (infrastructure queries, deployments, etc.), see the root [AGENTS.md](../AGENTS.md) — all AWS commands MUST include `--profile dpm-profile --region eu-north-1`.

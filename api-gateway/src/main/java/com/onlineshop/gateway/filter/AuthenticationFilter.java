@@ -75,7 +75,7 @@ public class AuthenticationFilter extends OncePerRequestFilter {
         String authHeader = request.getHeader(AUTHORIZATION_HEADER);
 
         if (authHeader == null || !authHeader.startsWith(BEARER_PREFIX)) {
-            sendUnauthorizedResponse(response, "Missing or invalid Authorization header", path);
+            sendUnauthorizedResponse(request, response, "Missing or invalid Authorization header", path);
             return;
         }
 
@@ -85,7 +85,7 @@ public class AuthenticationFilter extends OncePerRequestFilter {
             ValidateResponse validateResponse = authValidationService.validateToken(token);
 
             if (!validateResponse.isValid()) {
-                sendUnauthorizedResponse(response, "Invalid or expired token", path);
+                sendUnauthorizedResponse(request, response, "Invalid or expired token", path);
                 return;
             }
 
@@ -106,21 +106,22 @@ public class AuthenticationFilter extends OncePerRequestFilter {
 
         } catch (InvalidTokenFormatException e) {
             log.warn("Invalid token format: {}", e.getMessage());
-            sendBadRequestResponse(response, e.getMessage(), path);
+            sendBadRequestResponse(request, response, e.getMessage(), path);
         } catch (ServiceUnavailableException e) {
             log.error("Auth service unavailable: {}", e.getMessage());
-            sendServiceUnavailableResponse(response, "Authentication service is temporarily unavailable", path);
+            sendServiceUnavailableResponse(request, response, "Authentication service is temporarily unavailable", path);
         } catch (GatewayTimeoutException e) {
             log.error("Auth service timeout: {}", e.getMessage());
-            sendGatewayTimeoutResponse(response, "Authentication service request timed out", path);
+            sendGatewayTimeoutResponse(request, response, "Authentication service request timed out", path);
         } catch (Exception e) {
             log.error("Unexpected error during authentication: {}", e.getMessage(), e);
-            sendBadGatewayResponse(response, "An unexpected error occurred during authentication", path);
+            sendBadGatewayResponse(request, response, "An unexpected error occurred during authentication", path);
         }
     }
 
-    private void sendBadRequestResponse(HttpServletResponse response, String detail, String path)
-            throws IOException {
+    private void sendBadRequestResponse(HttpServletRequest request, HttpServletResponse response,
+                                        String detail, String path) throws IOException {
+        addCorsHeaders(request, response);
         ErrorResponse errorResponse = ErrorResponse.badRequest(detail, path);
 
         response.setStatus(HttpServletResponse.SC_BAD_REQUEST);
@@ -128,8 +129,9 @@ public class AuthenticationFilter extends OncePerRequestFilter {
         response.getWriter().write(objectMapper.writeValueAsString(errorResponse));
     }
 
-    private void sendUnauthorizedResponse(HttpServletResponse response, String detail, String path)
-            throws IOException {
+    private void sendUnauthorizedResponse(HttpServletRequest request, HttpServletResponse response,
+                                          String detail, String path) throws IOException {
+        addCorsHeaders(request, response);
         ErrorResponse errorResponse = ErrorResponse.unauthorized(detail, path);
 
         response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
@@ -137,8 +139,9 @@ public class AuthenticationFilter extends OncePerRequestFilter {
         response.getWriter().write(objectMapper.writeValueAsString(errorResponse));
     }
 
-    private void sendServiceUnavailableResponse(HttpServletResponse response, String detail, String path)
-            throws IOException {
+    private void sendServiceUnavailableResponse(HttpServletRequest request, HttpServletResponse response,
+                                                String detail, String path) throws IOException {
+        addCorsHeaders(request, response);
         ErrorResponse errorResponse = ErrorResponse.serviceUnavailable(detail, path);
 
         response.setStatus(HttpServletResponse.SC_SERVICE_UNAVAILABLE);
@@ -146,8 +149,9 @@ public class AuthenticationFilter extends OncePerRequestFilter {
         response.getWriter().write(objectMapper.writeValueAsString(errorResponse));
     }
 
-    private void sendGatewayTimeoutResponse(HttpServletResponse response, String detail, String path)
-            throws IOException {
+    private void sendGatewayTimeoutResponse(HttpServletRequest request, HttpServletResponse response,
+                                            String detail, String path) throws IOException {
+        addCorsHeaders(request, response);
         ErrorResponse errorResponse = ErrorResponse.gatewayTimeout(detail, path);
 
         response.setStatus(HttpServletResponse.SC_GATEWAY_TIMEOUT);
@@ -155,13 +159,22 @@ public class AuthenticationFilter extends OncePerRequestFilter {
         response.getWriter().write(objectMapper.writeValueAsString(errorResponse));
     }
 
-    private void sendBadGatewayResponse(HttpServletResponse response, String detail, String path)
-            throws IOException {
+    private void sendBadGatewayResponse(HttpServletRequest request, HttpServletResponse response,
+                                        String detail, String path) throws IOException {
+        addCorsHeaders(request, response);
         ErrorResponse errorResponse = ErrorResponse.badGateway(detail, path);
 
         response.setStatus(HttpServletResponse.SC_BAD_GATEWAY);
         response.setContentType(MediaType.APPLICATION_JSON_VALUE);
         response.getWriter().write(objectMapper.writeValueAsString(errorResponse));
+    }
+
+    private void addCorsHeaders(HttpServletRequest request, HttpServletResponse response) {
+        String origin = request.getHeader("Origin");
+        if (origin != null) {
+            response.setHeader("Access-Control-Allow-Origin", origin);
+            response.setHeader("Access-Control-Allow-Credentials", "true");
+        }
     }
 
     /**

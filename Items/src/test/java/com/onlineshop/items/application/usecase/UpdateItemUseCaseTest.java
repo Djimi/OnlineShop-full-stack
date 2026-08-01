@@ -1,20 +1,21 @@
 package com.onlineshop.items.application.usecase;
 
-import com.onlineshop.common.domain.valueobject.ItemDescription;
-import com.onlineshop.common.domain.valueobject.ItemId;
-import com.onlineshop.common.domain.valueobject.ItemName;
-import com.onlineshop.common.domain.valueobject.Quantity;
+import com.onlineshop.items.domain.valueobject.ItemDescription;
+import com.onlineshop.items.domain.valueobject.ItemId;
+import com.onlineshop.items.domain.valueobject.ItemName;
+import com.onlineshop.items.domain.valueobject.Quantity;
 import com.onlineshop.items.application.command.UpdateItemCommand;
 import com.onlineshop.items.application.dto.UpdateItemResponse;
+import com.onlineshop.items.application.dto.mapper.ItemResponseMapper;
 import com.onlineshop.items.domain.aggregateroots.Item;
 import com.onlineshop.items.domain.event.ItemUpdated;
+import com.onlineshop.items.domain.exception.ItemNotFoundException;
 import com.onlineshop.items.domain.repository.ItemRepository;
-import com.onlineshop.items.web.exception.ItemNotFoundException;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Captor;
-import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.context.ApplicationEventPublisher;
@@ -38,11 +39,17 @@ class UpdateItemUseCaseTest {
     @Mock
     private ApplicationEventPublisher eventPublisher;
 
-    @InjectMocks
+    private final ItemResponseMapper mapper = new ItemResponseMapper();
+
     private UpdateItemUseCase updateItemUseCase;
 
     @Captor
     private ArgumentCaptor<ItemUpdated> itemUpdatedCaptor;
+
+    @BeforeEach
+    void setUp() {
+        updateItemUseCase = new UpdateItemUseCase(itemRepository, eventPublisher, mapper);
+    }
 
     @Test
     void execute_whenItemFoundAndChanged_updatesAndPublishesEvent() {

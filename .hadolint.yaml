@@ -1,0 +1,2 @@
+ignored:
+  - DL3006  # Always tag images — the Maven build image intentionally floats (tags resolve to latest patch)

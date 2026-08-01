@@ -1,9 +1,9 @@
 package com.onlineshop.items.domain.aggregateroots;
 
-import com.onlineshop.common.domain.valueobject.ItemDescription;
-import com.onlineshop.common.domain.valueobject.ItemId;
-import com.onlineshop.common.domain.valueobject.ItemName;
-import com.onlineshop.common.domain.valueobject.Quantity;
+import com.onlineshop.items.domain.valueobject.ItemDescription;
+import com.onlineshop.items.domain.valueobject.ItemId;
+import com.onlineshop.items.domain.valueobject.ItemName;
+import com.onlineshop.items.domain.valueobject.Quantity;
 import com.onlineshop.items.domain.event.ItemCreated;
 import com.onlineshop.items.domain.event.ItemDeleted;
 import com.onlineshop.items.domain.event.ItemUpdated;
@@ -73,7 +73,7 @@ class ItemTest {
 
         Item item = Item.fromPersistence(id, name, quantity, null);
 
-        assertThat(item.getDescription()).isNull();
+        assertThat(item.getDescription().value()).isEmpty();
         assertThat(item.getDomainEvents()).isEmpty();
     }
 

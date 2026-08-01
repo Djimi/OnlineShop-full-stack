@@ -10,7 +10,7 @@ services:
     ports:
       - "5432:5432"
     volumes:
-      - items-postgres-data:/var/lib/postgresql/data
+      - items-postgres-data:/var/lib/postgresql
       - ./Items/init-db:/docker-entrypoint-initdb.d
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U items"]
@@ -30,7 +30,7 @@ services:
     ports:
       - "5433:5432"
     volumes:
-      - auth-postgres-data:/var/lib/postgresql/data
+      - auth-postgres-data:/var/lib/postgresql
       - ./Auth/init-db:/docker-entrypoint-initdb.d
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U auth"]
@@ -162,8 +162,8 @@ services:
 
   items-service:
     build:
-      context: ./Items
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: Items/Dockerfile
     container_name: items-service
     ports:
       - "9000:9000"
@@ -177,10 +177,10 @@ services:
     networks:
       - onlineshop-network
     healthcheck:
-      test: ["CMD-SHELL", "curl http://localhost:9000/api/v1/items 2>&1"]
+      test: ["CMD-SHELL", "curl -f http://localhost:9000/actuator/health || exit 1"]
       interval: 10s
       timeout: 5s
-      retries: 10
+      retries: 3
       start_period: 30s
 
   api-gateway:
@@ -201,6 +201,24 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+    networks:
+      - onlineshop-network
+
+  # ==================== FRONTEND ====================
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: frontend
+    ports:
+      - "5173:5173"
+    environment:
+      VITE_API_URL: http://localhost:10000
+    volumes:
+      - ./frontend/src:/app/src
+    depends_on:
+      api-gateway:
+        condition: service_started
     networks:
       - onlineshop-network
 

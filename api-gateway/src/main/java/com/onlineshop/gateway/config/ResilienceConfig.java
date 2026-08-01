@@ -34,8 +34,9 @@ public class ResilienceConfig {
      * - Connection timeout: 5 seconds (time to establish connection)
      * - Read timeout: 5 seconds (time to read response)
      *
-     * Note: Resilience4j TimeLimiter (3s) typically triggers before these timeouts,
-     * providing the primary timeout control. These HTTP-level timeouts serve as a safety net.
+     * Note: Resilience4j TimeLimiter (4s) triggers before these HTTP-level
+     * timeouts (5s), providing the primary timeout control. The HTTP-level
+     * timeouts serve as a safety net if the TimeLimiter fails to trigger.
      */
     @Bean
     public RestClient restClient() {
@@ -94,7 +95,7 @@ public class ResilienceConfig {
     @Bean
     public TimeLimiter authServiceTimeLimiter() {
         TimeLimiterConfig config = TimeLimiterConfig.custom()
-                .timeoutDuration(Duration.ofSeconds(3))
+                .timeoutDuration(Duration.ofSeconds(4))
                 .build();
 
         TimeLimiterRegistry registry = TimeLimiterRegistry.of(config);

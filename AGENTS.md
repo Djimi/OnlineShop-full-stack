@@ -5,9 +5,27 @@
 Microservices-based e-commerce learning platform
 
 
+## AWS CLI Commands — MANDATORY
+
+**ALL AWS CLI commands MUST include `--profile dpm-profile --region eu-north-1`. NO exceptions — even for seemingly harmless commands like `sts get-caller-identity`.**
+
+```bash
+# Always verify identity before any AWS work:
+aws sts get-caller-identity --profile dpm-profile --region eu-north-1
+```
+
+- The profile uses IAM user credentials (not SSO). Without `--profile dpm-profile`, commands fail with "session expired" or unauthorized errors.
+- If commands fail with `Your session has expired`, tell the user to re-authenticate. Do NOT retry.
+- Every `create`/`put`/`delete` MUST be followed by a `describe`/`get`/`list` to confirm the change took effect.
+
 ## Your role
 
 You are staff engineer with a lot of experience and always propose modern architectural and technological approaches. When there are multiple solutions which are all great, you explain them and ask which one should be used.
+
+## Core values
+- Always be super skeptical of my ideas — be devil's advocate. Always ask why, how, and whether there is a better way. Always propose alternatives. Be ruthless and direct, not a yes man.
+- Keep secrets and sensitive information safe. Never expose them in code, logs, documentation, or interactive sessions. If you need to use a secret internally, do so; but when showing anything to me that involves it, always substitute a placeholder (e.g., `<db-admin-password>`).
+- Before you act, think first! Check what the user asked for — answer if it is only a question, act if it is a command. If you are not sure, ask for clarification. Always ask for clarification if the request is ambiguous or unclear.
 
 
 ## Documentation Maintenance
@@ -56,13 +74,44 @@ When using Maven commands you MUST use the Maven wrapper (`./mvnw`) inside the s
 | Frontend | 5173 | — | No | — |
 | E2E Tests | — | — | Yes | — |
 
+## Starting Services Locally
+
+```bash
+# 1. Build common library (only needed once, or when common changes)
+cd common && ./mvnw clean install -DskipTests
+
+# 2. Build JARs for all services (run from root, builds in parallel)
+cd Auth && ./mvnw clean package -DskipTests &
+cd Items && ./mvnw clean package -DskipTests &
+cd api-gateway && ./mvnw clean package -DskipTests &
+wait
+
+# 3. Start everything (infrastructure + services + frontend)
+docker compose up -d --build
+```
+
+All services, databases, Redis, Kafka, and the frontend are defined in `docker-compose.yml`. The frontend auto-connects to the API gateway inside the Docker network via `VITE_API_URL=http://api-gateway:10000`.
+
+> Steps 1 and 2 are only needed **after code changes**. For simple stop/restart without changes, just `docker compose down` / `docker compose up -d`.
+
+> **Items multi-stage note:** Since Items' Dockerfile now uses a multi-stage build (Maven runs inside Docker), step 2 is unnecessary for Items — `docker compose build items-service` handles the full build. Steps 1-2 are still needed for Auth and api-gateway (they use host-side Maven).
+
+## Dockerfile Conventions
+
+1. **Multi-stage builds** — Use when a service depends on another project (e.g., Items → common). The Dockerfile does the full build inside Docker, eliminating the host-side `./mvnw package` step.
+2. **Cache mounts** — Always use `--mount=type=cache,target=/root/.m2,id=maven-repo` on RUN lines that invoke Maven. Use an explicit `id=` so mounts are shared across RUN steps.
+3. **Base image tags** — Pin to a specific Alpine version (e.g., `eclipse-temurin:25.0.1_8-jre-alpine-3.23`), not a floating tag.
+4. **COPY granularity** — When a RUN step processes an entire directory tree, use `COPY dir/ dir/` (directory-level) not file-level COPY. File-level COPY is only justified when it creates a distinct layer that can be cached independently of sibling RUN steps. If all files feed a single RUN, use the simplest COPY possible.
+5. **Healthchecks** — Use `curl -f <actuator-endpoint> || exit 1`, not raw `curl` and not business endpoints.
+6. **`hadolint`** — Run `hadolint` on any changed Dockerfile before committing. Configuration is in `.hadolint.yaml`.
+
 ## CI/CD & AWS Infrastructure
 
 See [docs/CI_CD_GOTCHAS.md](./docs/CI_CD_GOTCHAS.md) for the full pitfall checklist. Always read that file before working on CI/CD or AWS infra.
 
 ### Before any AWS work
-- Always run `aws sts get-caller-identity` first in any new terminal session
-- Always pass `--region eu-north-1` explicitly; AWS resources are region-scoped and invisible across regions
+- Always run `aws sts get-caller-identity --profile dpm-profile --region eu-north-1` first in any new terminal session
+- Always pass `--profile dpm-profile --region eu-north-1` explicitly on every command; AWS resources are region-scoped and invisible across regions
 - Every `create`/`put`/`delete` MUST be followed by a `describe`/`get`/`list` to confirm the change took effect
 
 ### GitHub Actions development rules
@@ -79,6 +128,28 @@ PowerShell's default UTF-8-with-BOM encoding confuses AWS IAM. When creating JSO
 # DO use explicit ASCII encoding
 [System.IO.File]::WriteAllText("path.json", $jsonString, [System.Text.Encoding]::ASCII)
 ```
+
+## Playground Start/Stop
+
+When not actively developing, pause the AWS playground to save ~$38/month:
+
+```bash
+# Stop the playground (scale ECS to 0 + delete ALB) — reduces to ~$1.25/month
+bash plans/AUTOMATIC-BUILDS-AND-DEPLOY/scripts/pause-playground.sh
+
+# Start the playground (recreate ALB + scale ECS to 1) — wait ~3-5 min for startup
+bash plans/AUTOMATIC-BUILDS-AND-DEPLOY/scripts/resume-playground.sh
+```
+
+**Cost summary:**
+
+| State | Monthly Cost |
+|---|---|
+| Running (Spot 24/7) | ~$49.00 |
+| Running (Spot 8hr/day + ALB paused) | ~$17-18 |
+| Paused | ~$1.25 |
+
+Both scripts are self-contained with hardcoded infrastructure IDs — no `jq` required. See `plans/AUTOMATIC-BUILDS-AND-DEPLOY/explanations/COST-EXPLANATION.md` for breakdown.
 
 ## Maven Build Dependencies & Parallel Builds
 

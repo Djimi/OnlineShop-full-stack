@@ -40,39 +40,39 @@
 
 ### 1.4 Database Layer
 
-- [ ] Decide: RDS Free Tier PostgreSQL vs. containerized PostgreSQL on ECS
+- [x] Decide: RDS Free Tier PostgreSQL vs. containerized PostgreSQL on ECS
   - RDS Free Tier (`db.t3.micro` / `db.t4g.micro`, 20 GB) is free for 12 months — **preferred for MVP**
   - Containerized PG is cheaper long-term but no managed backups
-- [ ] Provision PostgreSQL instance(s) for Auth and Items
-- [ ] Apply init-db scripts (`01-schema.sql`, `02-seed-data.sql`) to each database
-- [ ] Store DB credentials in Secrets Manager; wire ECS task definitions to fetch them
+- [x] Provision PostgreSQL instance(s) for Auth and Items
+- [x] Apply init-db scripts (`01-schema.sql`, `02-seed-data.sql`) to each database
+- [x] Store DB credentials in Secrets Manager; wire ECS task definitions to fetch them
 
 ### 1.5 ECS Cluster & Services (Fargate)
 
-- [ ] Create ECS cluster
-- [ ] Create task definitions for Auth, Items, API Gateway
+- [x] Create ECS cluster
+- [x] Create task definitions for Auth, Items, API Gateway
   - Fargate Spot where possible (cost savings)
   - Minimal resource allocation (0.25 vCPU / 0.5 GB per task is a good starting point)
-- [ ] Create ECS services (desired count = 1 per service)
-- [ ] Set up a single ALB (Application Load Balancer) with path-based routing:
+- [x] Create ECS services (desired count = 1 per service)
+- [x] Set up a single ALB (Application Load Balancer) with path-based routing:
   - `/api/auth/**` → Auth service
   - `/api/items/**` → Items service
   - `/api/**` → API Gateway (or route everything through Gateway)
-- [ ] Configure security groups: ALB ↔ ECS tasks ↔ RDS
-- [ ] Verify backend health checks pass
+- [x] Configure security groups: ALB ↔ ECS tasks ↔ RDS
+- [x] Verify backend health checks pass
 
 ### 1.6 Frontend — S3 + CloudFront
 
-- [ ] Create S3 bucket for frontend static assets
-- [ ] Build frontend (`npm run build`) and upload `dist/` to S3
-- [ ] Create CloudFront distribution pointing to S3 origin
-- [ ] Configure CloudFront to forward `/api/*` requests to the ALB (origin for backend)
-- [ ] Verify frontend loads and can communicate with backend APIs
+- [x] Create S3 bucket for frontend static assets
+- [x] Build frontend (`npm run build`) and upload `dist/` to S3
+- [x] Create CloudFront distribution pointing to S3 origin
+- [x] Configure CloudFront to forward `/auth/*` and `/items/*` requests to the ALB (origin for backend)
+- [x] Verify frontend loads and can communicate with backend APIs
 
 ### 1.7 Smoke Test
 
-- [ ] Manually verify: frontend loads, login works, items list renders
-- [ ] Document the public URL(s) in the project README or a dedicated `DEPLOYED.md`
+- [x] Manually verify: frontend loads, login works, items list renders
+- [x] Document the public URL(s) in `executed/INFO.md` and `WHAT-WAS-DONE.md`
 
 ---
 

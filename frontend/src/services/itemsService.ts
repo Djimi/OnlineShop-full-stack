@@ -7,7 +7,7 @@ export const itemsService = {
     return response.data;
   },
 
-  getItemById: async (id: number): Promise<ItemDTO> => {
+  getItemById: async (id: string): Promise<ItemDTO> => {
     const response = await api.get<ItemDTO>(`/items/${id}`);
     return response.data;
   },

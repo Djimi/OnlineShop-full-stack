@@ -20,3 +20,28 @@ spring:
       hibernate:
         dialect: org.hibernate.dialect.PostgreSQLDialect
         format_sql: true
+
+management:
+  health:
+    show-details: when-authorized
+    group:
+      liveness:
+        show-details: when-authorized
+      readiness:
+        show-details: when-authorized
+  env:
+    show-values: never
+  configprops:
+    show-values: never
+
+  endpoints:
+    web:
+      exposure:
+        include: health,metrics,prometheus
+
+  metrics:
+    tags:
+      application: items
+  info:
+    env:
+      enabled: true
