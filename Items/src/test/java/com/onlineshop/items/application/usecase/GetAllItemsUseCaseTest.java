@@ -1,16 +1,17 @@
 package com.onlineshop.items.application.usecase;
 
-import com.onlineshop.common.domain.valueobject.ItemDescription;
-import com.onlineshop.common.domain.valueobject.ItemId;
-import com.onlineshop.common.domain.valueobject.ItemName;
-import com.onlineshop.common.domain.valueobject.Quantity;
+import com.onlineshop.items.domain.valueobject.ItemDescription;
+import com.onlineshop.items.domain.valueobject.ItemId;
+import com.onlineshop.items.domain.valueobject.ItemName;
+import com.onlineshop.items.domain.valueobject.Quantity;
 import com.onlineshop.items.application.dto.GetItemResponse;
+import com.onlineshop.items.application.dto.mapper.ItemResponseMapper;
 import com.onlineshop.items.application.query.GetAllItemsQuery;
 import com.onlineshop.items.domain.aggregateroots.Item;
 import com.onlineshop.items.domain.repository.ItemRepository;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
@@ -26,8 +27,14 @@ class GetAllItemsUseCaseTest {
     @Mock
     private ItemRepository itemRepository;
 
-    @InjectMocks
+    private final ItemResponseMapper mapper = new ItemResponseMapper();
+
     private GetAllItemsUseCase getAllItemsUseCase;
+
+    @BeforeEach
+    void setUp() {
+        getAllItemsUseCase = new GetAllItemsUseCase(itemRepository, mapper);
+    }
 
     @Test
     void execute_whenItemsExist_returnsAllItems() {
@@ -74,6 +81,6 @@ class GetAllItemsUseCaseTest {
         List<GetItemResponse> responses = getAllItemsUseCase.execute(new GetAllItemsQuery());
 
         assertThat(responses).hasSize(1);
-        assertThat(responses.get(0).description()).isNull();
+        assertThat(responses.get(0).description()).isEmpty();
     }
 }

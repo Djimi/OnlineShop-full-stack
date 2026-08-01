@@ -34,6 +34,7 @@ public class RateLimitFilter extends OncePerRequestFilter {
     private final GatewayMetrics metrics;
     private final ProxyManager<String> proxyManager;
     private final RateLimitConfigProperties rateLimitConfigProperties;
+    private volatile boolean loggedRedisDown;
 
     public RateLimitFilter(
             ObjectMapper objectMapper,
@@ -68,14 +69,22 @@ public class RateLimitFilter extends OncePerRequestFilter {
                 ? createAuthenticatedConfig()
                 : createAnonymousConfig();
 
-        Bucket bucket = proxyManager.builder().build(clientKey, () -> config);
+        try {
+            Bucket bucket = proxyManager.builder().build(clientKey, () -> config);
 
-        if (bucket.tryConsume(1)) {
+            if (bucket.tryConsume(1)) {
+                filterChain.doFilter(request, response);
+            } else {
+                metrics.incrementRateLimitRejections();
+                log.warn("Rate limit exceeded for client: {}", clientKey);
+                sendTooManyRequestsResponse(response, "Rate limit exceeded. Please try again later.", path);
+            }
+        } catch (Exception e) {
+            if (!loggedRedisDown) {
+                loggedRedisDown = true;
+                log.warn("Rate limiter unavailable (Redis down?), failing open: {}", e.getMessage());
+            }
             filterChain.doFilter(request, response);
-        } else {
-            metrics.incrementRateLimitRejections();
-            log.warn("Rate limit exceeded for client: {}", clientKey);
-            sendTooManyRequestsResponse(response, "Rate limit exceeded. Please try again later.", path);
         }
     }
 

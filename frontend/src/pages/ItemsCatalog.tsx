@@ -30,6 +30,10 @@ export default function ItemsCatalog() {
     };
 
     fetchItems();
+
+    return () => {
+      toast.dismiss();
+    };
   }, []);
 
   const handleSearch = (e: React.FormEvent) => {

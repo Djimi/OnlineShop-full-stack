@@ -44,7 +44,7 @@ export interface ErrorResponse {
 
 // Items Types
 export interface ItemDTO {
-  id: number;
+  id: string;
   name: string;
   quantity: number;
   description: string;

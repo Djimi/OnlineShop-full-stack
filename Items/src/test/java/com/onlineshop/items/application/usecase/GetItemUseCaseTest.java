@@ -1,17 +1,18 @@
 package com.onlineshop.items.application.usecase;
 
-import com.onlineshop.common.domain.valueobject.ItemDescription;
-import com.onlineshop.common.domain.valueobject.ItemId;
-import com.onlineshop.common.domain.valueobject.ItemName;
-import com.onlineshop.common.domain.valueobject.Quantity;
+import com.onlineshop.items.domain.valueobject.ItemDescription;
+import com.onlineshop.items.domain.valueobject.ItemId;
+import com.onlineshop.items.domain.valueobject.ItemName;
+import com.onlineshop.items.domain.valueobject.Quantity;
 import com.onlineshop.items.application.dto.GetItemResponse;
+import com.onlineshop.items.application.dto.mapper.ItemResponseMapper;
 import com.onlineshop.items.application.query.GetItemQuery;
 import com.onlineshop.items.domain.aggregateroots.Item;
+import com.onlineshop.items.domain.exception.ItemNotFoundException;
 import com.onlineshop.items.domain.repository.ItemRepository;
-import com.onlineshop.items.web.exception.ItemNotFoundException;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
@@ -28,8 +29,14 @@ class GetItemUseCaseTest {
     @Mock
     private ItemRepository itemRepository;
 
-    @InjectMocks
+    private final ItemResponseMapper mapper = new ItemResponseMapper();
+
     private GetItemUseCase getItemUseCase;
+
+    @BeforeEach
+    void setUp() {
+        getItemUseCase = new GetItemUseCase(itemRepository, mapper);
+    }
 
     @Test
     void execute_whenItemFound_returnsItemResponse() {
@@ -61,7 +68,7 @@ class GetItemUseCaseTest {
     }
 
     @Test
-    void execute_whenItemFoundWithNullDescription_returnsNullDescription() {
+    void execute_whenItemFoundWithNullDescription_returnsEmptyDescription() {
         UUID itemId = UUID.randomUUID();
         Item item = Item.fromPersistence(
             new ItemId(itemId),
@@ -73,6 +80,6 @@ class GetItemUseCaseTest {
 
         GetItemResponse response = getItemUseCase.execute(new GetItemQuery(itemId));
 
-        assertThat(response.description()).isNull();
+        assertThat(response.description()).isEmpty();
     }
 }

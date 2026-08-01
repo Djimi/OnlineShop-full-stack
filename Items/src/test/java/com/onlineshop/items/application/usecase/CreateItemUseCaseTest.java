@@ -1,20 +1,17 @@
 package com.onlineshop.items.application.usecase;
 
-import com.onlineshop.common.domain.valueobject.ItemDescription;
-import com.onlineshop.common.domain.valueobject.ItemId;
-import com.onlineshop.common.domain.valueobject.ItemName;
-import com.onlineshop.common.domain.valueobject.Quantity;
 import com.onlineshop.items.application.command.CreateItemCommand;
 import com.onlineshop.items.application.dto.CreateItemResponse;
+import com.onlineshop.items.application.dto.mapper.ItemResponseMapper;
 import com.onlineshop.items.domain.aggregateroots.Item;
 import com.onlineshop.items.domain.event.ItemCreated;
 import com.onlineshop.items.domain.repository.ItemRepository;
 import com.onlineshop.items.domain.service.IdGenerator;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Captor;
-import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.context.ApplicationEventPublisher;
@@ -42,11 +39,17 @@ class CreateItemUseCaseTest {
     @Mock
     private IdGenerator idGenerator;
 
-    @InjectMocks
+    private final ItemResponseMapper mapper = new ItemResponseMapper();
+
     private CreateItemUseCase createItemUseCase;
 
     @Captor
     private ArgumentCaptor<ItemCreated> itemCreatedCaptor;
+
+    @BeforeEach
+    void setUp() {
+        createItemUseCase = new CreateItemUseCase(itemRepository, eventPublisher, idGenerator, mapper);
+    }
 
     @Test
     void execute_whenValidCommand_createsItemAndPublishesEvent() {
@@ -73,7 +76,7 @@ class CreateItemUseCaseTest {
     }
 
     @Test
-    void execute_whenValidCommandWithNullDescription_returnsNullDescription() {
+    void execute_whenValidCommandWithNullDescription_returnsEmptyDescription() {
         UUID generatedId = UUID.randomUUID();
         when(idGenerator.generate()).thenReturn(generatedId);
         when(itemRepository.save(any(Item.class))).thenAnswer(invocation -> invocation.getArgument(0));
@@ -84,7 +87,7 @@ class CreateItemUseCaseTest {
         assertThat(response.id()).isEqualTo(generatedId);
         assertThat(response.name()).isEqualTo("No Desc Item");
         assertThat(response.quantity()).isEqualTo(3);
-        assertThat(response.description()).isNull();
+        assertThat(response.description()).isEmpty();
 
         verify(eventPublisher).publishEvent(itemCreatedCaptor.capture());
 
@@ -93,7 +96,7 @@ class CreateItemUseCaseTest {
         assertThat(event.getName().value()).isEqualTo("No Desc Item");
         assertThat(event.getQuantity().amount()).isEqualTo(3);
         assertThat(event.getDescription()).isNotNull();
-        assertThat(event.getDescription().value()).isNull();
+        assertThat(event.getDescription().value()).isEmpty();
     }
 
     @Test

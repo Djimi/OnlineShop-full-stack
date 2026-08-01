@@ -21,10 +21,7 @@ info:
           cors-configurations:
             '[/**]':
               allowed-origins:
-                - "http://localhost:5173"
-                - "http://localhost:5174"
-                - "http://localhost:3000"
-                - "http://127.0.0.1:5173"
+                - "*"
               allowed-methods:
                 - GET
                 - POST
@@ -33,7 +30,7 @@ info:
                 - OPTIONS
                 - PATCH
               allowed-headers: "*"
-              allow-credentials: true
+              allow-credentials: false
               max-age: 3600
 
   # Redis configuration (L2 cache)
@@ -42,20 +39,17 @@ info:
       host: localhost
       port: 6379
       timeout: 100ms
+      connect-timeout: 10s
 
 # Actuator & Metrics
 management:
   endpoint:
     health:
-      show-details: always
-    env:
-      show-values: always
-    configprops:
-      show-values: always
+      show-details: when-authorized
   endpoints:
     web:
       exposure:
-        include: "*"
+        include: health,metrics,prometheus
   metrics:
     tags:
       application: api-gateway
@@ -84,4 +78,3 @@ gateway:
       requests-per-minute: 5
       burst: 50
 
-debug: true

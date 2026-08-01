@@ -19,7 +19,6 @@ import java.util.List;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -28,8 +27,7 @@ class SearchItemsUseCaseTest {
     @Mock
     private ItemRepository itemRepository;
 
-    @Mock
-    private ItemResponseMapper mapper;
+    private final ItemResponseMapper mapper = new ItemResponseMapper();
 
     private SearchItemsUseCase searchItemsUseCase;
 
@@ -59,8 +57,6 @@ class SearchItemsUseCaseTest {
         );
 
         when(itemRepository.searchByDescription(searchTerm)).thenReturn(List.of(item1, item2));
-        when(mapper.toGetItemResponse(item1)).thenReturn(new GetItemResponse(item1Id, "Gaming Laptop", 5, "High-performance gaming laptop with RTX 4090"));
-        when(mapper.toGetItemResponse(item2)).thenReturn(new GetItemResponse(item2Id, "Business Laptop", 10, "Professional laptop for business use"));
 
         SearchItemsByDescriptionQuery query = new SearchItemsByDescriptionQuery(searchTerm);
         List<GetItemResponse> responses = searchItemsUseCase.execute(query);
@@ -104,7 +100,6 @@ class SearchItemsUseCaseTest {
         );
 
         when(itemRepository.searchByDescription(searchTerm)).thenReturn(List.of(item));
-        when(mapper.toGetItemResponse(item)).thenReturn(new GetItemResponse(itemId, "Wireless Mouse", 20, ""));
 
         SearchItemsByDescriptionQuery query = new SearchItemsByDescriptionQuery(searchTerm);
         List<GetItemResponse> responses = searchItemsUseCase.execute(query);
@@ -146,9 +141,6 @@ class SearchItemsUseCaseTest {
         );
 
         when(itemRepository.searchByDescription(searchTerm)).thenReturn(List.of(item1, item2, item3));
-        when(mapper.toGetItemResponse(item1)).thenReturn(new GetItemResponse(item1Id, "Mouse", 15, "Wireless mouse with Bluetooth"));
-        when(mapper.toGetItemResponse(item2)).thenReturn(new GetItemResponse(item2Id, "Keyboard", 8, "Mechanical wireless keyboard"));
-        when(mapper.toGetItemResponse(item3)).thenReturn(new GetItemResponse(item3Id, "Headset", 12, "Wireless gaming headset with noise cancellation"));
 
         SearchItemsByDescriptionQuery query = new SearchItemsByDescriptionQuery(searchTerm);
         List<GetItemResponse> responses = searchItemsUseCase.execute(query);

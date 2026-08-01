@@ -1,19 +1,19 @@
 package com.onlineshop.items.application.usecase;
 
-import com.onlineshop.common.domain.valueobject.ItemDescription;
-import com.onlineshop.common.domain.valueobject.ItemId;
-import com.onlineshop.common.domain.valueobject.ItemName;
-import com.onlineshop.common.domain.valueobject.Quantity;
+import com.onlineshop.items.domain.valueobject.ItemDescription;
+import com.onlineshop.items.domain.valueobject.ItemId;
+import com.onlineshop.items.domain.valueobject.ItemName;
+import com.onlineshop.items.domain.valueobject.Quantity;
 import com.onlineshop.items.application.command.DeleteItemCommand;
 import com.onlineshop.items.domain.aggregateroots.Item;
 import com.onlineshop.items.domain.event.ItemDeleted;
 import com.onlineshop.items.domain.repository.ItemRepository;
-import com.onlineshop.items.web.exception.ItemNotFoundException;
+import com.onlineshop.items.domain.exception.ItemNotFoundException;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Captor;
-import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.context.ApplicationEventPublisher;
@@ -35,11 +35,15 @@ class DeleteItemUseCaseTest {
     @Mock
     private ApplicationEventPublisher eventPublisher;
 
-    @InjectMocks
     private DeleteItemUseCase deleteItemUseCase;
 
     @Captor
     private ArgumentCaptor<ItemDeleted> itemDeletedCaptor;
+
+    @BeforeEach
+    void setUp() {
+        deleteItemUseCase = new DeleteItemUseCase(itemRepository, eventPublisher);
+    }
 
     @Test
     void execute_whenItemFound_deletesAndPublishesEvent() {
