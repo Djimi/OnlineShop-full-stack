@@ -55,6 +55,19 @@ const API_BASE_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:10000';
 
 **Note:** Uses `??` (nullish coalescing) instead of `||` so that `VITE_API_URL=''` is preserved as an empty string (enabling relative API calls).
 
+### Multi-Worktree (Per-Worktree Frontend)
+
+In a non-main worktree, the frontend's `VITE_API_URL` is set to `http://localhost:<GATEWAY_PORT>` by the compose file (via `.env`). The containerized frontend auto-connects to the correct worktree gateway.
+
+**Host-run frontend in a worktree:** Always source the exports before running Vite:
+
+```bash
+source <(scripts/dev-env.sh --exports)
+npm run dev -- --port "$FRONTEND_PORT"
+```
+
+**WARNING:** Without `--exports`, `VITE_API_URL` is unset and `api.ts` falls back to `http://localhost:10000` — main's gateway. This is a silent cross-worktree data-plane mixup, worse than a crash.
+
 ## SPA Routing
 
 React Router handles client-side navigation. CloudFront is configured with a custom error response:

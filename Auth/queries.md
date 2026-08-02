@@ -4,7 +4,7 @@ Environment used:
 - `auth-postgres` + `auth-service` from `docker-compose.yml`
 - Endpoints called directly on `http://localhost:9001`
 - Test flow: `register -> login -> validate`
-- Captured from: `docker logs auth-service --since "2026-02-08T22:40:58Z" --until "2026-02-08T22:41:10Z"`
+- Captured from: `docker compose logs auth-service --since "2026-02-08T22:40:58Z" --until "2026-02-08T22:41:10Z"`
 
 ## Register (`POST /api/v1/auth/register`)
 

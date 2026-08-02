@@ -64,6 +64,15 @@ Optional threshold overrides:
 --auth.troubleshooting.datasource.acquire-slow-threshold-ms=2
 ```
 
+## Host-Run Dev Mode (Multi-Worktree)
+
+In a non-main worktree, run the auth service on the host with `--exports` to pick up worktree-specific ports:
+
+```bash
+source <(scripts/dev-env.sh --exports)
+./mvnw spring-boot:run
+```
+
 ## AWS CLI Conventions
 
 For AWS CLI commands (infrastructure queries, deployments, etc.), see the root [AGENTS.md](../AGENTS.md) — all AWS commands MUST include `--profile dpm-profile --region eu-north-1`.

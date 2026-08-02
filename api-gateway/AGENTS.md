@@ -109,3 +109,12 @@ For tighter security in production, replace `"*"` with the explicit CloudFront d
 ## AWS CLI Conventions
 
 For AWS CLI commands (infrastructure queries, deployments, etc.), see the root [AGENTS.md](../AGENTS.md) — all AWS commands MUST include `--profile dpm-profile --region eu-north-1`.
+
+## Host-Run Dev Mode (Multi-Worktree)
+
+In a non-main worktree, run the gateway on the host with `--exports` to pick up worktree-specific ports:
+
+```bash
+source <(scripts/dev-env.sh --exports)
+./mvnw spring-boot:run
+```

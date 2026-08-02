@@ -7,6 +7,32 @@
 >
 > Without step 1, the Docker image will use the old JAR and changes won't apply.
 
+## Multi-Worktree Port Conflicts
+
+If `docker compose up` fails with a bind error (port already in use):
+
+```bash
+# Check which worktree's ports you have
+scripts/dev-env.sh
+
+# Regenerate with a new slot (downs old stack first)
+scripts/dev-env.sh --regenerate
+docker compose up -d --build
+
+# To also drop DB volumes when regenerating:
+scripts/dev-env.sh --regenerate --volumes
+```
+
+**Manual debug:** find what's using a port:
+```bash
+ss -tlnH "sport = :<port>"    # shows the process listening on <port>
+docker ps --filter publish=<port>  # shows the container
+```
+
+**Forgot to run dev-env.sh?** A bare `docker compose up` in a non-main worktree without running `scripts/dev-env.sh` will use main's ports — colliding with the main checkout if it's running. Run `scripts/dev-env.sh` first.
+
+See [docs/MULTI_WORKTREE.md](./MULTI_WORKTREE.md) for full multi-worktree guide.
+
 
 ## Essential Commands
 

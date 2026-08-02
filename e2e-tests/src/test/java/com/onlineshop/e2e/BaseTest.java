@@ -9,7 +9,7 @@ import org.junit.jupiter.api.BeforeAll;
 
 public abstract class BaseTest {
 
-    protected static final String BASE_URL = "http://localhost:10000";
+    protected static final String BASE_URL = System.getenv().getOrDefault("E2E_BASE_URL", "http://localhost:10000");
 
     protected static RequestSpecification requestSpec;
 
