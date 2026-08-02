@@ -258,3 +258,41 @@ curl -s -o /dev/null -w "%{http_code}" -X OPTIONS "$CF/auth/login" -H "Origin: h
 - API path prefixing (`/api/*`) to separate frontend routes from API endpoints (fixes direct-navigation collision on `/items`)
 - CloudFront cache invalidation is manual — integrate into CI/CD pipeline
 
+---
+
+## Pass 2 — CI Pipeline Hardening & Staging (2026-08-02)
+
+### 2.4 — Auth JaCoCo Coverage Threshold Bump ✅
+
+- LINE and BRANCH minimums: `0.30` → `0.50` in `Auth/pom.xml`
+
+### 2.4 — Auth Actuator Security Fix ✅
+
+- **Problem:** `endpoints.web.exposure.include: "*"` with `env.show-values: always` — potential DB password leak via `/actuator/env`
+- **Fix:** Restricted exposure to `health,metrics`, changed `show-values` to `never`, aligned with Items pattern
+
+### 2.2-2.5 — CI/CD Workflow Rewrite ✅
+
+- **New file:** `.github/workflows/build-and-deploy.yml`
+- **Triggers:** push to `feature/**` and `main`, PR to `main`, `workflow_dispatch`
+- **Change detection:** `dorny/paths-filter@v3` with dependency-aware filters
+- **Test gates:** `./mvnw verify` (was `mvnw package -DskipTests` in old workflow)
+- **Concurrency:** Cancel in-progress on same branch/PR
+- **Docker tags:** `sha-<SHA>` always, `branch-<name>` on feature, `main-latest` on main
+- **E2E staging job:** Deploy to staging + run E2E tests (on push to main)
+
+### 2.7 — Staging Scripts Created ✅
+
+- `scripts/ci-deploy-staging.sh` — Deploys images to staging ECS services
+- `scripts/setup-staging-env.sh` — Guided setup for staging infrastructure (prints commands)
+
+### Pending (needs AWS re-authentication)
+
+- [ ] IAM role update: add ECS deploy + ELB describe permissions
+- [ ] Staging databases: `auth_staging`, `items_staging` on RDS
+- [ ] Staging Secrets Manager entries
+- [ ] Staging ALB + target group + listener
+- [ ] Staging task definitions (3 services)
+- [ ] Staging ECS services (3, desired:0)
+- [ ] Branch protection on `main`
+

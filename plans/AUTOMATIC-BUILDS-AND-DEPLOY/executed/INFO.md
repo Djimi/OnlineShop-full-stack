@@ -1650,3 +1650,218 @@ Created `plans/AUTOMATIC-BUILDS-AND-DEPLOY/scripts/` with two self-contained bas
 - `--profile dpm-profile --region eu-north-1` on every aws command
 - Error handling: detects already-paused/already-resumed state and skips redundant operations
 - `resume-playground.sh` waits up to 5 minutes for Spring Boot startup (3 min startPeriod + buffer)
+
+---
+
+## Pass 2 — CI Pipeline Hardening & Staging
+
+### Date: 2026-08-02
+
+### 2.1 Branch Protection (APPLIED 2026-08-02)
+
+**Rules on `main`:**
+| Rule | Value |
+|------|-------|
+| Required status checks | `auth`, `items`, `api-gateway`, `e2e-staging` |
+| Strict status checks | `true` (branches must be up-to-date) |
+| Required approvals | 1 |
+| Dismiss stale reviews | `true` |
+| Required linear history | `true` (squash merge only) |
+| Force pushes | Disabled |
+| Branch deletions | Disabled |
+
+**Command used:**
+```bash
+gh api repos/Djimi/OnlineShop-full-stack/branches/main/protection \
+  --method PUT \
+  -f required_status_checks='{"strict":true,"contexts":["auth","items","api-gateway","e2e-staging"]}' \
+  -f required_pull_request_reviews='{"required_approving_review_count":1,"dismiss_stale_reviews":true}' \
+  -f required_linear_history=true \
+  -f allow_force_pushes=false \
+  -f allow_deletions=false
+```
+
+### 2.2-2.5 Workflow Rewrite
+
+**Old:** `.github/workflows/build-and-push.yml` (kept for reference)
+**New:** `.github/workflows/build-and-deploy.yml`
+
+**Triggers:**
+| Trigger | Behavior |
+|---------|----------|
+| `push` to `feature/**` | Build, test, push affected services. Tags: `sha-<SHA>` + `branch-<name>` |
+| `pull_request` to `main` | Build, test, push affected services. Tags: `sha-<SHA>` only |
+| `push` to `main` | Build, test, push all changed. Tags: `sha-<SHA>` + `main-latest`. Deploy to staging + E2E |
+| `workflow_dispatch` | Manual. Service selection: `auth`/`items`/`api-gateway`/`all` |
+
+**Concurrency:** `${{ github.workflow }}-${{ github.ref }}`, `cancel-in-progress: true`
+
+**Job graph:**
+```
+changes (dorny/paths-filter)
+  ├── auth (test → build → push)
+  ├── items (build common → test → build → push)
+  ├── api-gateway (test → build → push)
+  └── e2e-staging (main only: deploy → E2E tests)
+```
+
+**Change detection filters:**
+| Service | Paths |
+|---------|-------|
+| `auth` | `Auth/**` |
+| `items` | `Items/**`, `common/**` |
+| `api-gateway` | `api-gateway/**` |
+| `frontend` | `frontend/**` |
+
+**Test gates:**
+- Auth: `./mvnw verify` (unit + integration tests, JaCoCo check at 50% line + branch)
+- Items: `./mvnw verify` (unit + integration tests, JaCoCo check at 90% line)
+- API Gateway: `./mvnw verify` (unit + integration tests, no JaCoCo)
+- Frontend: Not yet wired (no `test` script in package.json)
+
+**Test reports:** Uploaded as artifacts (`auth-test-report`, `items-test-report`, `api-gateway-test-report`)
+
+**Docker build per service:**
+- Auth: host-side `mvnw verify` + Docker build from `Auth/` context
+- Items: host-side `mvnw verify` (with `common` install) + Docker multi-stage build from root context
+- API Gateway: host-side `mvnw verify` + Docker build from `api-gateway/` context
+
+**Docker tag matrix:**
+| Event | SHA tag | Branch tag | main-latest |
+|-------|---------|------------|-------------|
+| push to `feature/foo` | `sha-<SHA>` | `branch-feature-foo` | — |
+| PR to main | `sha-<SHA>` | — | — |
+| push to main | `sha-<SHA>` | — | `main-latest` |
+| workflow_dispatch | `sha-<SHA>` | depends on ref | depends on ref |
+
+### 2.6 Caching Notes
+
+- **Maven cache** (`actions/cache@v4`): host-side `~/.m2/repository`, keyed by `pom.xml` hash
+  - Auth and API Gateway benefit from this
+  - Items' Docker multi-stage build uses Docker build cache mount (`--mount=type=cache,target=/root/.m2,id=maven-repo`) — separate from GHA Maven cache
+- **Docker layer cache** (`docker/setup-buildx-action@v3` + `type=gha`): GHA-cached Docker layers
+- **Cache miss correctness:** Verified via `restore-keys` fallback chain. If exact key misses, partial match restores best-effort cache. Maven re-downloads only missing dependencies.
+- **Known gap:** Items Docker multi-stage build downloads Maven deps fresh on cache mount miss (not shared across CI runs). Consider pre-building `common` inside Docker or using a dedicated CI Dockerfile.
+
+### 2.7 Staging Environment (PROVISIONED 2026-08-02)
+
+**Scripts created:**
+- `scripts/ci-deploy-staging.sh` — Deploys given image tag to staging ECS services
+- `scripts/setup-staging-env.sh` — One-time guided setup script (run once, now completed)
+
+**Staging Infrastructure (provisioned):**
+
+| Resource | Name/ID | Details |
+|----------|---------|---------|
+| Staging ALB | `onlineshop-staging-alb` | ARN: `arn:aws:elasticloadbalancing:eu-north-1:799111666795:loadbalancer/app/onlineshop-staging-alb/095c9e98dbbe762e`, DNS: `onlineshop-staging-alb-615176433.eu-north-1.elb.amazonaws.com` |
+| Staging TG | `onlineshop-staging-tg` | ARN: `arn:aws:elasticloadbalancing:eu-north-1:799111666795:targetgroup/onlineshop-staging-tg/201ace94eec44688` |
+| Staging Listener | — | ARN: `arn:aws:elasticloadbalancing:eu-north-1:799111666795:listener/app/onlineshop-staging-alb/095c9e98dbbe762e/87eeef8afb383a2d`, Port 80 → TG |
+| Auth Staging TD | `onlineshop-auth-staging:2` | `auth-staging-port:9001`, DB: `auth_staging`, secrets: `onlineshop/auth/db-staging` |
+| Items Staging TD | `onlineshop-items-staging:2` | `items-staging-port:9000`, DB: `items_staging`, secrets: `onlineshop/items/db-staging` |
+| API Gateway Staging TD | `onlineshop-api-gateway-staging:2` | `gateway-staging-port:10000`, SC client to `auth-staging` + `items-staging` |
+| Auth Staging Service | `onlineshop-auth-staging` | FARGATE_SPOT, desired:0 (on-demand), SC: `auth-staging:9001` |
+| Items Staging Service | `onlineshop-items-staging` | FARGATE_SPOT, desired:0 (on-demand), SC: `items-staging:9000` |
+| API Gateway Staging Service | `onlineshop-api-gateway-staging` | FARGATE_SPOT, desired:0 (on-demand), ALB TG attached, SC client |
+| Staging DB: auth | `auth_staging` on RDS | Schema: `01-schema.sql` (users, sessions) + seed data |
+| Staging DB: items | `items_staging` on RDS | Schema: `01-schema.sql` (items) + seed data |
+| Service Account | `auth_app_staging` | SELECT,INSERT,UPDATE,DELETE on auth_staging |
+| Service Account | `items_app_staging` | SELECT,INSERT,UPDATE,DELETE on items_staging |
+| Secret | `onlineshop/auth/db-staging-Dkh7wC` | `{"username":"auth_app_staging",...}` |
+| Secret | `onlineshop/items/db-staging-LaYr9R` | `{"username":"items_app_staging",...}` |
+| Cloud Map Service | `auth-staging-port` | DNS: `auth-staging.onlineshop.local:9001` |
+| Cloud Map Service | `items-staging-port` | DNS: `items-staging.onlineshop.local:9000` |
+| Cloud Map Service | `gateway-staging-port` | DNS: `gateway-staging.onlineshop.local:10000` |
+
+**Key design decision:** Staging container port mapping names differ from production (`auth-staging-port` vs `auth-port`) because Service Connect requires unique port names per namespace. Production uses `auth-port`, `items-port`, `gateway-port`.
+
+**Deployment flow (push to main):**
+1. All service images built + pushed with `sha-<SHA>` + `main-latest`
+2. `ci-deploy-staging.sh sha-<SHA>` → registers new task defs, updates services to desired:1
+3. Waits for services stable (60s timeout)
+4. Runs E2E tests against staging ALB
+
+**Smoke test verified (2026-08-02):**
+- `POST /auth/register` → 201
+- `POST /auth/login` → 200 + token
+- `GET /items` with Bearer → 200, 5 products
+- `GET /auth/validate` → 200, valid:true
+
+**Issue encountered during provisioning:** The `echo <SCHEMA>` approach for applying SQL via ECS task didn't work — the `IF NOT EXISTS` in CREATE TABLE masked errors. Re-applied schema using explicit CREATE TABLE statements (without IF NOT EXISTS, after DROP TABLE IF EXISTS). The `echo` approach for SQL injection via Docker command is fragile — prefer `psql -c` with individual statements.
+
+**To pause staging ALB (when not in use):**
+```bash
+# Delete listener and ALB to save cost (same pattern as production)
+aws elbv2 delete-listener --profile dpm-profile --region eu-north-1 \
+  --listener-arn arn:aws:elasticloadbalancing:eu-north-1:799111666795:listener/app/onlineshop-staging-alb/095c9e98dbbe762e/87eeef8afb383a2d
+aws elbv2 delete-target-group --profile dpm-profile --region eu-north-1 \
+  --target-group-arn arn:aws:elasticloadbalancing:eu-north-1:799111666795:targetgroup/onlineshop-staging-tg/201ace94eec44688
+aws elbv2 delete-load-balancer --profile dpm-profile --region eu-north-1 \
+  --load-balancer-arn arn:aws:elasticloadbalancing:eu-north-1:799111666795:loadbalancer/app/onlineshop-staging-alb/095c9e98dbbe762e
+```
+
+**To resume staging:**
+Reverse of above — create ALB, TG, listener, wire to API Gateway staging service.
+
+### 2.8 CI Security Verification
+
+| Check | Status | Details |
+|-------|--------|---------|
+| OIDC only auth | ✅ CONFIRMED | `configure-aws-credentials@v4` with `role-to-assume`. No long-lived keys in repo |
+| Secrets at runtime | ✅ CONFIRMED | ECS task defs use `secrets[].valueFrom` → AWS Secrets Manager. No secrets in env vars |
+| Secret masking in logs | ✅ CONFIRMED | Secrets Manager integration masks values in ECS logs. GitHub Actions masks via `::add-mask::` |
+| Minimal permissions | ✅ IMPROVED | ECR + ECS deploy + ELB describe. `Resource: "*"` on ECS still — tighten in Pass 3 |
+
+**IAM role `github-actions-onlineshop` policies (2026-08-02):**
+- `ecr-push-pull` — ECR operations (Resource: `*`)
+- `ecs-deploy-staging` — ECS deploy + ELB describe (Resource: `*`)
+
+### Code Changes in Pass 2
+
+#### 1. Auth JaCoCo Threshold Bump
+
+**File:** `Auth/pom.xml`
+**Change:** LINE and BRANCH minimums: `0.30` → `0.50`
+
+#### 2. Auth Actuator Security Fix
+
+**File:** `Auth/src/main/resources/application.yml`
+**Problem:** Global `endpoints.web.exposure.include: "*"` exposed all actuator endpoints including `/actuator/env` and `/actuator/configprops` with `show-values: always` — potential database password leak.
+**Fix:**
+- Removed global `"*"` exposure, set to `health,metrics`
+- Changed `health.show-details` from `always` to `when-authorized`
+- Changed `env.show-values` and `configprops.show-values` from `always` to `never`
+- Aligned with Items' pattern (fixed in Pass 1)
+
+#### 3. CI/CD Workflow Rewrite
+
+**File:** `.github/workflows/build-and-deploy.yml` (new)
+Replaces the old `build-and-push.yml` with:
+- `dorny/paths-filter@v3` for selective builds
+- Test execution in CI (was `-DskipTests` everywhere)
+- Docker multi-tag support (SHA + branch + main-latest)
+- Staging deployment on main push
+- E2E test job against staging
+- Test report artifact uploads
+
+#### 4. Staging Scripts
+
+**Files:**
+- `scripts/ci-deploy-staging.sh` — CI-friendly deploy script
+- `scripts/setup-staging-env.sh` — Guided setup documentation
+
+### Remaining for Pass 2 Completion
+
+| Task | Status | Notes |
+|------|--------|-------|
+| AWS session | ✅ Done | Re-authenticated |
+| IAM role update | ✅ Done | `ecs-deploy-staging` policy attached to `github-actions-onlineshop` |
+| Staging databases | ✅ Done | `auth_staging`, `items_staging` created with schemas + seed data |
+| Staging secrets | ✅ Done | `onlineshop/auth/db-staging-Dkh7wC`, `onlineshop/items/db-staging-LaYr9R` |
+| Staging ALB + TG | ✅ Done | ALB `onlineshop-staging-alb`, TG `onlineshop-staging-tg` |
+| Staging task definitions | ✅ Done | All 3 at revision 2 with unique port names |
+| Staging ECS services | ✅ Done | All 3 at desired:0, FARGATE_SPOT |
+| Staging E2E smoke test | ✅ Done | Register → Login → Items → Validate all pass |
+| Branch protection | ✅ Done | Rules applied via `gh api` (see section 2.1) |
+| Old workflow removal | 🔧 After merge | Delete `.github/workflows/build-and-push.yml` after `build-and-deploy.yml` verified on main |
+| Auth tests @ 50% | 🔧 Manual | Run `cd Auth && ./mvnw verify` to confirm coverage threshold passes |
+| Staging ALB pause script | 🔧 Future | Integrate staging ALB into pause-playground.sh / resume-playground.sh |

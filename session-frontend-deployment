@@ -1,0 +1,422 @@
+# How S3 ErrorDocument works with React SPA routing
+
+**Session ID:** ses_03d936fb3ffe5mR7081tXb4a1a
+**Created:** 8/2/2026, 3:22:02 PM
+**Updated:** 8/2/2026, 4:55:40 PM
+
+---
+
+## User
+
+I have a question related to @explanations/frontend-aws-deployment.md :
+Why set ErrorDocument to index.html?
+
+In a React SPA, routing is handled by JavaScript in the browser. If a user directly visits /login, there is no login.html file on S3. Without the error document override, S3 would return a plain 404 XML error. By redirecting 404 → index.html, the React app loads and its router renders the login page. 
+
+What does that means - if I hit "/some" it wil return index.html. But how react will handle that and how it will understand that I tried to hit some? I am a bit confused, explain i ndetails
+
+---
+
+## Assistant (Build · DeepSeek V4 Pro · 14.7s)
+
+_Thinking:_
+
+The user is asking for a detailed explanation of how the S3 ErrorDocument redirect to index.html works with React, and how React understands which route the user intended when they visit a URL like `/some` directly.
+
+Let me explain this in detail:
+
+1. When a user types `https://example.com/some` in their browser, the browser sends a GET request to the server (S3 in this case) for the path `/some`.
+
+2. Since there's no `some.html` or `some/` directory with an index.html on S3, S3 would normally return a 404. But because we set `ErrorDocument: index.html`, S3 returns `index.html` with an HTTP 200 status code instead.
+
+3. The browser receives `index.html` - this is the React app's shell. The browser renders it, which loads the JavaScript bundle.
+
+4. **This is the key part**: When the browser loads the page, the JavaScript still has access to the **original URL** the user typed. React Router (or any client-side router) reads `window.location.pathname` which will be `/some`.
+
+5. React Router sees `window.location.pathname === '/some'` and matches it against the route definitions in the app. If there's a `<Route path="/some" component={SomeComponent} />`, it renders that component.
+
+The critical insight is: S3's ErrorDocument redirect is NOT an HTTP redirect (no 301/302). It's a response rewrite - S3 returns the content of `index.html` at the same URL the user requested. The browser's address bar still shows `/some`, and `window.location.pathname` is still `/some`. React Router reads that and handles it normally.
+
+This is different from a server-side redirect (HTTP 301/302) which would change the URL in the browser to `/index.html`, losing the original path.
+
+Let me write a clear, detailed explanation.
+
+Here's what happens step-by-step when a user visits `https://example.com/some`:
+
+### 1. The browser sends a GET request for `/some`
+`GET /some` → S3 looks for an object with key `some` — it doesn't exist.
+
+### 2. S3 serves `index.html` but keeps the original URL
+Because `ErrorDocument` is set to `index.html`, S3 returns the **content** of `index.html` as the response body, but it does **NOT** redirect the browser. The browser's address bar still shows `https://example.com/some`. Critically, this is an HTTP 200 response — not a 301/302 redirect. A 302 would change the address bar to `/index.html` and `window.location.pathname` would become `/index.html`, losing the original path. S3's ErrorDocument is a **response body swap**, not a redirect.
+
+### 3. The browser loads the React app
+The browser receives `index.html`, parses it, and downloads the JS bundle. The `window.location.pathname` still equals `"/some"`.
+
+### 4. React Router reads the current URL
+React Router uses the browser's History API internally — specifically, it reads `window.location.pathname`. So when it initializes, it sees:
+
+```
+window.location.pathname → "/some"
+```
+
+### 5. React Router matches the route
+It checks its route table:
+
+```jsx
+<Routes>
+  <Route path="/login" element={<Login />} />
+  <Route path="/items" element={<Items />} />
+  <Route path="/some"  element={<SomePage />} />   // ✅ matches!
+</Routes>
+```
+
+And renders the matching component. The whole trick hinges on S3 serving `index.html`'s content **without changing the URL the browser thinks it's at**, so React Router still sees the original path the user typed.
+
+---
+
+## User
+
+One more question "6.2 The distribution configuration" - how cloudfront knows which traffic is for the UI which is for the api gateway
+
+---
+
+## Assistant (Build · DeepSeek V4 Pro · 8.0s)
+
+_Thinking:_
+
+The user is asking about how CloudFront routes traffic between the two origins (S3 for frontend and ALB for API). I need to explain the cache behaviors mechanism - specifically how path patterns determine which origin handles which request.
+
+CloudFront uses **cache behaviors** — path-based routing rules. The key is the order they're evaluated:
+
+1. First, CloudFront checks if the request path matches any **explicit cache behavior** (lower-numbered `PathPattern` takes priority).
+2. If no match, it falls through to the **default cache behavior** (`Default (*)`).
+
+In our setup:
+
+| Priority | Path Pattern | Origin | Handles |
+|---|---|---|---|
+| 1 (explicit) | `/auth*` | `alb-api` | `/auth/login`, `/auth/register`, etc. |
+| 2 (explicit) | `/items*` | `alb-api` | `/items`, `/items/123`, etc. |
+| 3 (default) | `*` | `s3-frontend` | `/`, `/login`, `/assets/index.js`, everything else |
+
+So when a request arrives:
+- `GET /auth/login` → matches `/auth*` → sent to ALB (API Gateway)
+- `GET /items?page=2` → matches `/items*` → sent to ALB (API Gateway)
+- `GET /` → no explicit match → default `*` → sent to S3
+- `GET /login` → no explicit match → default `*` → sent to S3 → S3 returns `index.html` (React app handles routing)
+- `GET /assets/index-DEfIbenB.js` → default `*` → sent to S3 → served as static file
+
+The `*` wildcard matches zero or more characters, so `/auth*` catches anything starting with `/auth`, and `*` alone catches everything else. The path-based split is what lets a single CloudFront domain serve both the static frontend and the dynamic API seamlessly — the browser thinks it's talking to one server.
+
+---
+
+## User
+
+But where these rules/routes are configured
+
+---
+
+## Assistant (Build · DeepSeek V4 Pro · 13.0s)
+
+_Thinking:_
+
+The user is asking where these routing rules (cache behaviors) are configured in CloudFront. They want to know the practical mechanism - where do you actually set these up? Let me explain clearly.
+
+They're configured in the CloudFront distribution's **Cache Behaviors** tab. You define them when creating the distribution (or update them later) via:
+
+1. **AWS Console** — CloudFront → Distributions → select yours → Behaviors tab → Create Behavior
+
+2. **AWS CLI / JSON config** — this is what we used. The relevant section in our `cloudfront-distribution.json`:
+
+```json
+{
+  "CacheBehaviors": {
+    "Quantity": 2,
+    "Items": [
+      {
+        "PathPattern": "/auth*",
+        "TargetOriginId": "alb-api",
+        "ViewerProtocolPolicy": "redirect-to-https",
+        "MinTTL": 0,
+        "DefaultTTL": 0,
+        "MaxTTL": 0,
+        "ForwardedValues": {
+          "QueryString": true,
+          "Cookies": { "Forward": "all" },
+          "Headers": { "Items": ["Authorization", "Content-Type"] }
+        }
+      },
+      {
+        "PathPattern": "/items*",
+        "TargetOriginId": "alb-api",
+        ...
+      }
+    ]
+  },
+  "DefaultCacheBehavior": {
+    "TargetOriginId": "s3-frontend",
+    ...
+  }
+}
+```
+
+3. **Infrastructure-as-Code** (Terraform/CDK/CloudFormation) — same structure, different syntax.
+
+So the routing logic lives entirely inside the CloudFront distribution config on AWS's side — not in your app code. There's no nginx, no HAProxy, no reverse proxy you manage. CloudFront is the reverse proxy, and the cache behaviors ARE the routing table.
+
+---
+
+## User
+
+Forwarded values for API calls - in that section why we don't forward all Headers? Only answer, no changes
+
+---
+
+## Assistant (Build · DeepSeek V4 Pro · 4.5s)
+
+_Thinking:_
+
+The user is asking why we don't forward all headers for API calls, only specific ones like `Authorization` and `Content-Type`.
+
+Because forwarding all headers disables header-based cache key optimization — CloudFront can't cache anything when every possible request header variation creates a separate cache entry. We only need `Authorization` (for Bearer tokens) and `Content-Type` (for JSON parsing) to reach the backend; letting extra browser headers like `User-Agent` or `Accept-Language` vary the cache key would blow up the cache footprint with no benefit.
+
+---
+
+## User
+
+I d ont get it. Why chn't we forward all headers, but use onle 2-3 of them for cache key
+
+---
+
+## Assistant (Build · DeepSeek V4 Pro · 30.6s)
+
+_Thinking:_
+
+The user is asking a good question about CloudFront's behavior. They're asking: why can't we forward all headers to the origin but only use 2-3 of them for the cache key?
+
+Let me think about this. In CloudFront, the `ForwardedValues` configuration has two aspects:
+1. Which headers are forwarded to the origin
+2. Which headers are used as part of the cache key
+
+In the legacy CloudFront configuration (using `ForwardedValues`), the headers you specify in `Items` are BOTH forwarded to the origin AND used as part of the cache key. There's no separate "forward these but don't cache-key on them" in the legacy config.
+
+However, in the newer cache policy + origin request policy model, you CAN separate them:
+- Cache policy controls what goes into the cache key
+- Origin request policy controls what headers are forwarded to the origin
+
+But our documentation shows we're using the legacy `ForwardedValues` format. In that legacy format, they're the same list - you can't separate them.
+
+But actually, we have TTL=0 for API calls (no caching), so the cache key doesn't matter. So why not forward all headers then?
+
+The real reason is simpler: in the `ForwardedValues` model (which we're using), you either specify individual headers or you forward none. There's no "forward all" option in the `ForwardedValues.Items` model - you have to list them individually. You CAN whitelist "all" via the console but in the API/JSON there's a whitelist/none choice, not "all".
+
+Wait, actually let me reconsider. In the CloudFront API, `ForwardedValues.Headers` has:
+- `Quantity` and `Items` - a list of specific headers to forward
+- There IS actually a way to forward all headers, but it uses a different structure
+
+Actually, CloudFront does support forwarding all headers to the origin. You can set `ForwardedValues.Headers.Quantity` to a special value or use a different approach.
+
+But the answer the user is getting at is: since we have TTL=0 (no caching), why not forward all headers? The cache key is irrelevant anyway.
+
+Let me think about this more carefully... Actually in CloudFront, when you forward all headers, it also means CloudFront treats every variation of ANY header as a different cache key. Even with TTL=0, this could affect behavior. But more importantly, in the legacy API, there's no way to say "forward all headers to the origin but don't cache on them" - the forwarding list IS the cache key list.
+
+Wait, actually I think there IS a way in newer CloudFront. With cache policies and origin request policies (newer API), you can have:
+- Cache policy: specifies what creates cache keys (nothing, or specific headers)
+- Origin request policy: specifies what headers to forward to the origin (can be all)
+
+But our config uses the legacy `ForwardedValues` approach where the list is shared. However, since TTL=0, caching is disabled anyway, so the cache key concern is moot.
+
+Hmm, but the documentation says "Because forwarding all headers disables header-based cache key optimization" — that's the reason given in the doc. But the user is challenging this: with TTL=0, we don't cache, so why does cache key optimization matter?
+
+I think the real answer might be simpler: we're using the legacy format and it just doesn't support separating forwarding from cache key. But wait, in the legacy format with TTL=0, forwarding all headers is perfectly fine since nothing gets cached anyway.
+
+Let me reconsider... Maybe the doc is just explaining the general principle (why you shouldn't forward all headers when you DO cache), but the actual reason we only forward 2-3 in our specific case is different. Maybe it's just cleaner/simpler, or maybe there's a subtle gotcha.
+
+Actually, I think the answer is: you CAN forward all headers, and it would work fine since TTL=0. The doc's explanation is misleading/wrong in this context. The real reason to be selective is just minimalism — why forward 50 headers when you only need 2? It's cleaner config.
+
+But the user asked me to answer, so let me give a clear, concise answer. The key insight is: in the legacy CloudFront API (`ForwardedValues`), the header forwarding list and the cache key list are the **same list**. You can't forward all headers to the origin while only using a few for the cache key — they're one and the same. So "forward all" = "cache-key on all" = every unique `User-Agent` would create a separate cache entry, wasting edge storage. That's the actual coupling in the legacy API that the newer cache/origin request policies fix.
+
+But again, TTL=0 means no caching at all, so this concern is moot... unless CloudFront still does some internal bookkeeping even at TTL=0.
+
+I think the straightforward answer to the user is: you're right, with TTL=0 it doesn't matter. But in the legacy CloudFront API model we're using, there's no way to decouple "what to forward" from "what to use as cache key" — they're the same list. The newer Cache Policy + Origin Request Policy model does support this separation, but we're not using it.
+
+Let me give a concise answer.
+
+In the legacy CloudFront API we're using (`ForwardedValues`), the list of forwarded headers and the cache key are the **same list** — you can't forward one set and cache-key on a different set. They're coupled.
+
+Forwarding all headers would mean CloudFront also varies the cache key on every single one of them. So even if two users request `/items`, CloudFront would treat `User-Agent: Chrome` and `User-Agent: Firefox` as separate cache entries.
+
+That said, since we set `TTL=0` (no caching at all), this concern is technically moot — nothing gets cached regardless. So forwarding all headers would actually work fine here. We only forward `Authorization` and `Content-Type` out of minimalism, not necessity.
+
+---
+
+## User
+
+Start subagents to ivnestigate the best practiecs for these- should we restrict the headers we are forwarding to the api gateway or no? Only answer
+
+---
+
+## Assistant (Build · DeepSeek V4 Pro · 137.0s)
+
+_Thinking:_
+
+The user wants me to investigate best practices for whether to forward all headers or restrict them when using CloudFront with an API Gateway origin. Let me research this.
+
+Let me think about what I know and then search for best practices.
+
+Key considerations:
+1. CloudFront legacy API (ForwardedValues) couples header forwarding with the cache key
+2. Newer Cache Policy API decouples them
+3. Security implications of forwarding all headers
+4. Whether TTL=0 (no caching) makes this moot
+5. What headers should actually reach the backend
+
+Let me do some research on best practices.
+
+**Tool: task**
+
+**Input:**
+```json
+{
+  "description": "Research CloudFront header forwarding",
+  "prompt": "Research and summarize the best practices for whether to forward all headers vs restrict headers when using CloudFront in front of an API Gateway (like a Spring Boot backend). Specifically:\n\n1. In CloudFront's legacy ForwardedValues API, header forwarding and cache key are coupled. Is there a newer API (Cache Policy + Origin Request Policy) that decouples them?\n2. If TTL=0 (no caching for API calls), does the cache key concern even matter?\n3. What are the security implications of forwarding all browser headers to the backend? (e.g., Host, X-Forwarded-*, etc.)\n4. What do AWS docs/well-architected framework recommend — forward all headers or be selective?\n5. In a microservices architecture with an API gateway behind CloudFront, what headers are typically needed vs unnecessary?\n\nPlease provide a concise, opinionated answer with reasoning. Include links to AWS documentation if you find them relevant. This is for a learning/e-commerce project (not high-security production), but I want to know the right way.",
+  "subagent_type": "general"
+}
+```
+
+**Output:**
+```
+<task id="ses_03d44ad55ffeDBhKQhHJpha2Gk" state="completed">
+<task_result>
+Here's the summary:
+
+---
+
+## 1. Yes — Cache Policy + Origin Request Policy decouples them
+
+The legacy `ForwardedValues` API bundled "what goes into the cache key" and "what gets forwarded to the origin" into one opaque blob. Since ~2020, **Cache Policies** control the cache key, and **Origin Request Policies** control what gets forwarded. They're attached independently to the same cache behavior.
+
+> *"Origin request policies are separate from cache policies, which control the cache key. This way, you can receive additional information at the origin and also maintain a good cache hit ratio."*
+> — [AWS Docs](https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/controlling-origin-requests.html)
+
+## 2. No — if TTL=0, the cache key is irrelevant
+
+The `CachingDisabled` managed policy sets min/max/default TTL all to 0 and includes **zero headers/cookies/query strings** in the cache key. Nothing is ever cached, so there's nothing to vary on. No concern.
+
+## 3. Security implications of forwarding all headers
+
+**Don't do it.** Specific problems:
+
+- **`Host` header**: Your viewer sends `Host: your-distribution.cloudfront.net`. If forwarded to API Gateway or a Spring Boot backend, it can break host-based routing, return wrong URLs, or cause the origin to reject the request. AWS literally created `AllViewerExceptHostHeader` to solve this.
+- **`Cookie`**: JWT tokens in cookies plus session cookies get forwarded. Unnecessary bandwidth and exposes internal tokens to backend services that don't need them.
+- **`X-Forwarded-*`**: CloudFront sets these correctly. Forwarding the viewer's (spoofable) version of these headers can poison your backend's trust in `X-Forwarded-For` if not handled carefully.
+- **Browser fingerprinting headers**: `Sec-Ch-Ua-*`, `DNT`, etc. — irrelevant to your backend, just noise and potential PII leakage in logs.
+- **`Authorization`**: If you don't include it in the cache key but do forward it, you can serve cached authenticated responses to unauthenticated users (though this is moot at TTL=0).
+
+## 4. AWS recommends being selective
+
+AWS's own managed policies tell the story:
+
+| Policy | Forwards | Use case |
+|--------|----------|----------|
+| `CachingDisabled` | *nothing* in cache key | Dynamic API (your case) |
+| `AllViewerExceptHostHeader` | Everything except `Host` | **API Gateway / Lambda URLs specifically** |
+| `CORS-CustomOrigin` | Only `Origin` header | CORS preflight |
+| `UserAgentRefererHeaders` | Only `User-Agent`, `Referer` | Analytics |
+| `HostHeaderOnly` | Only `Host` | Bare minimum |
+
+The fact that `AllViewerExceptHostHeader` exists and explicitly calls out API Gateway tells you the recommended approach. There is no managed policy called "AllViewer" intended for APIs — `AllViewer` is generic, `AllViewerExceptHostHeader` is the API-specific one.
+
+## 5. What you actually need for a microservices API behind CloudFront
+
+**Forward these** (via a custom or managed origin request policy):
+
+| Header | Why |
+|--------|-----|
+| `Authorization` | JWT Bearer tokens |
+| `Content-Type` | Request body parsing |
+| `Accept` | Content negotiation (e.g., `application/problem+json`) |
+| `X-Request-Id` | Distributed tracing / correlation IDs |
+| CloudFront geo headers (`CloudFront-Viewer-Country` etc.) | If you do region-based pricing/shipping |
+
+**Do NOT forward**:
+
+| Header | Why |
+|--------|-----|
+| `Host` | Let CloudFront set it to the origin domain |
+| `Cookie` | Unless you use cookie-based auth (you probably don't) |
+| `Origin`, `Referer` | Irrelevant for API calls |
+| `Sec-*`, `DNT`, browser-specific headers | Noise |
+| `X-Forwarded-For` (from viewer) | CloudFront sets this correctly; viewer-supplied one is spoofable |
+
+---
+
+## Opinionated recommendation for your project
+
+**Cache policy**: `CachingDisabled` (`4135ea2d-6df8-44a3-9df3-4b5a84be39ad`)
+
+**Origin request policy**: `AllViewerExceptHostHeader` (`b689b0a8-53d0-40ab-baf2-68738e2966ac`) — this is the lazy-correct choice. It forwards everything the viewer sent (so you never accidentally drop a header you need later) but correctly strips the `Host` header so your API Gateway / Spring Boot backend works.
+
+If you want to be *strict*, create a custom origin request policy that only allows: `Authorization`, `Content-Type`, `Accept`, `X-Request-Id`, and optionally CloudFront viewer location headers. This is what I'd do for production, but for a learning project, `AllViewerExceptHostHeader` is fine and won't cause real problems.
+
+**Bottom line**: The one header you *must* exclude is `Host`. Beyond that, at TTL=0 with no caching, forwarding extras is mostly just wasteful, not dangerous — but in production, be selective.
+</task_result>
+</task>
+```
+
+---
+
+## Assistant (Build · DeepSeek V4 Pro · 5.6s)
+
+_Thinking:_
+
+The research is comprehensive. Let me summarize it concisely for the user.
+
+For your project: use `AllViewerExceptHostHeader` (a managed AWS policy) as the origin request policy. It forwards everything the viewer sent except the `Host` header — which is the one header you MUST strip because the viewer's `Host` is your CloudFront domain, not the ALB domain, and forwarding it can break backend routing.
+
+`CachingDisabled` as the cache policy, which you already have effectively with TTL=0.
+
+Being strict and forwarding only `Authorization`, `Content-Type`, `Accept` is cleaner for production, but `AllViewerExceptHostHeader` is the pragmatic "never accidentally drop a header you need" approach for a learning project.
+
+---
+
+## User
+
+What is "--distribution-id EPS8MI3FV3B7X "
+
+---
+
+## Assistant (Build · DeepSeek V4 Pro · 10.2s)
+
+_Thinking:_
+
+The user is asking what the `--distribution-id EPS8MI3FV3B7X` is in the context of CloudFront commands.
+
+The CloudFront distribution's unique identifier. When you create a distribution, AWS assigns it an ID like `EPS8MI3FV3B7X`. You use this ID in every CloudFront CLI command (`get-distribution`, `create-invalidation`, `update-distribution`, etc.) to tell AWS which distribution you're operating on.
+
+You can find yours with:
+
+```bash
+aws cloudfront list-distributions --query 'DistributionList.Items[*].{Id:Id,Domain:DomainName}' --profile dpm-profile --region us-east-1
+```
+
+---
+
+## User
+
+So what "distribution" means in clound front terminology
+
+---
+
+## Assistant (Build · DeepSeek V4 Pro · 4.9s)
+
+_Thinking:_
+
+The user is asking what "distribution" means in CloudFront terminology. The documentation file we already read covers this briefly in section 3, but let me give a clear, concise answer.
+
+A **distribution** is a single CloudFront CDN deployment. It's the top-level container that holds everything: your origins (S3, ALB), your cache behaviors (routing rules), your SSL certificate, your domain name, and so on.
+
+You can think of it as "one website" — all the configuration that makes `https://d2akuwv5pxgajc.cloudfront.net` work. If you had a second website, you'd create a second distribution with a different ID.
+
+---
+

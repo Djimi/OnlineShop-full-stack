@@ -1,0 +1,327 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches:
+      - 'feature/**'
+      - 'main'
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      service:
+        description: 'Service to build, test, and push'
+        required: true
+        type: choice
+        options:
+          - auth
+          - items
+          - api-gateway
+          - all
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  AWS_REGION: eu-north-1
+  ECR_REGISTRY: 799111666795.dkr.ecr.eu-north-1.amazonaws.com
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      auth: ${{ steps.resolve.outputs.auth }}
+      items: ${{ steps.resolve.outputs.items }}
+      api-gateway: ${{ steps.resolve.outputs.api-gateway }}
+      frontend: ${{ steps.resolve.outputs.frontend }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            auth:
+              - 'Auth/**'
+            items:
+              - 'Items/**'
+              - 'common/**'
+            api-gateway:
+              - 'api-gateway/**'
+            frontend:
+              - 'frontend/**'
+
+      - name: Resolve final changes
+        id: resolve
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            SERVICE="${{ github.event.inputs.service }}"
+            [ "$SERVICE" = "all" ] || [ "$SERVICE" = "auth" ] && echo "auth=true" >> $GITHUB_OUTPUT || echo "auth=false" >> $GITHUB_OUTPUT
+            [ "$SERVICE" = "all" ] || [ "$SERVICE" = "items" ] && echo "items=true" >> $GITHUB_OUTPUT || echo "items=false" >> $GITHUB_OUTPUT
+            [ "$SERVICE" = "all" ] || [ "$SERVICE" = "api-gateway" ] && echo "api-gateway=true" >> $GITHUB_OUTPUT || echo "api-gateway=false" >> $GITHUB_OUTPUT
+            [ "$SERVICE" = "all" ] && echo "frontend=true" >> $GITHUB_OUTPUT || echo "frontend=false" >> $GITHUB_OUTPUT
+          elif [ "${{ github.ref }}" = "refs/heads/main" ]; then
+            echo "auth=true" >> $GITHUB_OUTPUT
+            echo "items=true" >> $GITHUB_OUTPUT
+            echo "api-gateway=true" >> $GITHUB_OUTPUT
+            echo "frontend=true" >> $GITHUB_OUTPUT
+          else
+            echo "auth=${{ steps.filter.outputs.auth }}" >> $GITHUB_OUTPUT
+            echo "items=${{ steps.filter.outputs.items }}" >> $GITHUB_OUTPUT
+            echo "api-gateway=${{ steps.filter.outputs.api-gateway }}" >> $GITHUB_OUTPUT
+            echo "frontend=${{ steps.filter.outputs.frontend }}" >> $GITHUB_OUTPUT
+          fi
+
+  auth:
+    needs: changes
+    if: needs.changes.outputs.auth == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          java-version: '25'
+          distribution: 'temurin'
+
+      - uses: actions/cache@v4
+        with:
+          path: ~/.m2/repository
+          key: ${{ runner.os }}-maven-auth-${{ hashFiles('Auth/pom.xml') }}
+          restore-keys: |
+            ${{ runner.os }}-maven-auth-
+            ${{ runner.os }}-maven-
+
+      - name: Run tests with coverage
+        working-directory: Auth
+        run: chmod +x mvnw && ./mvnw verify
+
+      - name: Upload test report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: auth-test-report
+          path: Auth/target/reporting-output/
+          if-no-files-found: ignore
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        if: success()
+        with:
+          role-to-assume: arn:aws:iam::799111666795:role/github-actions-onlineshop
+          aws-region: ${{ env.AWS_REGION }}
+
+      - uses: aws-actions/amazon-ecr-login@v2
+        if: success()
+
+      - name: Compute Docker tags
+        id: tags
+        if: success()
+        run: |
+          SHA_TAG="$ECR_REGISTRY/onlineshop-auth:sha-${{ github.sha }}"
+          ALL_TAGS="$SHA_TAG"
+          if [[ "${{ github.ref }}" == refs/heads/feature/* ]]; then
+            BRANCH_TAG="$ECR_REGISTRY/onlineshop-auth:branch-$(echo '${{ github.ref_name }}' | sed 's/\//-/g')"
+            ALL_TAGS="$SHA_TAG,$BRANCH_TAG"
+          elif [ "${{ github.ref }}" = "refs/heads/main" ]; then
+            ALL_TAGS="$SHA_TAG,$ECR_REGISTRY/onlineshop-auth:main-latest"
+          fi
+          echo "tags=$ALL_TAGS" >> $GITHUB_OUTPUT
+
+      - uses: docker/setup-buildx-action@v3
+        if: success()
+
+      - uses: docker/build-push-action@v6
+        if: success()
+        with:
+          context: Auth
+          push: true
+          tags: ${{ steps.tags.outputs.tags }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  items:
+    needs: changes
+    if: needs.changes.outputs.items == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          java-version: '25'
+          distribution: 'temurin'
+
+      - uses: actions/cache@v4
+        with:
+          path: ~/.m2/repository
+          key: ${{ runner.os }}-maven-items-${{ hashFiles('Items/pom.xml', 'common/pom.xml') }}
+          restore-keys: |
+            ${{ runner.os }}-maven-items-
+            ${{ runner.os }}-maven-
+
+      - name: Build common dependency
+        working-directory: common
+        run: chmod +x mvnw && ./mvnw install -DskipTests
+
+      - name: Run tests with coverage
+        working-directory: Items
+        run: chmod +x mvnw && ./mvnw verify
+
+      - name: Upload test report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: items-test-report
+          path: Items/target/site/jacoco/
+          if-no-files-found: ignore
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        if: success()
+        with:
+          role-to-assume: arn:aws:iam::799111666795:role/github-actions-onlineshop
+          aws-region: ${{ env.AWS_REGION }}
+
+      - uses: aws-actions/amazon-ecr-login@v2
+        if: success()
+
+      - name: Compute Docker tags
+        id: tags
+        if: success()
+        run: |
+          SHA_TAG="$ECR_REGISTRY/onlineshop-items:sha-${{ github.sha }}"
+          ALL_TAGS="$SHA_TAG"
+          if [[ "${{ github.ref }}" == refs/heads/feature/* ]]; then
+            BRANCH_TAG="$ECR_REGISTRY/onlineshop-items:branch-$(echo '${{ github.ref_name }}' | sed 's/\//-/g')"
+            ALL_TAGS="$SHA_TAG,$BRANCH_TAG"
+          elif [ "${{ github.ref }}" = "refs/heads/main" ]; then
+            ALL_TAGS="$SHA_TAG,$ECR_REGISTRY/onlineshop-items:main-latest"
+          fi
+          echo "tags=$ALL_TAGS" >> $GITHUB_OUTPUT
+
+      - uses: docker/setup-buildx-action@v3
+        if: success()
+
+      - uses: docker/build-push-action@v6
+        if: success()
+        with:
+          context: .
+          file: Items/Dockerfile
+          push: true
+          tags: ${{ steps.tags.outputs.tags }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  api-gateway:
+    needs: changes
+    if: needs.changes.outputs.api-gateway == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          java-version: '25'
+          distribution: 'temurin'
+
+      - uses: actions/cache@v4
+        with:
+          path: ~/.m2/repository
+          key: ${{ runner.os }}-maven-api-gateway-${{ hashFiles('api-gateway/pom.xml') }}
+          restore-keys: |
+            ${{ runner.os }}-maven-api-gateway-
+            ${{ runner.os }}-maven-
+
+      - name: Run tests
+        working-directory: api-gateway
+        run: chmod +x mvnw && ./mvnw verify
+
+      - name: Upload test report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: api-gateway-test-report
+          path: api-gateway/target/surefire-reports/
+          if-no-files-found: ignore
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        if: success()
+        with:
+          role-to-assume: arn:aws:iam::799111666795:role/github-actions-onlineshop
+          aws-region: ${{ env.AWS_REGION }}
+
+      - uses: aws-actions/amazon-ecr-login@v2
+        if: success()
+
+      - name: Compute Docker tags
+        id: tags
+        if: success()
+        run: |
+          SHA_TAG="$ECR_REGISTRY/onlineshop-api-gateway:sha-${{ github.sha }}"
+          ALL_TAGS="$SHA_TAG"
+          if [[ "${{ github.ref }}" == refs/heads/feature/* ]]; then
+            BRANCH_TAG="$ECR_REGISTRY/onlineshop-api-gateway:branch-$(echo '${{ github.ref_name }}' | sed 's/\//-/g')"
+            ALL_TAGS="$SHA_TAG,$BRANCH_TAG"
+          elif [ "${{ github.ref }}" = "refs/heads/main" ]; then
+            ALL_TAGS="$SHA_TAG,$ECR_REGISTRY/onlineshop-api-gateway:main-latest"
+          fi
+          echo "tags=$ALL_TAGS" >> $GITHUB_OUTPUT
+
+      - uses: docker/setup-buildx-action@v3
+        if: success()
+
+      - uses: docker/build-push-action@v6
+        if: success()
+        with:
+          context: api-gateway
+          push: true
+          tags: ${{ steps.tags.outputs.tags }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  e2e-staging:
+    needs: [auth, items, api-gateway]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::799111666795:role/github-actions-onlineshop
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Deploy to staging
+        run: |
+          chmod +x scripts/ci-deploy-staging.sh
+          bash scripts/ci-deploy-staging.sh sha-${{ github.sha }}
+
+      - uses: actions/setup-java@v4
+        with:
+          java-version: '25'
+          distribution: 'temurin'
+
+      - uses: actions/cache@v4
+        with:
+          path: ~/.m2/repository
+          key: ${{ runner.os }}-maven-e2e-${{ hashFiles('e2e-tests/pom.xml') }}
+          restore-keys: |
+            ${{ runner.os }}-maven-e2e-
+
+      - name: Run E2E tests against staging
+        working-directory: e2e-tests
+        run: |
+          STAGING_URL=$(aws elbv2 describe-load-balancers \
+            --names onlineshop-staging-alb \
+            --query 'LoadBalancers[0].DNSName' \
+            --output text)
+          echo "Testing against staging: $STAGING_URL"
+          E2E_BASE_URL="http://$STAGING_URL" ./mvnw clean test
