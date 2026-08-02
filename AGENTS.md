@@ -95,28 +95,21 @@ See [docs/MULTI_WORKTREE.md](./docs/MULTI_WORKTREE.md) for full port isolation d
 ### Build and start
 
 ```bash
-# 1. Build common library (only needed once, or when common changes)
-cd common && ./mvnw clean install -DskipTests
-
-# 2. Build JARs for all services (run from root, builds in parallel)
-cd Auth && ./mvnw clean package -DskipTests &
-cd Items && ./mvnw clean package -DskipTests &
-cd api-gateway && ./mvnw clean package -DskipTests &
-wait
-
-# 3. Start everything (infrastructure + services + frontend)
+# Build every application image from the current source and start the full stack.
 docker compose up -d --build
 ```
 
-All services, databases, Redis, Kafka, and the frontend are defined in `docker-compose.yml`. The frontend auto-connects to the API gateway via `VITE_API_URL=http://localhost:<GATEWAY_PORT>` (set by compose `environment:`).
+`docker build` builds one image only. Use the Compose command above for the complete local stack: it builds Auth, Items, API Gateway, and frontend, then starts those containers plus the database and infrastructure containers.
 
-> Steps 1 and 2 are only needed **after code changes**. For simple stop/restart without changes, just `docker compose down` / `docker compose up -d`.
+All services, databases, Redis, Kafka, and the frontend are defined in `docker-compose.yml`. The Auth, Items, and API Gateway Dockerfiles compile their applications in a Maven build stage; the frontend image installs its dependencies and copies the current source. The frontend auto-connects to the API gateway via `VITE_API_URL=http://localhost:<GATEWAY_PORT>` (set by Compose `environment:`).
 
-> **Items multi-stage note:** Since Items' Dockerfile now uses a multi-stage build (Maven runs inside Docker), step 2 is unnecessary for Items — `docker compose build items-service` handles the full build. Steps 1-2 are still needed for Auth and api-gateway (they use host-side Maven).
+`--build` uses Docker's cache for unchanged layers and rebuilds layers affected by source changes. It is not a test command; run the service Maven or npm tests separately when needed. For a simple stop/restart without changes, use `docker compose down` / `docker compose up -d`.
+
+> **Build contexts:** Items uses the repository root as its context because it builds the `common` library first. Auth and API Gateway use their service directories. `common` is a library, not a separate deployable Compose service.
 
 ## Dockerfile Conventions
 
-1. **Multi-stage builds** — Use when a service depends on another project (e.g., Items → common). The Dockerfile does the full build inside Docker, eliminating the host-side `./mvnw package` step.
+1. **Self-contained application builds** — Java service Dockerfiles use multi-stage builds and run Maven inside Docker, eliminating a host-side `./mvnw package` prerequisite. Use the repository root as the context when a service depends on another project (e.g., Items → common).
 2. **Cache mounts** — Always use `--mount=type=cache,target=/root/.m2,id=maven-repo` on RUN lines that invoke Maven. Use an explicit `id=` so mounts are shared across RUN steps.
 3. **Base image tags** — Pin to a specific Alpine version (e.g., `eclipse-temurin:25.0.1_8-jre-alpine-3.23`), not a floating tag.
 4. **COPY granularity** — When a RUN step processes an entire directory tree, use `COPY dir/ dir/` (directory-level) not file-level COPY. File-level COPY is only justified when it creates a distinct layer that can be cached independently of sibling RUN steps. If all files feed a single RUN, use the simplest COPY possible.

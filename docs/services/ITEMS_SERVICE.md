@@ -50,8 +50,10 @@ Query params for GET list: `page`, `size`, `category`
 
 ### With Docker Compose
 ```bash
-docker compose up -d items-service items-postgres
+docker compose up -d --build items-service items-postgres
 ```
+
+`Items/Dockerfile` uses the repository root as its build context, installs the `common` library, and builds Items from source in Docker. A host-side `target/*.jar` is not required. From the repository root, `docker compose up -d --build` rebuilds and starts the complete stack.
 
 ### Standalone
 ```bash

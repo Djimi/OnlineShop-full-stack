@@ -65,7 +65,7 @@ All `container_name:` directives have been removed from `docker-compose.yml`. Co
 
 ## Daily Work
 
-- **Start**: `docker compose up -d --build` — plain compose, no wrapper.
+- **Start**: `docker compose up -d --build` — plain Compose, no wrapper. This builds application images from the current source; no host-side JAR packaging is needed.
 - **Stop**: `docker compose down` (add `-v` to drop volumes).
 - **Logs**: `docker compose logs -f items-service`.
 - **Status**: `docker compose ps`.

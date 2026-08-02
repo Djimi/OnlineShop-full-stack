@@ -124,10 +124,10 @@ Older in-progress builds on the same branch/PR are automatically cancelled when 
 
 ### 3.6 Service-Specific Build Details
 
-**Auth** (`Auth/Dockerfile` — single-stage):
-1. Host-side Maven test: `./mvnw verify` (produces JAR in `target/`)
-2. Docker build: `context: Auth`, copies `target/*.jar`
-3. Maven cache: `~/.m2/repository` via `actions/cache@v4`
+**Auth** (`Auth/Dockerfile` — multi-stage):
+1. Host-side Maven test: `./mvnw verify`
+2. Docker build: `context: Auth`, compiles the source in a Maven build stage, then copies the resulting JAR into the runtime image
+3. Maven cache: `~/.m2/repository` via `actions/cache@v4` for the host-side test job
 
 **Items** (`Items/Dockerfile` — multi-stage):
 1. Host-side: build `common` (`./mvnw install -DskipTests`)
@@ -136,11 +136,11 @@ Older in-progress builds on the same branch/PR are automatically cancelled when 
    - Build stage: `maven:3.9-eclipse-temurin-25`, builds `common` + `Items` with `-DskipTests` (tests already ran)
    - Run stage: `eclipse-temurin:25.0.1_8-jre-alpine-3.23`
 4. Docker layer cache: `cache-from: type=gha, cache-to: type=gha,mode=max`
-5. **Known gap:** Items' Dockerfile uses `--mount=type=cache,target=/root/.m2,id=maven-repo` for Maven deps inside Docker. This is a Docker build cache mount, separate from GHA's Maven cache. Maven deps inside the Docker build are not shared across CI runs. Consider a CI-specific Dockerfile for faster builds in Pass 3.
+5. The Docker Maven cache is separate from GHA's host-side Maven cache. Maven dependencies inside the Docker build are not shared across CI runs unless the Docker layer cache is restored.
 
-**API Gateway** (`api-gateway/Dockerfile` — single-stage):
+**API Gateway** (`api-gateway/Dockerfile` — multi-stage):
 1. Host-side Maven test: `./mvnw verify`
-2. Docker build: same pattern as Auth
+2. Docker build: `context: api-gateway`, compiles the source in a Maven build stage, then copies the resulting JAR into the runtime image
 
 ### 3.7 Caching Strategy
 
@@ -148,7 +148,7 @@ Older in-progress builds on the same branch/PR are automatically cancelled when 
 |-------|-----------|-------|
 | Host Maven deps | `actions/cache@v4` with `pom.xml` hash key | Auth, API Gateway, Items (host-side only) |
 | Docker layers | `docker/setup-buildx-action@v3` + `type=gha` | All 3 Docker builds |
-| Docker Maven (Items only) | `--mount=type=cache` in Dockerfile | Items Docker build only (not shared) |
+| Docker Maven | `--mount=type=cache` in each Java Dockerfile | Docker build only (separate from host Maven cache) |
 
 **Cache miss correctness:** Each cache uses `restore-keys` with progressive fallback (`*-maven-auth-` → `*-maven-`). If exact key misses, partial match restores best-effort cache. Maven re-downloads only missing dependencies.
 

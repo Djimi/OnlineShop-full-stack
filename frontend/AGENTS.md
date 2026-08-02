@@ -12,6 +12,14 @@ React + TypeScript SPA for the OnlineShop e-commerce platform.
 
 ## Build & Deploy
 
+### Docker Compose
+```bash
+# Run from the repository root
+docker compose up -d --build frontend
+```
+
+The frontend Dockerfile installs npm dependencies and copies the current source into a Vite development container. The Compose source mount keeps `frontend/src` live during development; rebuild after changing `package.json` or the lockfile. `docker compose up -d --build` rebuilds and starts the complete stack, including the frontend.
+
 ### Local Development
 ```bash
 cd frontend

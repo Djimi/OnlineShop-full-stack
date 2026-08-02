@@ -70,8 +70,10 @@ BCrypt with Spring Security's `PasswordEncoder`.
 
 ### With Docker Compose (Recommended)
 ```bash
-docker compose up -d auth-service auth-postgres
+docker compose up -d --build auth-service auth-postgres
 ```
+
+`Auth/Dockerfile` builds the service from source in a Maven build stage, so a host-side `target/*.jar` is not required. From the repository root, `docker compose up -d --build` rebuilds and starts the complete stack.
 
 ### Standalone
 ```bash

@@ -38,6 +38,16 @@ cd Items
 
 > **CRITICAL:** Never run `./mvnw -f ../Items/pom.xml` from a sibling directory. Always `cd` into `Items/` first.
 
+## Docker Compose Build
+
+Run from the repository root:
+
+```bash
+docker compose up -d --build items-service
+```
+
+`Items/Dockerfile` uses the repository root as its build context, installs `common`, and packages Items inside Docker. A host-side `target/*.jar` is not required. Use `docker compose up -d --build` to rebuild and start the complete stack.
+
 ## Dev Mode (Hot Restart with DevTools)
 
 Items has `spring-boot-devtools` for fast development. Edit a Java file, save, and DevTools restarts the application context automatically (~2 seconds).

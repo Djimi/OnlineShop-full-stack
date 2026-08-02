@@ -13,11 +13,21 @@
 ## Commands
 
 ```bash
-mvn clean install        # Build
-mvn spring-boot:run      # Run
-mvn spring-boot:run -Dspring-boot.run.arguments="--spring.profiles.active=db-troubleshooting"  # Run with DB diagnostics
-mvn test                 # Run all tests
+./mvnw clean install        # Build
+./mvnw spring-boot:run      # Run
+./mvnw spring-boot:run -Dspring-boot.run.arguments="--spring.profiles.active=db-troubleshooting"  # Run with DB diagnostics
+./mvnw test                 # Run all tests
 ```
+
+## Docker Compose Build
+
+Run from the repository root:
+
+```bash
+docker compose up -d --build auth-service
+```
+
+`Auth/Dockerfile` is a self-contained multi-stage build. It compiles the current source inside Docker, so a host-side `target/*.jar` is not required. Use `docker compose up -d --build` to rebuild and start the complete stack.
 
 ## Service Overview
 
