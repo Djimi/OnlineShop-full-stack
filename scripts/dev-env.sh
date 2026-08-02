@@ -11,10 +11,10 @@ set -euo pipefail
 #   scripts/dev-env.sh --check      Guard: exit 0 if safe to "up", 1 if not
 #   scripts/dev-env.sh --regenerate Down old stack, bump slot, rewrite
 #   scripts/dev-env.sh --exports    Print export variables for host-run dev
-#   scripts/dev-env.sh --set-slot N Force a specific slot (1-619)
+#   scripts/dev-env.sh --set-slot N Force a specific slot (1-631)
 # ====================================================================
 
-SLOT_COUNT=619
+SLOT_COUNT=631
 BLOCK_SIZE=20
 BASE_PORT=20000
 MARKER_START="# >>> dev-env (managed by scripts/dev-env.sh — do not edit between the markers)"

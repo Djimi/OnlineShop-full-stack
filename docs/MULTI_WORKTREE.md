@@ -27,14 +27,14 @@ scripts/dev-env.sh              # Create/refresh managed .env block for this wor
 scripts/dev-env.sh --check       # Guard: exit 0 if safe to 'up', 1 if you forgot dev-env.sh
 scripts/dev-env.sh --regenerate  # Down old stack, bump slot, rewrite .env
 scripts/dev-env.sh --exports     # Print export variables for host-run dev mode
-scripts/dev-env.sh --set-slot N  # Force a specific slot (1-619)
+scripts/dev-env.sh --set-slot N  # Force a specific slot (1-631)
 ```
 
 **Note:** `--set-slot` only rewrites `.env` with a new slot — it does NOT take down existing containers from a previous slot. Use `docker compose down` first if you want to stop the old stack, or use `--regenerate` for a migrating change.
 
 ## Port Mapping
 
-Each worktree gets a slot number (1-619). Services sit at fixed offsets within the slot's 20-port block:
+Each worktree gets a slot number (1-631). Services sit at fixed offsets within the slot's 20-port block:
 
 | Offset | Service | Slot-0 (legacy) | Slot N = 20000 + N×20 + offset |
 |--------|---------|-----------------|-------------------------------|
@@ -53,11 +53,11 @@ Each worktree gets a slot number (1-619). Services sit at fixed offsets within t
 
 All ports for a slot are sequential from the gateway: items = gateway+1, auth = gateway+2, etc. In Postman, set one variable (`gateway_url = http://localhost:<GATEWAY_PORT>`) and derive the rest by adding offsets.
 
-**Note:** Port offset derivation (gateway+N) only works for worktree slots (slots 1-619) where all ports live in a contiguous block. On the main checkout (slot 0), legacy ports are non-sequential — set each Postman variable individually.
+**Note:** Port offset derivation (gateway+N) only works for worktree slots (slots 1-631) where all ports live in a contiguous block. On the main checkout (slot 0), legacy ports are non-sequential — set each Postman variable individually.
 
 ## Collision Probability
 
-619 slots × 20-port blocks. With 8 worktrees active, the probability of two sharing the same initial hash-derived slot is ~4.4%. If a collision occurs, it is caught at generation time (bind check) or surfaces as a bind error at `docker compose up`. Recovery: `scripts/dev-env.sh --regenerate`.
+631 slots × 20-port blocks. With 8 worktrees active, the probability of two sharing the same initial hash-derived slot is ~4.3%. If a collision occurs, it is caught at generation time (bind check) or surfaces as a bind error at `docker compose up`. Recovery: `scripts/dev-env.sh --regenerate`.
 
 ## Container Names
 
