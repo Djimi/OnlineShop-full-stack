@@ -76,6 +76,24 @@ When using Maven commands you MUST use the Maven wrapper (`./mvnw`) inside the s
 
 ## Starting Services Locally
 
+### First time in a worktree (required before `docker compose up`)
+
+```bash
+scripts/dev-env.sh --check  # Agent pre-up guard — exits 1 if you forgot dev-env.sh
+```
+
+### First-time setup (run once):
+
+```bash
+scripts/dev-env.sh           # Assigns unique ports, writes .env
+```
+
+### Multi-worktree guide
+
+See [docs/MULTI_WORKTREE.md](./docs/MULTI_WORKTREE.md) for full port isolation details, collision recovery, host-run dev mode, and Postman setup.
+
+### Build and start
+
 ```bash
 # 1. Build common library (only needed once, or when common changes)
 cd common && ./mvnw clean install -DskipTests
@@ -90,7 +108,7 @@ wait
 docker compose up -d --build
 ```
 
-All services, databases, Redis, Kafka, and the frontend are defined in `docker-compose.yml`. The frontend auto-connects to the API gateway inside the Docker network via `VITE_API_URL=http://api-gateway:10000`.
+All services, databases, Redis, Kafka, and the frontend are defined in `docker-compose.yml`. The frontend auto-connects to the API gateway via `VITE_API_URL=http://localhost:<GATEWAY_PORT>` (set by compose `environment:`).
 
 > Steps 1 and 2 are only needed **after code changes**. For simple stop/restart without changes, just `docker compose down` / `docker compose up -d`.
 

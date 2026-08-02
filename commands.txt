@@ -1,4 +1,4 @@
-docker run -p 5050:80 --name pgadmin --network onlineshop-claude_onlineshop-network -e PGADMIN_DEFAULT_EMAIL=admin@admin.com -e PGADMIN_DEFAULT_PASSWORD=admin -d dpage/pgadmin4
+docker compose up -d pgadmin
 
 -------------------
 
