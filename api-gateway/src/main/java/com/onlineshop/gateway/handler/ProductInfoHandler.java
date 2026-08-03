@@ -6,6 +6,8 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.servlet.function.ServerRequest;
 import org.springframework.web.servlet.function.ServerResponse;
 
+import java.util.UUID;
+
 @Component
 public class ProductInfoHandler {
 
@@ -15,6 +17,7 @@ public class ProductInfoHandler {
     public ServerResponse getProductInfo(ServerRequest request) {
         return ServerResponse.ok()
                 .contentType(MediaType.APPLICATION_JSON)
+                .header("randomheader", UUID.randomUUID().toString())
                 .body(RESPONSE);
     }
 }
