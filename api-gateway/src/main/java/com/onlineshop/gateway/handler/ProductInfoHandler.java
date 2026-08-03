@@ -18,6 +18,7 @@ public class ProductInfoHandler {
         return ServerResponse.ok()
                 .contentType(MediaType.APPLICATION_JSON)
                 .header("randomheader", UUID.randomUUID().toString())
+                .header("anotherrandomheader", UUID.randomUUID().toString())
                 .body(RESPONSE);
     }
 }
