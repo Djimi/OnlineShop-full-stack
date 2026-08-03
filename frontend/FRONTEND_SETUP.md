@@ -70,13 +70,13 @@ Ensure you have the following installed:
   - Auth Service on port 9001
   - Items Service on port 9000
 
-### 2. Start Backend Services
+### 2. Start the Stack
 
-Before starting the frontend, ensure the backend is running:
+The Compose command builds application images from the current source and starts the backend, infrastructure, and containerized frontend:
 
 ```bash
 # From the repository root
-docker compose up -d
+docker compose up -d --build
 ```
 
 This starts:
@@ -85,17 +85,21 @@ This starts:
 - Auth Service (port 9001)
 - Items Service (port 9000)
 - API Gateway (port 10000)
+- Frontend development server (port 5173)
 
 Verify services are running:
 ```bash
 docker compose ps
 ```
 
-### 3. Install Dependencies
+### 3. Optional Host-Run Frontend
 
-Navigate to the frontend directory and install npm packages:
+The Compose command above already starts the frontend. To run Vite on the host instead, stop the Compose frontend first and install dependencies locally:
+
+From the repository root:
 
 ```bash
+docker compose stop frontend
 cd frontend
 npm install
 ```
@@ -335,7 +339,7 @@ Error: Request failed with status code 0
 
 **Solution**: Ensure backend services are running:
 ```bash
-docker compose up -d
+docker compose up -d --build
 docker compose ps  # Verify all services are running
 ```
 

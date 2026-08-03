@@ -41,4 +41,4 @@ RUN apt-get update \
 # --- Non-root user ----------------------------------------------------------
 # Base image already provides the "vscode" user (uid 1000).
 USER vscode
-WORKDIR /workspaces/OnlineShop-claude
+WORKDIR /workspaces/OnlineShop-full-stack

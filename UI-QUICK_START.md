@@ -2,17 +2,12 @@
 
 ## 30-Second Setup
 
-### Terminal 1: Start Backend
+### Terminal 1: Start Full Stack
 ```bash
-docker compose up -d
+docker compose up -d --build
 ```
 
-### Terminal 2: Start Frontend
-```bash
-cd frontend
-npm install  # Only first time
-npm run dev
-```
+This builds the Auth, Items, API Gateway, and frontend images from the current source, then starts the databases and supporting infrastructure.
 
 ### Browser
 Open: **http://localhost:5173**

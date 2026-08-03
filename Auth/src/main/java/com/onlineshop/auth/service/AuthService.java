@@ -136,7 +136,9 @@ public class AuthService {
         log.info("Validate operation db.findValidationProjectionByTokenHash completed in {} ms",
                 elapsedMillis(findSessionStartedAt));
 
-        if (session == null || now.isAfter(session.getExpiresAt())) {
+        if (session == null
+                || now.isBefore(session.getCreatedAt())
+                || now.isAfter(session.getExpiresAt())) {
             log.info("Validate service completed in {} ms with valid=false", elapsedMillis(requestStartedAt));
             return ValidateResponse.builder()
                     .valid(false)

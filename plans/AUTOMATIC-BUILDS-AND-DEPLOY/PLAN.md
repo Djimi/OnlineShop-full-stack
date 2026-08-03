@@ -20,7 +20,7 @@ After Pass 1 you have a **working deployment**. After Pass 4 you satisfy **every
 1. [01_MVP_DEPLOY.md](./01_MVP_DEPLOY.md) — AWS account, ECR, minimal GH Actions, ECS Fargate, S3+CloudFront, databases
 2. [02_CI_PIPELINE_HARDENING.md](./02_CI_PIPELINE_HARDENING.md) — Branch protection, selective builds, test gates, Docker tagging, caching, staging
 3. [03_RELEASE_TRACEABILITY.md](./03_RELEASE_TRACEABILITY.md) — Release identity, promotion flow, production env, rollback, traceability chain, ECR retention
-4. [04_OPERATIONAL_MATURITY.md](./04_OPERATIONAL_MATURITY.md) — Notifications, dashboards, audit, merge queue, nightly builds, runbooks, cost monitoring
+4. [04_OPERATIONAL_MATURITY.md](./04_OPERATIONAL_MATURITY.md) — Notifications, dashboards, audit, merge queue, nightly builds, runbooks, cost monitoring, PR/branch-protection policy review
 5. [05_FUTURE_IMPROVEMENTS.md](./05_FUTURE_IMPROVEMENTS.md) — Non-mandatory improvements for later (Dependabot, etc.)
 
 ---
@@ -97,7 +97,31 @@ Every step executed in this plan **MUST** update [`executed/INFO.md`](./executed
 ## Progress
 
 - [x] **Pass 1** — MVP: Running on AWS (DONE — ECS + RDS + CI/CD + S3 + CloudFront + frontend deployed; ALB active during verification, now paused)
-- [ ] **Pass 2** — CI Pipeline Hardening & Staging (basic caching from Pass 1, nothing else started)
+- [x] **Pass 2** — CI Pipeline Hardening & Staging (DONE — workflow with change detection + test gates + selective builds + Docker tagging; staging infra provisioned + smoke tested; branch protection applied via `gh api`)
 - [ ] **Pass 3** — Release, Traceability & Promotion
 - [ ] **Pass 4** — Operational Maturity
 - [ ] **Pass 5** — Future Improvements (non-mandatory)
+
+---
+
+## Known Issues & Resolutions
+
+### Resolved ✅
+
+| Issue | Resolution |
+|-------|-----------|
+| ✅ Private RDS unreachable for SQL ops (no public access, private subnets) | One-off Fargate psql task pattern, codified in `scripts/ecs-run-sql.sh` (see [AWS_COMMANDS_GUIDE.md Part D](./AWS_COMMANDS_GUIDE.md)) |
+| ✅ Schema apply reported exit 0 but tables missing (`missing table [sessions]` crash loop) | Caused by JSON-escaping bugs in hand-built container commands + no read-back verification. Fixed by `ecs-run-sql.sh` (base64 SQL transport) + mandatory `--verify` in the same run |
+| ✅ Service Connect `SC service is already used` / `portName does not refer to any named PortMapping` | SC portName must match container `portMappings[].name` AND be unique per Cloud Map namespace. Staging TDs use `*-staging-port` names |
+| ✅ `launch type and capacity provider strategy` conflict on service create | Mutually exclusive flags — staging/prod services use `--capacity-provider-strategy FARGATE_SPOT` only |
+| ✅ Container `secrets` rejected without `executionRoleArn` | All TDs include `executionRoleArn: ecsTaskExecutionRole` |
+| ✅ ECS stopped launching tasks after crash loop (`desired:1, running:0`) | ECS deployment circuit-breaker behavior; resolved with `--force-new-deployment` after root-cause fix |
+| ✅ Master DB password plaintext in 11 helper TD revisions; staging passwords in session logs (2026-08-02) | Master creds moved to `onlineshop/rds/master` secret; exec role policy extended; both staging passwords rotated (verified by connecting as each service account); 11 revisions permanently purged via `delete-task-definitions` |
+| ✅ Long blocking poll loops hit shell timeouts (120s + 600s lost) | Rule added to `AGENTS.md`: no blocking polls; use `aws ecs wait services-stable` or short bounded loops |
+
+### Open
+
+| Issue | Notes |
+|-------|-------|
+| ✅ Duplicate `build-and-push.yml` workflow | Removed; `build-and-deploy.yml` is the single active CI/CD workflow after merge |
+| ⬜ Staging services don't auto-scale to 0 after E2E | Deliberate in Pass 2; automated teardown planned for Pass 3 |

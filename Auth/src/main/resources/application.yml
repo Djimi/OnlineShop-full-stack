@@ -43,31 +43,21 @@ session:
 
 
 management:
-  # Individual endpoint settings (singular)
-  endpoint:
-    web:
-      exposure:
-        include: health,metrics,prometheus
-    health:
-      show-details: always
-      group:
-        liveness:
-          show-details: always
-        readiness:
-          show-details: always
-        custom:
-          include: [db, ssl]
-    env:
-      show-values: always
-    configprops:
-      show-values: always
-
-  # Global exposure settings (plural)
+  health:
+    show-details: when-authorized
+    group:
+      liveness:
+        show-details: when-authorized
+      readiness:
+        show-details: when-authorized
+  env:
+    show-values: never
+  configprops:
+    show-values: never
   endpoints:
     web:
       exposure:
-        include: "*"
-
+        include: health,metrics
   metrics:
     tags:
       application: auth

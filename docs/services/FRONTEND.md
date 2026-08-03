@@ -57,6 +57,14 @@ frontend/src/
 
 ## Development
 
+### With Docker Compose (Recommended)
+```bash
+# Run from the repository root
+docker compose up -d --build frontend
+```
+
+The frontend Dockerfile installs npm dependencies and copies the current source into the Vite development container. The Compose source mount keeps `frontend/src` live during development; rebuild after changing `package.json` or the lockfile. Use `docker compose up -d --build` to rebuild and start the complete stack.
+
 ### Start Dev Server
 ```bash
 cd frontend

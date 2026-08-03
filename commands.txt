@@ -68,4 +68,4 @@ mvn package -Dmaven.test.skip=true
 Remove buggy nul file:
 
 
-rename \\.\D:\CodingProjects\OnlineShop-claude\nul deletefile.txt 
+rename \\.\D:\CodingProjects\OnlineShop-full-stack\nul deletefile.txt

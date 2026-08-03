@@ -1,11 +1,14 @@
 # Debug Info
 
-> **Important:** When making code changes to backend services, you MUST:
-> 1. Build the JAR with Maven from the service directory (`./mvnw clean package`)
-> 2. Stop the running service (`docker compose down <service-name>`)
-> 3. Rebuild the Docker image from root (`docker compose up -d --build <service-name>`)
+> **Important:** Java service Dockerfiles build from source in Docker. When making code changes, rebuild and restart the affected service from the repository root:
 >
-> Without step 1, the Docker image will use the old JAR and changes won't apply.
+> ```bash
+> docker compose up -d --build <service-name>
+> ```
+>
+> A host-side Maven package and manual `docker compose down` are not required. Docker reuses unchanged layers and includes changes from the service build context.
+>
+> `docker build` builds one image; use `docker compose up -d --build` when you want to rebuild and start the complete stack.
 
 ## Multi-Worktree Port Conflicts
 
@@ -39,8 +42,8 @@ See [docs/MULTI_WORKTREE.md](./MULTI_WORKTREE.md) for full multi-worktree guide.
 > **Note:** All `docker compose` commands must be run from the root project directory.
 
 ```bash
-# Start all services
-docker compose up -d
+# Build current application sources and start all services
+docker compose up -d --build
 
 # Stop all services
 docker compose down
@@ -49,11 +52,11 @@ docker compose down
 # DANGER: Only run when explicitly requested and confirmed by user
 docker compose down -v
 
-# Apply code changes to a service (MUST build JAR first, then rebuild container)
-# Run from service directory (e.g., Items/, Auth/, api-gateway/, etc):
-./mvnw clean package -DskipTests
-# Then rebuild the Docker image:
+# Apply code changes to a service (run from the repository root)
 docker compose up -d --build <service-name>
+
+# Host-side package is optional and is not needed by Docker Compose:
+# cd <service-directory> && ./mvnw clean package -DskipTests
 
 # Run unit + integration tests (from service directory)
 ./mvnw clean test
@@ -104,14 +107,14 @@ aws ecr describe-images --repository-name onlineshop-auth --region eu-north-1
 # Verify pushed images in ECR
 aws ecr describe-images --repository-name onlineshop-auth --region eu-north-1 --query "imageDetails[*].imageTags[0]"
 
-# Trigger workflow manually (only works after merging to main)
-gh workflow run "Build & Push to ECR" -f service=all
+# Trigger the CI/CD workflow manually (after it is available from main)
+gh workflow run "CI/CD Pipeline" -f service=all
 
 # View workflow run logs
 gh run view <run-id> --log
 
 # List recent workflow runs
-gh run list --workflow="Build & Push to ECR" --limit 5
+gh run list --workflow="CI/CD Pipeline" --limit 5
 
 # Check gh CLI auth status
 gh auth status

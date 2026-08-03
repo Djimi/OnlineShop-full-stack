@@ -63,8 +63,10 @@ gateway.cache.operations.total{layer="l1", service="auth", result="hit"}
 
 ### With Docker Compose (Recommended)
 ```bash
-docker compose up -d api-gateway
+docker compose up -d --build api-gateway
 ```
+
+`api-gateway/Dockerfile` builds the service from source in a Maven build stage, so a host-side `target/*.jar` is not required. From the repository root, `docker compose up -d --build` rebuilds and starts the complete stack.
 
 ### Standalone
 ```bash

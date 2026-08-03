@@ -9,7 +9,7 @@ A VS Code Dev Container that lets you run **all** OnlineShop services from sourc
 2. Install [VS Code](https://code.visualstudio.com/) and the **Dev Containers** extension (`ms-vscode-remote.remote-containers`).
 
 **Open the project inside the container:**
-1. Open the repo root in VS Code: `File` → `Open Folder` → `D:\CodingProjects\OnlineShop-claude`.
+1. Open the repo root in VS Code: `File` → `Open Folder` → `D:\CodingProjects\OnlineShop-full-stack`.
 2. **Stop any previously running compose stack** from the root: `docker compose down` in PowerShell. (The root `docker-compose.yml` maps the same ports as the devcontainer — e.g., port 10000 for api-gateway — so leftover containers will cause "port already in use" errors.)
 3. `Ctrl+Shift+P` → **Dev Containers: Reopen in Container**.
 4. First image build takes ~2–3 min (image pull, JDK 25 + Node LTS install). Subsequent reopens take seconds.
@@ -18,7 +18,7 @@ A VS Code Dev Container that lets you run **all** OnlineShop services from sourc
 **First-time setup (only needed once — cached in named volumes):**
 ```bash
 # Maven deps (~3-5 min total, run in parallel or sequentially)
-cd /workspaces/OnlineShop-claude
+cd /workspaces/OnlineShop-full-stack
 (cd Auth && ./mvnw -DskipTests compile) &
 (cd Items && ./mvnw -DskipTests compile) &
 (cd api-gateway && ./mvnw -DskipTests compile) &
@@ -129,7 +129,7 @@ Everything is reachable from your Windows host as `http://localhost:<port>` exac
 
 - **Code change:** none required — `..` is bind-mounted into the container.
 - **devcontainer.json or Dockerfile change:** `Ctrl+Shift+P` → "Dev Containers: Rebuild Container".
-- **Wipe Maven cache:** `docker volume rm onlineshop-claude_onlineshop-m2` (Compose project name varies; `docker volume ls` to find it).
+- **Wipe Maven cache:** `docker volume rm <compose-project>_onlineshop-m2` (Compose project name varies; use `docker volume ls` to find it).
 
 ## Troubleshooting
 

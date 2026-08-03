@@ -11,6 +11,19 @@ The API Gateway is the entry point to OnlineShop services. It routes traffic, en
 | Location   | `/api-gateway`                         |
 | Database   | None (uses Redis for caching/limits)   |
 
+## Docker Compose Build
+
+Run from the repository root:
+
+```bash
+docker compose up -d --build api-gateway
+```
+
+`api-gateway/Dockerfile` is a self-contained multi-stage build. It compiles the current source inside Docker, so a host-side `target/*.jar` is not required. Use `docker compose up -d --build` to rebuild and start the complete stack.
+
+## CI/CD
+
+The CI pipeline runs `./mvnw verify` before publishing the API Gateway image. Pull-request builds create Docker images without requesting AWS credentials or pushing to ECR.
 
 ## Responsibilities
 

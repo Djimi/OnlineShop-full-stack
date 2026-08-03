@@ -9,7 +9,7 @@ A modern, production-ready React 19 UI has been created for the OnlineShop appli
 ## 📁 Project Location
 
 ```
-d:\CodingProjects\OnlineShop-claude\frontend/
+d:\CodingProjects\OnlineShop-full-stack\frontend/
 ```
 
 ## 🎯 What Was Built
@@ -94,8 +94,8 @@ d:\CodingProjects\OnlineShop-claude\frontend/
 ### Step 1: Start Backend Services
 
 ```bash
-# From repository root
-docker compose up -d
+# From repository root; builds application images from current source
+docker compose up -d --build
 
 # Verify all services are running
 docker compose ps
@@ -107,6 +107,7 @@ Expected services:
 - Auth Service (port 9001)
 - Items Service (port 9000)
 - API Gateway (port 10000)
+- Frontend development server (port 5173)
 
 ### Step 2: Install Dependencies
 

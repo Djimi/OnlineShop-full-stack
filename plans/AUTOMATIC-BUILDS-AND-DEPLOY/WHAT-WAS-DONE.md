@@ -23,15 +23,15 @@ Naming convention: `onlineshop-<service>` (no slashes, fixed from initial mistak
 
 ## Step 1.3 — GitHub Actions Build & Push ✅
 
-Workflow: `.github/workflows/build-and-push.yml`
-- Trigger: `workflow_dispatch` with service input (`auth`/`items`/`api-gateway`/`all`)
-- OIDC auth → ECR login → Maven build → Docker build → push with `sha-<FULL_SHA>` tag
+Workflow: `.github/workflows/build-and-deploy.yml`
+- Triggers: pushes to `feature/**` and `main`, pull requests to `main`, and `workflow_dispatch`
+- Selective test gates, OIDC auth, ECR login, Maven build, Docker build, and push with `sha-<FULL_SHA>` tags
 - Items job builds `common` first (dependency)
 - Maven caching via `actions/cache@v4` with `pom.xml` hash keys
 - Docker layer caching via BuildKit (`setup-buildx-action` + `type=gha`)
 
 IAM role for GitHub Actions: `arn:aws:iam::799111666795:role/github-actions-onlineshop`
-- Trust policy: OIDC from `repo:Djimi/OnlineShop-claude:*`
+- Applied trust policy: OIDC from configured subject `repo:Djimi@8793507/OnlineShop-full-stack@1097550215` on `main` and `feature/*` branch refs
 - Inline policy: `ecr-push-pull` for ECR operations
 
 ## Step 1.4a — RDS Provisioning ✅
@@ -258,3 +258,40 @@ curl -s -o /dev/null -w "%{http_code}" -X OPTIONS "$CF/auth/login" -H "Origin: h
 - API path prefixing (`/api/*`) to separate frontend routes from API endpoints (fixes direct-navigation collision on `/items`)
 - CloudFront cache invalidation is manual — integrate into CI/CD pipeline
 
+---
+
+## Pass 2 — CI Pipeline Hardening & Staging (2026-08-02)
+
+### 2.4 — Auth JaCoCo Coverage Threshold Bump ✅
+
+- LINE and BRANCH minimums: `0.30` → `0.50` in `Auth/pom.xml`
+
+### 2.4 — Auth Actuator Security Fix ✅
+
+- **Problem:** `endpoints.web.exposure.include: "*"` with `env.show-values: always` — potential DB password leak via `/actuator/env`
+- **Fix:** Restricted exposure to `health,metrics`, changed `show-values` to `never`, aligned with Items pattern
+
+### 2.2-2.5 — CI/CD Workflow Rewrite ✅
+
+- **New file:** `.github/workflows/build-and-deploy.yml`
+- **Triggers:** push to `feature/**` and `main`, PR to `main`, `workflow_dispatch`
+- **Change detection:** `dorny/paths-filter@v3` with dependency-aware filters
+- **Test gates:** `./mvnw verify` (was `mvnw package -DskipTests` in old workflow)
+- **Concurrency:** Cancel in-progress on same branch/PR
+- **Docker tags:** `sha-<SHA>` always, `branch-<name>` on feature, `main-latest` on main
+- **E2E staging job:** Deploy to staging + run E2E tests (on push to main)
+
+### 2.7 — Staging Scripts Created ✅
+
+- `scripts/ci-deploy-staging.sh` — Deploys images to staging ECS services
+- `scripts/setup-staging-env.sh` — Guided setup for staging infrastructure (prints commands)
+
+### Pending (needs AWS re-authentication)
+
+- [ ] IAM role update: add ECS deploy + ELB describe permissions
+- [ ] Staging databases: `auth_staging`, `items_staging` on RDS
+- [ ] Staging Secrets Manager entries
+- [ ] Staging ALB + target group + listener
+- [ ] Staging task definitions (3 services)
+- [ ] Staging ECS services (3, desired:0)
+- [ ] Branch protection on `main`

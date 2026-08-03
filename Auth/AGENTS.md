@@ -13,11 +13,21 @@
 ## Commands
 
 ```bash
-mvn clean install        # Build
-mvn spring-boot:run      # Run
-mvn spring-boot:run -Dspring-boot.run.arguments="--spring.profiles.active=db-troubleshooting"  # Run with DB diagnostics
-mvn test                 # Run all tests
+./mvnw clean install        # Build
+./mvnw spring-boot:run      # Run
+./mvnw spring-boot:run -Dspring-boot.run.arguments="--spring.profiles.active=db-troubleshooting"  # Run with DB diagnostics
+./mvnw test                 # Run all tests
 ```
+
+## Docker Compose Build
+
+Run from the repository root:
+
+```bash
+docker compose up -d --build auth-service
+```
+
+`Auth/Dockerfile` is a self-contained multi-stage build. It compiles the current source inside Docker, so a host-side `target/*.jar` is not required. Use `docker compose up -d --build` to rebuild and start the complete stack.
 
 ## Service Overview
 
@@ -35,7 +45,11 @@ Standard Spring Boot layered architecture: `controller/` → `service/` → `rep
 | POST   | `/api/v1/auth/login`       | User login             |
 | GET    | `/api/v1/auth/validate`    | Validate session token |
 
-**Validate contract:** invalid tokens return HTTP `200` with `valid=false` in the response body, not a 4xx error.
+**Validate contract:** invalid tokens return HTTP `200` with `valid=false` in the response body, not a 4xx error. A session is valid only when the current time is between its `createdAt` and `expiresAt` values, inclusive.
+
+## CI/CD
+
+The CI pipeline runs `./mvnw verify` before publishing Auth images. Pull-request builds create Docker images without requesting AWS credentials or pushing to ECR.
 
 ## Database
 
