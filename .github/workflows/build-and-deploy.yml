@@ -40,7 +40,12 @@ jobs:
       api-gateway: ${{ steps.resolve.outputs.api-gateway }}
       frontend: ${{ steps.resolve.outputs.frontend }}
     steps:
+      # Fetch 20 commits instead of the default shallow single commit so
+      # dorny/paths-filter can find the merge-base with the base branch locally,
+      # avoiding extra git fetch roundtrips (it auto-fetches more if needed).
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 20
 
       - uses: dorny/paths-filter@v3
         id: filter
