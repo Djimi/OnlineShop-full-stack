@@ -14,15 +14,21 @@ set -euo pipefail
 #     after a successful run, so no residue accumulates.
 #
 # Usage:
-#   scripts/ecs-run-sql.sh --database <db> --file <path.sql> [--verify "<sql>"]
-#   scripts/ecs-run-sql.sh --database <db> --command "<sql>" [--verify "<sql>"]
+#   scripts/ecs-run-sql.sh --database <db> --file <path.sql> --verify "<sql>"
+#   scripts/ecs-run-sql.sh --database <db> --command "<sql>" --verify "<sql>"
+#   scripts/ecs-run-sql.sh --database <db> --file <path.sql> --read-only
+#   scripts/ecs-run-sql.sh --database <db> --command "<sql>" --read-only
 #
 # Options:
 #   --database DB       Target database (e.g. postgres, auth_staging) [required]
 #   --file PATH         SQL file to apply (psql -f, ON_ERROR_STOP=1)
 #   --command SQL       Inline SQL (applied via psql -f after base64 decode)
 #   --verify SQL        Extra SQL run after the main one; use it to PROVE the
-#                       mutation worked (e.g. --verify "\dt"). Strongly recommended.
+#                       mutation worked (e.g. --verify "\dt"). Required unless
+#                       --read-only is set. Every mutation MUST use --verify.
+#   --read-only         Declare this run is read-only (SELECT, EXPLAIN, etc.).
+#                       Skips the --verify requirement. Mutating without --verify
+#                       is prohibited per project rules.
 #   --user NAME         DB user [default: dbadmin]
 #   --secret ID         Secrets Manager id holding {"username","password"} for
 #                       --user [default: onlineshop/rds/master]
@@ -43,7 +49,12 @@ set -euo pipefail
 #   # Rotate a password without ever printing it (update SM secret FIRST):
 #   scripts/ecs-run-sql.sh --database postgres \
 #     --command "ALTER ROLE auth_app_staging WITH LOGIN PASSWORD :'NEW_PASS';" \
-#     --extra-secret NEW_PASS=onlineshop/auth/db-staging:password
+#     --extra-secret NEW_PASS=onlineshop/auth/db-staging:password \
+#     --verify "SELECT 1 FROM pg_roles WHERE rolname='auth_app_staging';"
+#
+#   # Run a read-only query:
+#   scripts/ecs-run-sql.sh --database auth_staging \
+#     --command "SELECT COUNT(*) FROM users;" --read-only
 #
 # Exit codes: 0 = SQL succeeded (exit 0 from psql); 1 = failure.
 ###############################################################################
@@ -66,6 +77,7 @@ MASTER_SECRET="onlineshop/rds/master"
 # --- Parse args ---------------------------------------------------------------
 DB="" SQL_FILE="" SQL_CMD="" VERIFY_SQL="" DB_USER="dbadmin" SECRET_ID="$MASTER_SECRET"
 KEEP_TD=0
+READ_ONLY=0
 EXTRA_SECRETS=()
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -77,7 +89,8 @@ while [ $# -gt 0 ]; do
     --secret)       SECRET_ID="$2"; shift 2;;
     --extra-secret) EXTRA_SECRETS+=("$2"); shift 2;;
     --keep-td)      KEEP_TD=1; shift;;
-    -h|--help)      sed -n '1,50p' "$0"; exit 0;;
+    --read-only)    READ_ONLY=1; shift;;
+    -h|--help)      sed -n '1,60p' "$0"; exit 0;;
     *) echo "Unknown option: $1" >&2; exit 1;;
   esac
 done
@@ -91,6 +104,13 @@ if [ -z "$SQL_FILE" ] && [ -z "$SQL_CMD" ]; then
 fi
 if [ -n "$SQL_FILE" ] && [ ! -f "$SQL_FILE" ]; then
   echo "ERROR: file not found: $SQL_FILE" >&2; exit 1
+fi
+
+if [ "$READ_ONLY" = "0" ] && [ -z "$VERIFY_SQL" ]; then
+  echo "ERROR: --verify is required for mutating SQL runs. Use --read-only for" >&2
+  echo "       SELECT-only queries, or provide --verify to confirm the mutation." >&2
+  echo "       AGENTS.md: every SQL mutation needs a read-back --verify." >&2
+  exit 1
 fi
 
 AWS="aws --profile $PROFILE --region $REGION"
