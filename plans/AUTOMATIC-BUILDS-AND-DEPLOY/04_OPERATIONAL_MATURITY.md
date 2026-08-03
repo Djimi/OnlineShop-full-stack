@@ -87,6 +87,22 @@ Create version-controlled runbooks in the repository covering at minimum:
 - [ ] Custom domain (Route 53 — ~$0.50/month for hosted zone + domain registration cost)
 - [ ] CloudFront → ALB HTTPS enforcement
 
+### 4.9 PR & Branch Protection Policy Review
+
+Review-only task — do NOT change protection settings during this review; verify current state and record drift. Sole contributor, so GitHub hardcodes that PR authors cannot approve their own PRs.
+
+- [ ] Verify current effective state of `main` protection via `gh api`:
+  - Classic branch protection (`repos/<repo>/branches/main/protection`):
+    - Required status checks: `auth`, `items`, `api-gateway`, `e2e-staging`
+    - `required_approving_review_count: 1`, strict mode, `dismiss_stale_reviews: true`, `enforce_admins: false`
+  - Rulesets (`repos/<repo>/rulesets`): expect only `main-restricted` (id 18557637) with
+    - `pull_request` rule, `required_approving_review_count: 0`
+    - `deletion` + `non_fast_forward` rules, no bypass actors, `current_user_can_bypass: never`
+  - Confirm the legacy `main` ruleset (id 11444569) is still deleted
+- [ ] Re-check the effective merge policy: ruleset (0 approvals) + classic rule (1 approval) layer and the most restrictive wins → effective requirement is 1 approval. As sole contributor, 1 required approval is unsatisfiable (cannot self-approve) — effective count must stay 0 to merge own PRs
+- [ ] Verify PR review practices: no external reviewers exist; merge must rely on passing required checks, not on review count
+- [ ] Record current state and any drift in `executed/INFO.md` (what changed, when, and whether to adjust settings intentionally)
+
 ---
 
 ## Requirement Coverage Verification
@@ -95,7 +111,7 @@ After Pass 4, verify every requirement from the three source documents is satisf
 
 | Requirement Doc | Key Sections | Status |
 |---|---|---|
-| 01_REQUIREMENTS_BUILD §3 | Branch/merge policy | Pass 2 + Pass 4 (merge queue) |
+| 01_REQUIREMENTS_BUILD §3 | Branch/merge policy | Pass 2 + Pass 4 (4.9 policy review + merge queue) |
 | 01_REQUIREMENTS_BUILD §4 | Build triggers, selective builds | Pass 2 |
 | 01_REQUIREMENTS_BUILD §5 | Shared library policy | Pass 2 |
 | 01_REQUIREMENTS_BUILD §6 | Test matrix | Pass 2 + Pass 4 (nightly, merge queue) |
