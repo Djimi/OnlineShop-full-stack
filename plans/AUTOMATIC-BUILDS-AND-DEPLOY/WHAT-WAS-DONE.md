@@ -31,7 +31,7 @@ Workflow: `.github/workflows/build-and-deploy.yml`
 - Docker layer caching via BuildKit (`setup-buildx-action` + `type=gha`)
 
 IAM role for GitHub Actions: `arn:aws:iam::799111666795:role/github-actions-onlineshop`
-- Applied trust policy: OIDC from `repo:Djimi/OnlineShop-full-stack` `main` and `feature/*` branch refs
+- Applied trust policy: OIDC from configured subject `repo:Djimi@8793507/OnlineShop-full-stack@1097550215` on `main` and `feature/*` branch refs
 - Inline policy: `ecr-push-pull` for ECR operations
 
 ## Step 1.4a — RDS Provisioning ✅

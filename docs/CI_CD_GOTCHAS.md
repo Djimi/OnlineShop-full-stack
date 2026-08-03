@@ -38,13 +38,13 @@
 
 ### GitHub OIDC trust
 
-`Could not assume role with OIDC: Not authorized to perform sts:AssumeRoleWithWebIdentity` means the AWS role's trust policy rejected the token. For this repository, the `sub` condition must use `repo:Djimi/OnlineShop-full-stack` and be scoped to the refs that publish images:
+`Could not assume role with OIDC: Not authorized to perform sts:AssumeRoleWithWebIdentity` means the AWS role's trust policy rejected the token. This account uses the configured subject `repo:Djimi@8793507/OnlineShop-full-stack@1097550215`, scoped to the refs that publish images:
 
 ```json
 "StringLike": {
   "token.actions.githubusercontent.com:sub": [
-    "repo:Djimi/OnlineShop-full-stack:ref:refs/heads/main",
-    "repo:Djimi/OnlineShop-full-stack:ref:refs/heads/feature/*"
+    "repo:Djimi@8793507/OnlineShop-full-stack@1097550215:ref:refs/heads/main",
+    "repo:Djimi@8793507/OnlineShop-full-stack@1097550215:ref:refs/heads/feature/*"
   ]
 }
 ```

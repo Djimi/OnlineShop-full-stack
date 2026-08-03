@@ -131,7 +131,7 @@ See [docs/CI_CD_GOTCHAS.md](./docs/CI_CD_GOTCHAS.md) for the full pitfall checkl
 3. **Event context guard:** `github.event.inputs` is `null` on `push` events — it only exists for `workflow_dispatch`. Always check `github.event_name == 'workflow_dispatch'` before accessing `.inputs`.
 4. **BuildKit requirement:** Any `docker/build-push-action` using `cache-from`/`cache-to` (type=gha) MUST be preceded by `docker/setup-buildx-action@v3`. The default runner Docker driver does not support cache export.
 5. **Post-mutation verify:** Every AWS `create`/`put`/`delete` must be followed by a `describe`/`get`/`list` to confirm it took effect.
-6. **OIDC trust subjects:** The GitHub Actions role must trust `repo:Djimi/OnlineShop-full-stack`, scoped to the `main` and `feature/*` branch refs. Do not reuse a stale repository subject.
+6. **OIDC trust subjects:** The GitHub Actions role must trust the configured subject `repo:Djimi@8793507/OnlineShop-full-stack@1097550215`, scoped to the `main` and `feature/*` branch refs. Do not reuse a stale repository subject.
 
 ### AWS operational rules (added 2026-08-02 after Pass 2 session review)
 1. **No blocking poll loops** in a single bash call (a 10-min `sleep` loop hit the hard shell timeout and lost everything). Use `aws ecs wait services-stable`, or loops bounded to <2 min, then re-invoke.

@@ -25,7 +25,7 @@
 
 - [x] **1.3.1 IAM role for GitHub Actions → AWS (OIDC)**
   - Created IAM role `github-actions-onlineshop` (arn:aws:iam::799111666795:role/github-actions-onlineshop)
-  - Applied trust policy: OIDC from `repo:Djimi/OnlineShop-full-stack` `main` and `feature/*` refs with `sts.amazonaws.com` audience
+  - Applied trust policy: OIDC from configured subject `repo:Djimi@8793507/OnlineShop-full-stack@1097550215` on `main` and `feature/*` refs with `sts.amazonaws.com` audience
   - Attached inline policy `ecr-push-pull` for ECR operations
   - Additional permissions (ECS, S3, CloudFront) to be added in steps 1.5/1.6
 - [x] **1.3.2 Store secrets in AWS Secrets Manager** — Not needed for Pass 1 MVP (no build-time secrets; runtime secrets come in 1.4)

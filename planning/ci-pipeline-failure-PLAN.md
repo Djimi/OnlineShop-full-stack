@@ -20,8 +20,8 @@
 Apply `plans/AUTOMATIC-BUILDS-AND-DEPLOY/github-actions-oidc-trust-policy.json`. It allows the GitHub OIDC audience `sts.amazonaws.com` and these subjects:
 
 ```text
-repo:Djimi/OnlineShop-full-stack:ref:refs/heads/main
-repo:Djimi/OnlineShop-full-stack:ref:refs/heads/feature/*
+repo:Djimi@8793507/OnlineShop-full-stack@1097550215:ref:refs/heads/main
+repo:Djimi@8793507/OnlineShop-full-stack@1097550215:ref:refs/heads/feature/*
 ```
 
 Use the profile and region required by the project guide, then read the role back immediately after the update.

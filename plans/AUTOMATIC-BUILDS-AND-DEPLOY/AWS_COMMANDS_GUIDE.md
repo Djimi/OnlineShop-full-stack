@@ -138,7 +138,7 @@ IAM Role: github-actions-onlineshop
 │   └── "Allow sts:AssumeRoleWithWebIdentity if:
 │        - The token comes from GitHub's OIDC provider
 │        - The token's audience is sts.amazonaws.com
-│        - The token's subject matches the main or feature branch refs in repo:Djimi/OnlineShop-full-stack"
+│        - The token's subject matches the configured main or feature branch refs"
 └── Permissions Policy (outbound) — "ecr-push-pull"
     └── "Allow: GetAuthorizationToken, PutImage, UploadLayerPart, ..."
 ```
@@ -160,8 +160,8 @@ IAM Role: github-actions-onlineshop
       },
       "StringLike": {
         "token.actions.githubusercontent.com:sub": [
-          "repo:Djimi/OnlineShop-full-stack:ref:refs/heads/main",
-          "repo:Djimi/OnlineShop-full-stack:ref:refs/heads/feature/*"
+          "repo:Djimi@8793507/OnlineShop-full-stack@1097550215:ref:refs/heads/main",
+          "repo:Djimi@8793507/OnlineShop-full-stack@1097550215:ref:refs/heads/feature/*"
         ]
       }
     }
