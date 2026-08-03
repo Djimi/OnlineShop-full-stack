@@ -661,3 +661,137 @@ gh auth status
 # Trigger the workflow (after merged to main)
 gh workflow run "Build &amp; Push to ECR" -f service=all
 ```
+
+---
+
+# Part D: ECS & RDS Operations (Staging Era — 2026-08-02)
+
+> Everything here was learned the hard way during Pass 2 staging provisioning
+# (~56% of that session's turns went to these issues). Read BEFORE touching
+# ECS services, Service Connect, or the RDS instance.
+
+## D1. Private RDS Access — The Only Sanctioned Pattern
+
+| What | Details |
+|------|---------|
+| **Constraint** | `onlineshop-postgres-db` has `PubliclyAccessible: No` and lives in private subnets with no IGW route. It is unreachable from any developer machine, period |
+| **Failed approaches** | Local `psql` via Docker (hangs → 120s shell timeout); deliberating public access / SSM / ECS Exec (all dead ends or overkill) |
+| **Working pattern** | One-off Fargate task running `postgres:18-alpine` in the ECS security group (`sg-0b209104a6b15b157`), which RDS's SG already allows |
+| **Codified in** | `scripts/ecs-run-sql.sh` — use it, don't hand-roll |
+
+```bash
+# Apply a schema and PROVE it landed — in the same run:
+scripts/ecs-run-sql.sh --database auth_staging \
+  --file Auth/init-db/01-schema.sql \
+  --verify "SELECT tablename FROM pg_tables WHERE schemaname='public';"
+
+# Run as a least-privilege service account (password from its own secret):
+scripts/ecs-run-sql.sh --database items_staging \
+  --user items_app_staging --secret onlineshop/items/db-staging \
+  --command "SELECT count(*) FROM items;"
+```
+
+What the script encapsulates (each bullet was a multi-turn debugging episode):
+
+1. **TD JSON built to a temp file** (`python3 json.dump`) and passed via
+   `--cli-input-json file://` — inline `--container-definitions` with
+   multi-line SQL fails with `Invalid control character`.
+2. **SQL transported as base64** and decoded inside the container —
+   zero shell/JSON quoting bugs regardless of SQL content.
+3. **`psql -v ON_ERROR_STOP=1`** — psql exits non-zero on the first error
+   instead of merrily continuing.
+4. **`PGPASSWORD` injected from Secrets Manager** (`secrets[].valueFrom`),
+   never a plaintext env var. Master creds live in `onlineshop/rds/master`;
+   the execution role's `secretsmanager-read-onlineshop` policy covers
+   `onlineshop/rds/*`.
+5. **Log stream resolved correctly**: `<prefix>/<container>/<task-id>`,
+   with retries for CloudWatch ingestion lag.
+6. **Self-cleanup**: the TD revision is deregistered AND deleted
+   (`delete-task-definitions`) after a successful run — deregister alone
+   leaves it queryable as INACTIVE.
+
+## D2. The "exit 0 but nothing happened" Trap
+
+| What | Details |
+|------|---------|
+| **Symptom** | Schema apply task exits 0; app then crashes with `Schema validation: missing table [sessions]` |
+| **Root cause** | A JSON-escaping bug in the hand-built container command meant the SQL was never actually applied (the `echo` of a JSON-encoded string wrote literal `\n` sequences). psql still exited 0 in an earlier combined run because of `&&`-chained commands and meta-command confusion |
+| **Amplifier** | Log retrieval from the helper tasks failed (wrong stream-name guesses), so the failure was invisible for ~20 turns |
+| **Rule** | **Exit 0 is not verification.** Every SQL mutation must be followed by a read-back query (`\dt`, `SELECT ...`) in the same run. The script's `--verify` flag exists for exactly this |
+
+## D3. Service Connect Rules
+
+| Rule | Violation error |
+|------|-----------------|
+| SC `portName` must match a `portMappings[].name` in the task definition | `portName(X) does not refer to any named PortMapping in the container definitions` |
+| The Cloud Map service name derived from `portName` must be **unique per namespace** | `SC service is already used by arn:...:namespace/...` |
+
+Consequence: staging TDs rename the *container port mapping names*
+(`auth-port` → `auth-staging-port`) because prod already owns the plain
+names in `onlineshop.local`. Changing only the SC `clientAliases.dnsName`
+is NOT enough.
+
+Check what names are taken:
+
+```bash
+aws servicediscovery list-services --profile dpm-profile --region eu-north-1 \
+  --query 'Services[*].Name' --output table
+```
+
+## D4. `create-service` / `update-service` Flag Rules
+
+| Rule | Error when violated |
+|------|---------------------|
+| `--launch-type` and `--capacity-provider-strategy` are mutually exclusive | `Specifying both a launch type and capacity provider strategy is not supported` |
+| TD with container `secrets` requires `executionRoleArn` | `When you are specifying container secrets, you must also specify a value for 'executionRoleArn'` |
+| `secrets[].valueFrom` with `:json-key::` suffix needs the FULL secret ARN (a bare name is parsed as an SSM parameter) | `The Systems Manager parameter name specified for secret X is invalid` |
+| `update-service` has no `--launch-type` in the position you expect — check `aws ecs update-service help` before improvising flag combos | `Unknown options: --launch-type, FARGATE` |
+
+## D5. Reading Logs from Crashed/Stopped Tasks
+
+```bash
+# Fastest path — no stream-name guessing:
+aws logs filter-log-events --profile dpm-profile --region eu-north-1 \
+  --log-group-name /ecs/onlineshop-auth \
+  --start-time $(date -d '15 minutes ago' +%s)000 \
+  --query 'events[*].message' --output text
+
+# Stream names are deterministic:
+#   <awslogs-stream-prefix>/<container-name>/<task-id>
+# e.g. auth/auth/75396c8ee9d94c509897cd9a519e4c79
+```
+
+- `describe-tasks` does NOT reliably return `logStreamName` — construct it.
+- CloudWatch ingestion lags a few seconds after task stop — retry before concluding "no logs".
+- `startedAt: null` means "died during provisioning/early startup", not "image pull failed" — read the app logs before theorizing about IAM/secrets.
+- Guard task ARN parsing: `list-tasks` returning empty → `None` → `describe-tasks` errors with `taskId length should be one of [32,36]`.
+
+## D6. Deployment Behavior
+
+| Phenomenon | Meaning | Action |
+|-----------|---------|--------|
+| Crash loop then `desired:1, running:0`, rollout `COMPLETED`, no new tasks | ECS stopped retrying the failing deployment | Fix root cause, then `update-service --force-new-deployment` |
+| Health `UNKNOWN` for ~3 min on a fresh task | Container `healthCheck.startPeriod: 180` — checks haven't started | Normal. But if it persists past startPeriod+retries, check `list-tasks --desired-status STOPPED` for a crash loop instead of waiting |
+| Service event "stopped 1 pending tasks" repeatedly | Tasks fail before reaching RUNNING | Same as above — logs first |
+
+## D7. Secrets Hygiene in Task Definitions (Incident 2026-08-02)
+
+During Pass 2, helper TD revisions were registered with the **master DB
+password as a plaintext env var**, and staging passwords were echoed into
+session logs. Remediation performed same day:
+
+1. Master creds moved to Secrets Manager: `onlineshop/rds/master`
+2. `ecsTaskExecutionRole` policy extended to `onlineshop/rds/*`
+3. Both staging passwords rotated (`ALTER ROLE` + `put-secret-value`), verified by connecting as each service account
+4. All 11 `onlineshop-psql-helper` revisions permanently removed via `delete-task-definitions` (deregister alone leaves them readable)
+
+**Standing rules:**
+- Passwords only ever enter tasks via `secrets[].valueFrom` — never `environment`, never embedded in `command`, never `echo`ed.
+- One-off helper TD revisions: deregister AND delete after use.
+- Need the new password inside SQL (rotations)? Put it in its secret FIRST, then reference it via `--extra-secret VAR=secret:password` and psql interpolation `:'VAR'` — never inline it.
+
+## D8. Session-Efficiency Rules for Agents
+
+- **No blocking poll loops** in a single shell call (a 48×10s loop hit the 600s hard timeout and lost everything). Use `aws ecs wait services-stable`, or loops bounded to <2 min and re-invoke.
+- **Batch independent AWS reads** in one call (describe-services + list-tasks + logs in a single script) instead of one API call per turn.
+- Fix the FIRST error class before scaling out — items-staging burned a 10-minute wait on the exact schema issue already diagnosed on auth-staging.

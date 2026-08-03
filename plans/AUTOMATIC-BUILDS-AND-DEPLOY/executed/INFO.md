@@ -1865,3 +1865,21 @@ Replaces the old `build-and-push.yml` with:
 | Old workflow removal | 🔧 After merge | Delete `.github/workflows/build-and-push.yml` after `build-and-deploy.yml` verified on main |
 | Auth tests @ 50% | 🔧 Manual | Run `cd Auth && ./mvnw verify` to confirm coverage threshold passes |
 | Staging ALB pause script | 🔧 Future | Integrate staging ALB into pause-playground.sh / resume-playground.sh |
+
+---
+
+### 2.9 Secrets Hygiene Remediation & SQL Helper (2026-08-02, post-Pass-2 review)
+
+**Trigger:** Session review of Pass 2 found the master DB password had been registered as a plaintext env var in 11 `onlineshop-psql-helper` task-def revisions, and staging passwords were echoed into session logs.
+
+**Actions executed (all verified):**
+
+| Action | Detail | Verification |
+|--------|--------|--------------|
+| Created `onlineshop/rds/master` secret | ARN: `arn:aws:secretsmanager:eu-north-1:799111666795:secret:onlineshop/rds/master-GJlmZb` — `{"username":"dbadmin","password":<db-admin-password>}` | `describe-secret` ✅ |
+| Extended `ecsTaskExecutionRole` inline policy `secretsmanager-read-onlineshop` | Added resource `arn:aws:secretsmanager:eu-north-1:799111666795:secret:onlineshop/rds/*` | `get-role-policy` ✅ |
+| Rotated `auth_app_staging` + `items_app_staging` passwords | `put-secret-value` on both staging secrets (new version IDs), then `ALTER ROLE ... PASSWORD` via sql-runner task using psql `:'VAR'` interpolation (no plaintext anywhere) | Connected as each service account and ran `SELECT` — auth sees 2 tables, items sees 5 rows ✅ |
+| Purged 11 `onlineshop-psql-helper` TD revisions | `delete-task-definitions` (they were INACTIVE; deregister alone leaves them readable) | `list-task-definitions` ACTIVE=0, INACTIVE=0 ✅ |
+| Created `scripts/ecs-run-sql.sh` | Sanctioned private-RDS SQL runner: base64 SQL transport, `--cli-input-json file://`, `ON_ERROR_STOP=1`, PGPASSWORD via `secrets[].valueFrom` only, correct log-stream resolution, self deregister+delete of its TD revision | Smoke test `SELECT version()` ✅; TD residue 0 ✅ |
+
+**Standing rules added to `AGENTS.md`:** no blocking poll loops; no plaintext secrets in task definitions; private RDS only via `scripts/ecs-run-sql.sh` with `--verify`.

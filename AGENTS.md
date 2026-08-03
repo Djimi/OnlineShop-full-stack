@@ -132,6 +132,11 @@ See [docs/CI_CD_GOTCHAS.md](./docs/CI_CD_GOTCHAS.md) for the full pitfall checkl
 4. **BuildKit requirement:** Any `docker/build-push-action` using `cache-from`/`cache-to` (type=gha) MUST be preceded by `docker/setup-buildx-action@v3`. The default runner Docker driver does not support cache export.
 5. **Post-mutation verify:** Every AWS `create`/`put`/`delete` must be followed by a `describe`/`get`/`list` to confirm it took effect.
 
+### AWS operational rules (added 2026-08-02 after Pass 2 session review)
+1. **No blocking poll loops** in a single bash call (a 10-min `sleep` loop hit the hard shell timeout and lost everything). Use `aws ecs wait services-stable`, or loops bounded to <2 min, then re-invoke.
+2. **Secrets never enter ECS task definitions in plaintext** — no passwords in `environment` or `command`; always `secrets[].valueFrom` (with FULL secret ARN when using the `:json-key::` suffix). One-off helper TD revisions: deregister AND `delete-task-definitions` after use (deregister alone leaves them readable as INACTIVE).
+3. **Private RDS:** never connect from localhost (it hangs; RDS has no public route). Use `scripts/ecs-run-sql.sh` — see [docs/CI_CD_GOTCHAS.md](./docs/CI_CD_GOTCHAS.md) → "Private RDS Access". Every SQL mutation needs a read-back `--verify` in the same run — exit 0 is not proof.
+
 ### Windows PowerShell → AWS JSON
 PowerShell's default UTF-8-with-BOM encoding confuses AWS IAM. When creating JSON files for AWS:
 ```powershell
