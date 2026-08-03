@@ -29,7 +29,7 @@ fi
 # ---------------------------------------------------------------------------
 echo "[post-create] Fixing ownership on named volumes..."
 sudo chown -R vscode:vscode /home/vscode/.m2 || true
-sudo chown -R vscode:vscode /workspaces/OnlineShop-claude/frontend/node_modules || true
+sudo chown -R vscode:vscode /workspaces/OnlineShop-full-stack/frontend/node_modules || true
 sudo mkdir -p /home/vscode/.cache/ms-playwright
 sudo chown -R vscode:vscode /home/vscode/.cache || true
 
@@ -67,11 +67,11 @@ fi
 # the chromium download is a no-op on subsequent rebuilds.
 # ---------------------------------------------------------------------------
 echo "[post-create] Ensuring Playwright is installed..."
-PLAYWRIGHT_BIN="/workspaces/OnlineShop-claude/frontend/node_modules/.bin/playwright"
+PLAYWRIGHT_BIN="/workspaces/OnlineShop-full-stack/frontend/node_modules/.bin/playwright"
 
 if [ ! -x "$PLAYWRIGHT_BIN" ]; then
   echo "[post-create] frontend/node_modules missing playwright — running 'npm install'..."
-  (cd /workspaces/OnlineShop-claude/frontend && npm install) || \
+  (cd /workspaces/OnlineShop-full-stack/frontend && npm install) || \
     echo "[post-create] WARN: npm install in frontend failed"
 fi
 

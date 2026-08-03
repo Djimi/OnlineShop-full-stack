@@ -47,6 +47,9 @@ class AuthServiceTest {
     private SessionRepository sessionRepository;
 
     @Mock
+    private SessionRepository.SessionValidationProjection validationProjection;
+
+    @Mock
     private PasswordEncoder passwordEncoder;
 
     @Mock
@@ -169,10 +172,13 @@ class AuthServiceTest {
     void validateToken_whenTokenValid_returnsValidResponse() {
         String token = "validtoken";
         String tokenHash = hashToken(token);
-        User user = createUser(1L, "testuser", "encodedPassword");
-        Session session = createSession(1L, tokenHash, user, FIXED_TIME, FIXED_TIME.plusSeconds(3600));
 
-        when(sessionRepository.findByTokenHash(tokenHash)).thenReturn(Optional.of(session));
+        when(validationProjection.getCreatedAt()).thenReturn(FIXED_TIME);
+        when(validationProjection.getExpiresAt()).thenReturn(FIXED_TIME.plusSeconds(3600));
+        when(validationProjection.getUserId()).thenReturn(1L);
+        when(validationProjection.getUsername()).thenReturn("testuser");
+        when(sessionRepository.findValidationProjectionByTokenHash(tokenHash))
+                .thenReturn(Optional.of(validationProjection));
 
         ValidateResponse response = authService.validateToken(token);
 
@@ -187,7 +193,7 @@ class AuthServiceTest {
         String token = "invalidtoken";
         String tokenHash = hashToken(token);
 
-        when(sessionRepository.findByTokenHash(tokenHash)).thenReturn(Optional.empty());
+        when(sessionRepository.findValidationProjectionByTokenHash(tokenHash)).thenReturn(Optional.empty());
 
         ValidateResponse response = authService.validateToken(token);
 
@@ -202,12 +208,13 @@ class AuthServiceTest {
     void validateToken_whenSessionExpired_returnsInvalidResponse() {
         String token = "expiredtoken";
         String tokenHash = hashToken(token);
-        User user = createUser(1L, "testuser", "encodedPassword");
         Instant sessionCreatedAt = FIXED_TIME.minusSeconds(7200);
         Instant sessionExpiresAt = FIXED_TIME.minusSeconds(3600);
-        Session session = createSession(1L, tokenHash, user, sessionCreatedAt, sessionExpiresAt);
 
-        when(sessionRepository.findByTokenHash(tokenHash)).thenReturn(Optional.of(session));
+        when(validationProjection.getCreatedAt()).thenReturn(sessionCreatedAt);
+        when(validationProjection.getExpiresAt()).thenReturn(sessionExpiresAt);
+        when(sessionRepository.findValidationProjectionByTokenHash(tokenHash))
+                .thenReturn(Optional.of(validationProjection));
 
         ValidateResponse response = authService.validateToken(token);
 
@@ -222,12 +229,11 @@ class AuthServiceTest {
     void validateToken_whenCurrentTimeBeforeCreatedAt_returnsInvalidResponse() {
         String token = "futuretoken";
         String tokenHash = hashToken(token);
-        User user = createUser(1L, "testuser", "encodedPassword");
         Instant sessionCreatedAt = FIXED_TIME.plusSeconds(3600);
-        Instant sessionExpiresAt = FIXED_TIME.plusSeconds(7200);
-        Session session = createSession(1L, tokenHash, user, sessionCreatedAt, sessionExpiresAt);
 
-        when(sessionRepository.findByTokenHash(tokenHash)).thenReturn(Optional.of(session));
+        when(validationProjection.getCreatedAt()).thenReturn(sessionCreatedAt);
+        when(sessionRepository.findValidationProjectionByTokenHash(tokenHash))
+                .thenReturn(Optional.of(validationProjection));
 
         ValidateResponse response = authService.validateToken(token);
 
@@ -248,16 +254,6 @@ class AuthServiceTest {
         user.setCreatedAt(FIXED_TIME);
         user.setUpdatedAt(FIXED_TIME);
         return user;
-    }
-
-    private Session createSession(Long id, String tokenHash, User user, Instant createdAt, Instant expiresAt) {
-        Session session = new Session();
-        session.setId(id);
-        session.setTokenHash(tokenHash);
-        session.setUser(user);
-        session.setCreatedAt(createdAt);
-        session.setExpiresAt(expiresAt);
-        return session;
     }
 
     private void mockSecureRandomBytes() {

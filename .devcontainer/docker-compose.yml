@@ -32,12 +32,12 @@ services:
     volumes:
       # Mount the repo root (resolved from the root compose file's directory,
       # which IS the repo root — see the path-resolution note above).
-      - .:/workspaces/OnlineShop-claude:cached
+      - .:/workspaces/OnlineShop-full-stack:cached
       # Shadow frontend/node_modules with a container-only volume so Windows
       # binaries sitting in the host node_modules don't collide with the
       # Linux ones npm installs inside the container. Your Windows-side
       # node_modules stays untouched.
-      - onlineshop-frontend-node-modules:/workspaces/OnlineShop-claude/frontend/node_modules
+      - onlineshop-frontend-node-modules:/workspaces/OnlineShop-full-stack/frontend/node_modules
       # Persist Maven cache across rebuilds (cold start without this is ~5 min).
       # NOTE: first mount is root-owned; post-create.sh chowns it to vscode.
       - onlineshop-m2:/home/vscode/.m2

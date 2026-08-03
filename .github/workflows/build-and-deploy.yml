@@ -53,11 +53,14 @@ jobs:
           filters: |
             auth:
               - 'Auth/**'
+              - '.github/workflows/build-and-deploy.yml'
             items:
               - 'Items/**'
               - 'common/**'
+              - '.github/workflows/build-and-deploy.yml'
             api-gateway:
               - 'api-gateway/**'
+              - '.github/workflows/build-and-deploy.yml'
             frontend:
               - 'frontend/**'
 
@@ -116,13 +119,13 @@ jobs:
           if-no-files-found: ignore
 
       - uses: aws-actions/configure-aws-credentials@v4
-        if: success()
+        if: success() && github.event_name != 'pull_request'
         with:
           role-to-assume: arn:aws:iam::799111666795:role/github-actions-onlineshop
           aws-region: ${{ env.AWS_REGION }}
 
       - uses: aws-actions/amazon-ecr-login@v2
-        if: success()
+        if: success() && github.event_name != 'pull_request'
 
       - name: Compute Docker tags
         id: tags
@@ -145,7 +148,7 @@ jobs:
         if: success()
         with:
           context: Auth
-          push: true
+          push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.tags.outputs.tags }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
@@ -188,13 +191,13 @@ jobs:
           if-no-files-found: ignore
 
       - uses: aws-actions/configure-aws-credentials@v4
-        if: success()
+        if: success() && github.event_name != 'pull_request'
         with:
           role-to-assume: arn:aws:iam::799111666795:role/github-actions-onlineshop
           aws-region: ${{ env.AWS_REGION }}
 
       - uses: aws-actions/amazon-ecr-login@v2
-        if: success()
+        if: success() && github.event_name != 'pull_request'
 
       - name: Compute Docker tags
         id: tags
@@ -218,7 +221,7 @@ jobs:
         with:
           context: .
           file: Items/Dockerfile
-          push: true
+          push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.tags.outputs.tags }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
@@ -257,13 +260,13 @@ jobs:
           if-no-files-found: ignore
 
       - uses: aws-actions/configure-aws-credentials@v4
-        if: success()
+        if: success() && github.event_name != 'pull_request'
         with:
           role-to-assume: arn:aws:iam::799111666795:role/github-actions-onlineshop
           aws-region: ${{ env.AWS_REGION }}
 
       - uses: aws-actions/amazon-ecr-login@v2
-        if: success()
+        if: success() && github.event_name != 'pull_request'
 
       - name: Compute Docker tags
         id: tags
@@ -286,7 +289,7 @@ jobs:
         if: success()
         with:
           context: api-gateway
-          push: true
+          push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.tags.outputs.tags }}
           cache-from: type=gha
           cache-to: type=gha,mode=max

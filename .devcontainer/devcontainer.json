@@ -41,7 +41,7 @@
     "pgadmin"
   ],
 
-  "workspaceFolder": "/workspaces/OnlineShop-claude",
+  "workspaceFolder": "/workspaces/OnlineShop-full-stack",
 
   // Stop infra + workspace when VS Code window closes (matches normal flow).
   "shutdownAction": "stopCompose",

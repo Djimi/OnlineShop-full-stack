@@ -9,7 +9,7 @@ A modern, production-ready React 19 UI has been created for the OnlineShop appli
 ## 📁 Project Location
 
 ```
-d:\CodingProjects\OnlineShop-claude\frontend/
+d:\CodingProjects\OnlineShop-full-stack\frontend/
 ```
 
 ## 🎯 What Was Built

@@ -45,7 +45,11 @@ Standard Spring Boot layered architecture: `controller/` → `service/` → `rep
 | POST   | `/api/v1/auth/login`       | User login             |
 | GET    | `/api/v1/auth/validate`    | Validate session token |
 
-**Validate contract:** invalid tokens return HTTP `200` with `valid=false` in the response body, not a 4xx error.
+**Validate contract:** invalid tokens return HTTP `200` with `valid=false` in the response body, not a 4xx error. A session is valid only when the current time is between its `createdAt` and `expiresAt` values, inclusive.
+
+## CI/CD
+
+The CI pipeline runs `./mvnw verify` before publishing Auth images. Pull-request builds create Docker images without requesting AWS credentials or pushing to ECR.
 
 ## Database
 

@@ -123,5 +123,5 @@ Every step executed in this plan **MUST** update [`executed/INFO.md`](./executed
 
 | Issue | Notes |
 |-------|-------|
-| ⬜ Old `build-and-push.yml` still the only GitHub-indexed workflow | By design: `workflow_dispatch` workflows are indexed from `main` only. Remove old file after `build-and-deploy.yml` is verified on main |
+| ✅ Duplicate `build-and-push.yml` workflow | Removed; `build-and-deploy.yml` is the single active CI/CD workflow after merge |
 | ⬜ Staging services don't auto-scale to 0 after E2E | Deliberate in Pass 2; automated teardown planned for Pass 3 |

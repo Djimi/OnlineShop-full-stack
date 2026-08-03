@@ -25,15 +25,15 @@
 
 - [x] **1.3.1 IAM role for GitHub Actions → AWS (OIDC)**
   - Created IAM role `github-actions-onlineshop` (arn:aws:iam::799111666795:role/github-actions-onlineshop)
-  - Trust policy: OIDC from `repo:Djimi/OnlineShop-claude:*` with `sts.amazonaws.com` audience
+  - Applied trust policy: OIDC from `repo:Djimi/OnlineShop-full-stack` `main` and `feature/*` refs with `sts.amazonaws.com` audience
   - Attached inline policy `ecr-push-pull` for ECR operations
   - Additional permissions (ECS, S3, CloudFront) to be added in steps 1.5/1.6
 - [x] **1.3.2 Store secrets in AWS Secrets Manager** — Not needed for Pass 1 MVP (no build-time secrets; runtime secrets come in 1.4)
-- [x] **1.3.3 Create workflow YAML** (`.github/workflows/build-and-push.yml`):
-    - Trigger: `workflow_dispatch` with a `service` input (auth / items / api-gateway / all)
-    - Steps per service: checkout → OIDC auth → ECR login → Maven build → Docker build → push with `sha-<FULL_SHA>` tag
+- [x] **1.3.3 Create workflow YAML** (`.github/workflows/build-and-deploy.yml`):
+    - Triggers: pushes to `feature/**` and `main`, pull requests to `main`, and `workflow_dispatch`
+    - Steps per service: checkout → tests → OIDC auth → ECR login → Docker build → push with `sha-<FULL_SHA>` tag
     - Items also builds `common` first (dependency)
-    - Parallel jobs when `all` is selected
+    - Pull-request builds do not request AWS credentials or push images
 - [x] **1.3.4 Enable caching** (added to workflow):
   - Maven: `actions/cache@v4` with service-specific keys based on `pom.xml` hashes, `~/.m2/repository` path
   - Docker: `docker/build-push-action` with `type=gha` cache backend (`mode=max`)

@@ -2,7 +2,7 @@
 
 > **Goal:** This document walks through **every command and every issue** we encountered while setting up the automated build-and-push workflow. Each section explains **what** we did, **why** we did it, **what went wrong**, and **how we fixed it**. It's written for someone who is new to both AWS and GitHub Actions.
 >
-> **AWS Account ID:** `799111666795` | **Region:** `eu-north-1` (Stockholm) | **Repo:** `Djimi/OnlineShop-claude`
+> **AWS Account ID:** `799111666795` | **Region:** `eu-north-1` (Stockholm) | **Repo:** `Djimi/OnlineShop-full-stack`
 
 ---
 
@@ -59,7 +59,7 @@ Normally, if a script (running on GitHub Actions) wants to talk to AWS, you'd cr
 
 ```
 GitHub Actions workflow
-    ↓ (1) Asks GitHub: "Give me a signed identity token proving I'm running in repo Djimi/OnlineShop-claude"
+    ↓ (1) Asks GitHub: "Give me a signed identity token proving I'm running in repo Djimi/OnlineShop-full-stack"
     ↓ (2) Sends that token to AWS
 AWS IAM
     ↓ (3) Checks: "Is this token signed by GitHub? Is it for the right repo?"
@@ -129,7 +129,7 @@ For GitHub Actions, we **must** use an IAM Role (not a User) because OIDC only w
 
 An IAM Role has **two separate things** you need to configure:
 
-1. **Trust Policy** (who can assume this role?) — "GitHub Actions from repo `Djimi/OnlineShop-claude` can assume this role"
+1. **Trust Policy** (who can assume this role?) — "GitHub Actions from repo `Djimi/OnlineShop-full-stack` can assume this role"
 2. **Permissions Policies** (what can this role do?) — "Push/pull Docker images from ECR"
 
 ```mermaid
@@ -138,12 +138,12 @@ IAM Role: github-actions-onlineshop
 │   └── "Allow sts:AssumeRoleWithWebIdentity if:
 │        - The token comes from GitHub's OIDC provider
 │        - The token's audience is sts.amazonaws.com
-│        - The token's subject matches repo:Djimi/OnlineShop-claude:*"
+│        - The token's subject matches the main or feature branch refs in repo:Djimi/OnlineShop-full-stack"
 └── Permissions Policy (outbound) — "ecr-push-pull"
     └── "Allow: GetAuthorizationToken, PutImage, UploadLayerPart, ..."
 ```
 
-### The Trust Policy we wrote
+### The required Trust Policy
 
 ```json
 {
@@ -159,7 +159,10 @@ IAM Role: github-actions-onlineshop
         "token.actions.githubusercontent.com:aud": "sts.amazonaws.com"
       },
       "StringLike": {
-        "token.actions.githubusercontent.com:sub": "repo:Djimi/OnlineShop-claude:*"
+        "token.actions.githubusercontent.com:sub": [
+          "repo:Djimi/OnlineShop-full-stack:ref:refs/heads/main",
+          "repo:Djimi/OnlineShop-full-stack:ref:refs/heads/feature/*"
+        ]
       }
     }
   }]
@@ -173,9 +176,9 @@ IAM Role: github-actions-onlineshop
 | `"Federated": "arn:...oidc-provider/token.actions.githubusercontent.com"` | "Only the GitHub OIDC provider can vouch for this role assumption" |
 | `"Action": "sts:AssumeRoleWithWebIdentity"` | "The specific AWS API call being allowed is role assumption via web identity (OIDC)" |
 | `"aud": "sts.amazonaws.com"` | "The GitHub token must declare it's intended for AWS STS" |
-| `"sub": "repo:Djimi/OnlineShop-claude:*"` | "ONLY workflows from YOUR repo can assume this role. The `*` means any branch, any tag, any ref." |
+| `"sub"` branch-ref entries | "Only workflows from this repository's main and feature branches can assume this role." |
 
-> **Security note:** If the `sub` condition was `repo:*` (any repo), anyone with a GitHub Actions workflow could assume our role. The `repo:Djimi/OnlineShop-claude:*` scope is critical.
+> **Security note:** If the `sub` condition was `repo:*` (any repo), anyone with a GitHub Actions workflow could assume our role. Keep the repository and branch-ref scope exact.
 
 ### `aws iam list-roles` — checking what already exists
 
@@ -628,15 +631,15 @@ Removed the temporary `push` trigger. The final workflow uses `workflow_dispatch
 
 ### Workflow File
 
-- **Path:** `.github/workflows/build-and-push.yml`
-- **Trigger:** `workflow_dispatch` (will be discoverable after merge to `main`)
+- **Path:** `.github/workflows/build-and-deploy.yml`
+- **Trigger:** pushes to `feature/**` and `main`, pull requests to `main`, and `workflow_dispatch`
 - **Input:** `service` — choice of `auth`, `items`, `api-gateway`, or `all`
 
 ### Key Files Changed
 
 | File | Why |
 |------|-----|
-| `.github/workflows/build-and-push.yml` | The build-and-push workflow |
+| `.github/workflows/build-and-deploy.yml` | The tested CI/CD workflow |
 | `.gitattributes` | Added `*.jar binary` to prevent future CRLF corruption |
 | `.gitignore` | Added `**/maven-wrapper.jar` so mvnw auto-downloads JARs |
 | `plans/.../01_MVP_DEPLOY.md` | Updated task status to track progress |

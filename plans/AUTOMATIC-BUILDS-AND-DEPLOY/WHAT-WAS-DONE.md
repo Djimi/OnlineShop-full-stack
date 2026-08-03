@@ -23,15 +23,15 @@ Naming convention: `onlineshop-<service>` (no slashes, fixed from initial mistak
 
 ## Step 1.3 — GitHub Actions Build & Push ✅
 
-Workflow: `.github/workflows/build-and-push.yml`
-- Trigger: `workflow_dispatch` with service input (`auth`/`items`/`api-gateway`/`all`)
-- OIDC auth → ECR login → Maven build → Docker build → push with `sha-<FULL_SHA>` tag
+Workflow: `.github/workflows/build-and-deploy.yml`
+- Triggers: pushes to `feature/**` and `main`, pull requests to `main`, and `workflow_dispatch`
+- Selective test gates, OIDC auth, ECR login, Maven build, Docker build, and push with `sha-<FULL_SHA>` tags
 - Items job builds `common` first (dependency)
 - Maven caching via `actions/cache@v4` with `pom.xml` hash keys
 - Docker layer caching via BuildKit (`setup-buildx-action` + `type=gha`)
 
 IAM role for GitHub Actions: `arn:aws:iam::799111666795:role/github-actions-onlineshop`
-- Trust policy: OIDC from `repo:Djimi/OnlineShop-claude:*`
+- Applied trust policy: OIDC from `repo:Djimi/OnlineShop-full-stack` `main` and `feature/*` branch refs
 - Inline policy: `ecr-push-pull` for ECR operations
 
 ## Step 1.4a — RDS Provisioning ✅
@@ -295,4 +295,3 @@ curl -s -o /dev/null -w "%{http_code}" -X OPTIONS "$CF/auth/login" -H "Origin: h
 - [ ] Staging task definitions (3 services)
 - [ ] Staging ECS services (3, desired:0)
 - [ ] Branch protection on `main`
-

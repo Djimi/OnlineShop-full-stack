@@ -107,14 +107,14 @@ aws ecr describe-images --repository-name onlineshop-auth --region eu-north-1
 # Verify pushed images in ECR
 aws ecr describe-images --repository-name onlineshop-auth --region eu-north-1 --query "imageDetails[*].imageTags[0]"
 
-# Trigger workflow manually (only works after merging to main)
-gh workflow run "Build & Push to ECR" -f service=all
+# Trigger the CI/CD workflow manually (after it is available from main)
+gh workflow run "CI/CD Pipeline" -f service=all
 
 # View workflow run logs
 gh run view <run-id> --log
 
 # List recent workflow runs
-gh run list --workflow="Build & Push to ECR" --limit 5
+gh run list --workflow="CI/CD Pipeline" --limit 5
 
 # Check gh CLI auth status
 gh auth status

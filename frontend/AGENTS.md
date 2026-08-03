@@ -36,6 +36,10 @@ npm run build
 VITE_API_URL='' npm run build
 ```
 
+## CI/CD
+
+The current Java-service CI pipeline does not build or publish the frontend. Frontend changes require the frontend-specific build and deployment process documented above.
+
 ### Deploy to AWS
 ```bash
 # Build

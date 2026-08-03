@@ -38,6 +38,10 @@ cd Items
 
 > **CRITICAL:** Never run `./mvnw -f ../Items/pom.xml` from a sibling directory. Always `cd` into `Items/` first.
 
+## CI/CD
+
+The CI pipeline builds `common`, runs `./mvnw verify`, and then publishes the Items image on branch pushes. Pull-request builds create Docker images without requesting AWS credentials or pushing to ECR.
+
 ## Docker Compose Build
 
 Run from the repository root:

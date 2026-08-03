@@ -55,6 +55,8 @@ aws iam get-open-id-connect-provider \
 
 **Trust Policy (who can assume):**
 
+> Target correction for the renamed repository. Applied after AWS re-authentication and verified with `aws iam get-role`.
+
 ```json
 {
   "Version": "2012-10-17",
@@ -69,7 +71,10 @@ aws iam get-open-id-connect-provider \
         "token.actions.githubusercontent.com:aud": "sts.amazonaws.com"
       },
       "StringLike": {
-        "token.actions.githubusercontent.com:sub": "repo:Djimi/OnlineShop-claude:*"
+        "token.actions.githubusercontent.com:sub": [
+          "repo:Djimi/OnlineShop-full-stack:ref:refs/heads/main",
+          "repo:Djimi/OnlineShop-full-stack:ref:refs/heads/feature/*"
+        ]
       }
     }
   }]

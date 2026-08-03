@@ -55,7 +55,7 @@ This matches the pattern already applied to Items in Pass 1. The ECS health chec
 ## 3. CI/CD Workflow Rewrite (2.2—2.6)
 
 **New file:** `.github/workflows/build-and-deploy.yml`
-**Old file:** `.github/workflows/build-and-push.yml` (kept for reference, remove after merge verification)
+**Old file:** `.github/workflows/build-and-push.yml` (removed; superseded by the tested pipeline)
 
 ### 3.1 Trigger Matrix
 
@@ -304,7 +304,7 @@ Guided setup script that prints all commands needed to create the staging infras
 | ECR image tag immutability | Pass 3 (release traceability) |
 | ECR resource scoping | Pass 3 (tighten `Resource: "*"` to specific ARNs) |
 | Staging ALB auto-pause | Can integrate into `pause-playground.sh` in Pass 3 |
-| Old workflow removal | Remove `build-and-push.yml` after verifying `build-and-deploy.yml` on `main` |
+| Old workflow removal | Completed by removing the duplicate `build-and-push.yml`; verify the replacement after merge to `main` |
 | Verify Auth 50% coverage | Run `cd Auth && ./mvnw verify` locally (requires Docker for Testcontainers) |
 
 ---

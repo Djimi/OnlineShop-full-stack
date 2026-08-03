@@ -36,6 +36,32 @@
 | `Could not find or load main class ...MavenWrapperMain` | `maven-wrapper.jar` was tracked in git and got corrupted by CRLF normalisation | `maven-wrapper.jar` is in `.gitignore` and auto-downloaded. Never track it. |
 | Jobs all "skipped" on push | Job `if:` condition only checked `github.event.inputs.service` which is `null` on push | Always include `github.event_name == 'push'` as an OR condition in job guards during development. |
 
+### GitHub OIDC trust
+
+`Could not assume role with OIDC: Not authorized to perform sts:AssumeRoleWithWebIdentity` means the AWS role's trust policy rejected the token. For this repository, the `sub` condition must use `repo:Djimi/OnlineShop-full-stack` and be scoped to the refs that publish images:
+
+```json
+"StringLike": {
+  "token.actions.githubusercontent.com:sub": [
+    "repo:Djimi/OnlineShop-full-stack:ref:refs/heads/main",
+    "repo:Djimi/OnlineShop-full-stack:ref:refs/heads/feature/*"
+  ]
+}
+```
+
+After re-authenticating AWS, apply `plans/AUTOMATIC-BUILDS-AND-DEPLOY/github-actions-oidc-trust-policy.json`:
+
+```bash
+aws iam update-assume-role-policy \
+  --role-name github-actions-onlineshop \
+  --policy-document file://plans/AUTOMATIC-BUILDS-AND-DEPLOY/github-actions-oidc-trust-policy.json \
+  --profile dpm-profile \
+  --region eu-north-1
+aws iam get-role --role-name github-actions-onlineshop --profile dpm-profile --region eu-north-1
+```
+
+Pull-request jobs deliberately do not request AWS credentials or push images.
+
 ---
 
 ## AWS CLI on Windows
