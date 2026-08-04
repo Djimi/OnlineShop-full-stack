@@ -1,0 +1,113 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "EcrGetAuthorizationToken",
+      "Effect": "Allow",
+      "Action": "ecr:GetAuthorizationToken",
+      "Resource": "*"
+    },
+    {
+      "Sid": "ReadExistingReleaseImagesOnly",
+      "Effect": "Allow",
+      "Action": [
+        "ecr:BatchGetImage",
+        "ecr:DescribeImages",
+        "ecr:DescribeRepositories",
+        "ecr:GetDownloadUrlForLayer",
+        "ecr:ListImages"
+      ],
+      "Resource": [
+        "arn:aws:ecr:eu-north-1:799111666795:repository/onlineshop-auth",
+        "arn:aws:ecr:eu-north-1:799111666795:repository/onlineshop-items",
+        "arn:aws:ecr:eu-north-1:799111666795:repository/onlineshop-api-gateway"
+      ]
+    },
+    {
+      "Sid": "InspectProductionClustersAndServices",
+      "Effect": "Allow",
+      "Action": [
+        "ecs:DescribeClusters",
+        "ecs:ListServices",
+        "ecs:DescribeServices",
+        "ecs:ListTasks",
+        "ecs:DescribeTasks",
+        "ecs:TagResource"
+      ],
+      "Resource": [
+        "arn:aws:ecs:eu-north-1:799111666795:cluster/onlineshop-cluster",
+        "arn:aws:ecs:eu-north-1:799111666795:service/onlineshop-cluster/onlineshop-auth",
+        "arn:aws:ecs:eu-north-1:799111666795:service/onlineshop-cluster/onlineshop-items",
+        "arn:aws:ecs:eu-north-1:799111666795:service/onlineshop-cluster/onlineshop-api-gateway",
+        "arn:aws:ecs:eu-north-1:799111666795:task/onlineshop-cluster/*"
+      ]
+    },
+    {
+      "Sid": "RegisterAndReadProductionTaskDefinitions",
+      "Effect": "Allow",
+      "Action": [
+        "ecs:DescribeTaskDefinition",
+        "ecs:RegisterTaskDefinition",
+        "ecs:DeregisterTaskDefinition",
+        "ecs:DeleteTaskDefinitions"
+      ],
+      "Resource": "arn:aws:ecs:eu-north-1:799111666795:task-definition/onlineshop-*"
+    },
+    {
+      "Sid": "UpdateProductionServicesOnly",
+      "Effect": "Allow",
+      "Action": "ecs:UpdateService",
+      "Resource": [
+        "arn:aws:ecs:eu-north-1:799111666795:service/onlineshop-cluster/onlineshop-auth",
+        "arn:aws:ecs:eu-north-1:799111666795:service/onlineshop-cluster/onlineshop-items",
+        "arn:aws:ecs:eu-north-1:799111666795:service/onlineshop-cluster/onlineshop-api-gateway"
+      ]
+    },
+    {
+      "Sid": "PassExecutionRoleToEcsOnly",
+      "Effect": "Allow",
+      "Action": "iam:PassRole",
+      "Resource": "arn:aws:iam::799111666795:role/ecsTaskExecutionRole",
+      "Condition": {
+        "StringEquals": {
+          "iam:PassedToService": "ecs-tasks.amazonaws.com"
+        }
+      }
+    },
+    {
+      "Sid": "InspectProductionLoadBalancer",
+      "Effect": "Allow",
+      "Action": [
+        "elasticloadbalancing:DescribeLoadBalancers",
+        "elasticloadbalancing:DescribeTargetGroups",
+        "elasticloadbalancing:DescribeTargetHealth",
+        "elasticloadbalancing:DescribeListeners"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "DeployFrontendAssetsToOwnedBucket",
+      "Effect": "Allow",
+      "Action": [
+        "s3:GetObject",
+        "s3:PutObject",
+        "s3:HeadObject",
+        "s3:ListBucket"
+      ],
+      "Resource": [
+        "arn:aws:s3:::onlineshop-frontend-799111666795",
+        "arn:aws:s3:::onlineshop-frontend-799111666795/*"
+      ]
+    },
+    {
+      "Sid": "InvalidateOwnedCloudFrontDistribution",
+      "Effect": "Allow",
+      "Action": [
+        "cloudfront:CreateInvalidation",
+        "cloudfront:GetDistribution",
+        "cloudfront:ListInvalidations"
+      ],
+      "Resource": "arn:aws:cloudfront::799111666795:distribution/EPS8MI3FV3B7X"
+    }
+  ]
+}

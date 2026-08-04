@@ -50,6 +50,14 @@ lc_init() {
   done
   [ "${#LC_ALB_SUBNETS[@]}" -gt 1 ] || lc_die "at least two ALB subnets are required"
   [ "${#LC_SERVICES[@]}" -gt 0 ] || lc_die "at least one ECS service is required"
+  # The profile/region are MANDATORY and must never be overridden: every AWS
+  # call in this project forces --profile dpm-profile --region eu-north-1. The
+  # config carries these values, and lc_init refuses to run on anything else so
+  # no config or environment override can silently change the target account.
+  [ "$LC_PROFILE" = "dpm-profile" ] ||
+    lc_die "LC_PROFILE must be dpm-profile (got $LC_PROFILE); the profile is not overridable"
+  [ "$LC_REGION" = "eu-north-1" ] ||
+    lc_die "LC_REGION must be eu-north-1 (got $LC_REGION); the region is not overridable"
   command -v aws >/dev/null || lc_die "aws CLI is required"
   LC_AWS=(aws --profile "$LC_PROFILE" --region "$LC_REGION")
 }
@@ -302,13 +310,13 @@ lc_wait_http_unauthorized() {
 }
 
 lc_staging_db_status() {
-  lc_require_environment staging
+  lc_require_environment staging || return 1
   "${LC_AWS[@]}" rds describe-db-instances --db-instance-identifier "$LC_DB_INSTANCE" \
     --query 'DBInstances[0].DBInstanceStatus' --output text 2>/dev/null || true
 }
 
 lc_create_clean_staging_db() {
-  lc_require_environment staging
+  lc_require_environment staging || return 1
   local status endpoint public vpc encrypted
   status=$(lc_staging_db_status)
   if lc_is_present "$status"; then
@@ -347,7 +355,7 @@ lc_create_clean_staging_db() {
 }
 
 lc_staging_master_secret_arn() {
-  lc_require_environment staging
+  lc_require_environment staging || return 1
   local secret_arn
   secret_arn=$("${LC_AWS[@]}" rds describe-db-instances \
     --db-instance-identifier "$LC_DB_INSTANCE" \
@@ -358,7 +366,7 @@ lc_staging_master_secret_arn() {
 
 lc_delete_staging_db() {
   local snapshot_name="${1:-}" status protection
-  lc_require_environment staging
+  lc_require_environment staging || return 1
   status=$(lc_staging_db_status)
   if ! lc_is_present "$status"; then
     lc_log "Staging RDS $LC_DB_INSTANCE is already absent; no deletion needed."

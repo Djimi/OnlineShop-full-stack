@@ -807,3 +807,222 @@ session logs. Remediation performed same day:
 - **No blocking poll loops** in a single shell call (a 48×10s loop hit the 600s hard timeout and lost everything). Use `aws ecs wait services-stable`, or loops bounded to <2 min and re-invoke.
 - **Batch independent AWS reads** in one call (describe-services + list-tasks + logs in a single script) instead of one API call per turn.
 - Fix the FIRST error class before scaling out — items-staging burned a 10-minute wait on the exact schema issue already diagnosed on auth-staging.
+
+## E1. Pass 3, subphase 3.2 — Candidate evidence reads
+
+Pass 3.2 does not mutate AWS; the offline gate is `bash
+tests/scripts/candidate_evidence_test.sh`. The workflow reads, when it runs:
+
+```bash
+# Service-reported digest for the candidate tag (never inferred from the tag).
+aws ecr describe-images --profile dpm-profile --region eu-north-1 \
+  --repository-name onlineshop-auth \
+  --image-ids imageTag=sha-<full-sha> \
+  --query 'imageDetails[0].imageDigest' --output text
+
+# OCI labels live in the image *config* blob. `docker manifest inspect --verbose`
+# does not expose it (it only references the config by digest), so
+# image-labels.sh reads the config via the lightweight
+# `docker buildx imagetools inspect --format '{{json .Image}}' <image>` (fetches
+# manifest + config blob only, no layer pull). The caller must be docker-logged
+# in to ECR (aws-actions/amazon-ecr-login) and have buildx available
+# (docker/setup-buildx-action runs before every image-labels.sh call).
+# Wrapped by release/bin/image-labels.sh and verified by
+# release/bin/verify-producer-set.sh (canonical producer set) and
+# release/bin/publish-candidate-image.sh (push/reuse/fail-closed).
+```
+
+These live ECR/GitHub/Syft checks are deferred to the consolidated Pass 3
+verification pass; the offline gate never claims them.
+
+## E2. Pass 3, subphase 3.3 — ECR release tagging, immutability, least privilege
+
+The 3.3 work does **not** mutate AWS in this subphase; the offline gate is
+`bash tests/scripts/ecr_release_tagging_test.sh`. The scripts below are the
+live mutation/read-back paths that the consolidated pass and the promotion/
+rollback phases will run. **Every command includes `--profile dpm-profile
+--region eu-north-1` (the scripts default AWS_ARGS to exactly these values) and
+every mutation is immediately read back.**
+
+Immutable repositories (applied once, then read back):
+
+```bash
+bash plans/AUTOMATIC-BUILDS-AND-DEPLOY/release/bin/apply-immutable-repositories.sh \
+  --profile dpm-profile --region eu-north-1
+# per repository this runs:
+aws ecr put-image-tag-mutability --profile dpm-profile --region eu-north-1 \
+  --repository-name onlineshop-auth \
+  --image-tag-mutability IMMUTABLE_WITH_EXCLUSION \
+  --image-tag-mutability-exclusion-filters \
+  '[{"filterType":"WILDCARD","filter":"main-latest"},{"filterType":"WILDCARD","filter":"branch-*"}]'
+# then the read-back that must match:
+aws ecr describe-repositories --profile dpm-profile --region eu-north-1 \
+  --repository-name onlineshop-auth \
+  --query 'repositories[0].{mutability: imageTagMutability, exclusions: imageTagMutabilityExclusionFilters}' \
+  --output json
+```
+
+Read-only immutable-config verification (drift fails closed):
+
+```bash
+bash plans/AUTOMATIC-BUILDS-AND-DEPLOY/release/bin/verify-immutable-repositories.sh \
+  --profile dpm-profile --region eu-north-1
+```
+
+Server-side digest-preserving release tagging (promotion phase):
+
+```bash
+bash plans/AUTOMATIC-BUILDS-AND-DEPLOY/release/bin/promote-image-digest.sh \
+  --repository onlineshop-auth \
+  --candidate-tag sha-<full-sha> \
+  --release-tag release-1.2.1 \
+  --digest sha256:<recorded-digest> \
+  --profile dpm-profile --region eu-north-1
+# mints server-side via (never pulls/rebuilds):
+aws ecr batch-get-image --profile dpm-profile --region eu-north-1 \
+  --repository-name onlineshop-auth --image-ids imageTag=sha-<full-sha> \
+  --accepted-media-types application/vnd.docker.distribution.manifest.v2+json
+aws ecr put-image --profile dpm-profile --region eu-north-1 \
+  --repository-name onlineshop-auth --image-tag release-1.2.1 \
+  --image-manifest <manifest-from-batch-get-image> \
+  --image-manifest-media-type <same-media-type>
+# read-back (both tags must resolve to the recorded digest):
+aws ecr describe-images --profile dpm-profile --region eu-north-1 \
+  --repository-name onlineshop-auth \
+  --image-ids imageTag=sha-<full-sha> imageTag=release-1.2.1 \
+  --query 'imageDetails[].{tag: imageTags[0], digest: imageDigest}' --output json
+```
+
+Release-identity preflight (read-only, before any promotion mutation):
+
+```bash
+export GITHUB_REPOSITORY=Djimi/OnlineShop-full-stack
+bash plans/AUTOMATIC-BUILDS-AND-DEPLOY/release/bin/check-release-identity.sh \
+  --manifest candidate-manifest.json \
+  --bucket onlineshop-frontend-799111666795 \
+  --profile dpm-profile --region eu-north-1
+# prints action=proceed | action=resume; any collision exits non-zero.
+```
+
+IAM policy validation (structural, offline):
+
+```bash
+PYTHONPATH=plans/AUTOMATIC-BUILDS-AND-DEPLOY/release/src python3 \
+  -m release_contract.iam validate-policy \
+  --policy plans/AUTOMATIC-BUILDS-AND-DEPLOY/github-actions-promotion-policy.json
+PYTHONPATH=plans/AUTOMATIC-BUILDS-AND-DEPLOY/release/src python3 \
+  -m release_contract.iam validate-trust \
+  --policy plans/AUTOMATIC-BUILDS-AND-DEPLOY/github-actions-oidc-trust-policy.json
+```
+
+Before any live policy application, run IAM Access Analyzer
+(`aws iam validate-policy --policy-document file://... --profile dpm-profile
+--region eu-north-1`) — deferred to the consolidated pass. The OIDC
+`environment:production` subject must be verified from a real job's JWT, not
+guessed.
+
+---
+
+## Pass 3, subphase 3.5 — Production hardening (read-only + deferred mutations)
+
+All commands carry the mandatory `--profile dpm-profile --region eu-north-1`.
+CloudFront is a global service (global endpoint `cloudfront.amazonaws.com`,
+signing region `us-east-1`), so the `eu-north-1` region value is harmless on
+CloudFront commands.
+
+### Task-definition and service-config validation (offline, file-based)
+
+```bash
+RELEASE=plans/AUTOMATIC-BUILDS-AND-DEPLOY/release
+# Validates a task definition: Fargate awsvpc + CPU/memory, digest-pinned
+# image, versionConsistency=enabled, health check, awslogs, named Service
+# Connect ports, stopTimeout, full-ARN secrets[].valueFrom, no plaintext.
+bash "$RELEASE/bin/validate-task-definition.sh" --input task-definition.json
+# Digest-pins a copied definition and proves the diff is image-only with
+# secrets still in secrets[].valueFrom.
+bash "$RELEASE/bin/sanitize-task-definition.sh" \
+  --input current-td.json --output release-td.json \
+  --set-image auth=799111666795.dkr.ecr.eu-north-1.amazonaws.com/onlineshop-auth@sha256:<hex>
+```
+
+### Read-only production inventory and production/staging separation
+
+```bash
+# Compares every explicit non-secret identifier in scripts/config/production.env
+# against live AWS state; fails closed on any drift. Never mutates.
+bash scripts/inventory-production.sh [--json]
+
+# Proves production and staging share no VPC/cluster/RDS/SG/namespace/secrets/
+# services/target group — against the configs AND live identity + topology.
+bash scripts/verify-production-staging-separation.sh [--json]
+```
+
+### Frontend S3 REST + CloudFront OAC (NOT applied in 3.5)
+
+```bash
+# Read-only: REST origin + OAC + public access block + SPA fallback must all
+# be in place; website origin or public-read policy fails closed.
+bash scripts/verify-frontend-oac.sh [--json]
+
+# Mutation tool: --dry-run prints the ordered plan; --apply starts with a
+# no-lockout precondition gate (the current bucket policy must already grant
+# public read or the CloudFront OAC), then performs each mutation with an
+# immediate read-back, waits (bounded) for the asynchronous CloudFront
+# deployment to reach Deployed, and fails closed on drift. Deferred to the
+# consolidated verification pass.
+bash scripts/migrate-frontend-oac.sh --dry-run
+```
+
+### CloudTrail management-event coverage (read-only)
+
+```bash
+# Audits a multi-region, logging, management-event trail that delivers to an
+# S3/CloudWatch Logs target with a confirmed LatestDeliveryTime and no delivery
+# error, so ECS/ECR/S3/CloudFront/IAM/Secrets Manager control-plane mutations
+# are captured. Management selectors cover all management events; they are not
+# a per-service enumeration.
+bash scripts/verify-cloudtrail-coverage.sh [--json]
+```
+
+---
+
+## E3. Pass 3, subphase 3.7 — Release traceability queries (read-only)
+
+The offline gate is `bash tests/scripts/release_traceability_test.sh`. The
+operator CLI `release/bin/trace.sh` answers all four lookups in both directions
+plus the consistency audit. Output is machine-readable JSON on stdout (exit 0
+only when found AND consistent; 1 = `NOT_FOUND`/`AMBIGUOUS_*`/`*_MISMATCH`/
+`OBSERVED_READ_ERROR`; 2 = usage); `--human` adds a concise view on stderr.
+
+Offline fixture mode (no AWS):
+
+```bash
+RELEASE=plans/AUTOMATIC-BUILDS-AND-DEPLOY/release
+FX=$RELEASE/fixtures/traceability
+bash $RELEASE/bin/trace.sh commit  --sha a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4 \
+  --index $FX/index.json --observed $FX/observed-ok.json
+bash $RELEASE/bin/trace.sh release --version 1.2.1 \
+  --index $FX/index.json --observed $FX/observed-ok.json --human
+bash $RELEASE/bin/trace.sh running \
+  --index $FX/index.json --observed $FX/observed-paused.json
+bash $RELEASE/bin/trace.sh digest --digest sha256:<recorded-digest> \
+  --index $FX/index.json --observed $FX/observed-ok.json
+bash $RELEASE/bin/trace.sh audit \
+  --index $FX/index.json --observed $FX/observed-ok.json
+```
+
+Live read-only smoke test (deferred to the consolidated pass; mandatory
+identity preflight + non-overridable profile/region):
+
+```bash
+export GITHUB_REPOSITORY=Djimi/OnlineShop-full-stack
+# Index auto-fetched from GitHub Releases (read-only gh api); observed state
+# gathered with read-only AWS reads (ECR describe-images, ECS list-tasks/
+# describe-tasks/describe-services/describe-task-definition, S3 get-object).
+bash plans/AUTOMATIC-BUILDS-AND-DEPLOY/release/bin/trace.sh running --human
+bash plans/AUTOMATIC-BUILDS-AND-DEPLOY/release/bin/trace.sh audit --human
+# identity preflight (the script refuses any other profile/region):
+aws sts get-caller-identity --profile dpm-profile --region eu-north-1
+```
+
+`TRACE_KEEP_TMP=1` keeps the scratch directory for operator debugging.

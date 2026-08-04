@@ -1,0 +1,23 @@
+{
+  "trails": [
+    {
+      "Name": "onlineshop-cloudtrail",
+      "S3BucketName": "onlineshop-cloudtrail",
+      "IsMultiRegionTrail": false
+    }
+  ],
+  "statuses": {
+    "onlineshop-cloudtrail": {
+      "IsLogging": true,
+      "LatestDeliveryTime": "2026-08-04T12:00:00Z"
+    }
+  },
+  "selectors": {
+    "onlineshop-cloudtrail": [
+      {
+        "IncludeManagementEvents": true,
+        "ReadWriteType": "All"
+      }
+    ]
+  }
+}

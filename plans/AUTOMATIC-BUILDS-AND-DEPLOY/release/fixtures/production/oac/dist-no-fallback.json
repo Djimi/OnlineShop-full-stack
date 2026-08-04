@@ -1,0 +1,19 @@
+{
+  "Origins": {
+    "Quantity": 2,
+    "Items": [
+      {
+        "Id": "s3-frontend",
+        "DomainName": "onlineshop-frontend-799111666795.s3.eu-north-1.amazonaws.com",
+        "OriginAccessControlId": "OAC-1A2B3C4D"
+      },
+      {
+        "Id": "alb-api",
+        "DomainName": "onlineshop-alb-1163734147.eu-north-1.elb.amazonaws.com"
+      }
+    ]
+  },
+  "DefaultCacheBehavior": {
+    "TargetOriginId": "s3-frontend"
+  }
+}

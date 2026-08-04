@@ -1,0 +1,12 @@
+{
+  "deleteFlag": true,
+  "fromPrefix": "_releases/v1.1.0/",
+  "indexHtml": "index.html",
+  "marker": "release.json",
+  "steps": [
+    "fetch-prefix",
+    "live-marker-index",
+    "invalidate",
+    "verify"
+  ]
+}

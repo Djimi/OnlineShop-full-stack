@@ -1,0 +1,16 @@
+{
+  "lastOfficialVersion": "1.1.0",
+  "lastOfficialSha": "deadbeefcafebabe1234567890abcdef12345678",
+  "candidateSha": "a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4",
+  "candidateVersion": "1.2.1",
+  "descendantOfOfficial": {
+    "status": "diverged",
+    "aheadBy": 2,
+    "behindBy": 3
+  },
+  "reachableFromMain": {
+    "status": "identical",
+    "aheadBy": 0,
+    "behindBy": 0
+  }
+}

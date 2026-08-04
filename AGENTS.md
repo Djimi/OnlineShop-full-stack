@@ -134,6 +134,171 @@ ad-hoc shell string concatenation — and run the gate:
 bash tests/scripts/release_contract_test.sh
 ```
 
+### Candidate build evidence (Pass 3, subphase 3.2)
+
+The successful `main` push workflow emits one candidate evidence bundle (run
+id/attempt, full SHA, actor, ECR digests, frontend checksum, SBOMs, staging
+validation) after Auth, Items, API Gateway, frontend, and the cloud staging E2E
+job all pass. Reusable scripts and fixtures live in the same `release/`
+directory. The offline gate (fixtures, workflow static checks, reproducible
+frontend packaging, publish/reuse/fail-closed decisions, artifact identity/
+digest recording):
+
+```bash
+bash tests/scripts/candidate_evidence_test.sh
+```
+
+Live ECR/GitHub/Syft evidence is verified in the consolidated Pass 3
+verification pass, not by the offline gate.
+
+### ECR release tagging, immutability, and least privilege (Pass 3, subphase 3.3)
+
+The three backend ECR repositories are defined with desired state
+`IMMUTABLE_WITH_EXCLUSION` (exclusion filters exactly `main-latest` and
+`branch-*`, see `release/ecr/immutable-repositories.json`) so `sha-*` and
+`release-*` tags can never be overwritten and `latest` stays absent. Release
+tags are minted server-side from the recorded candidate bytes
+(`ecr:batch-get-image` + `ecr:put-image`, never pull/rebuild) by
+`promote-image-digest.sh`, guarded by the `release_contract.ecr`
+mint/reuse/fail-closed decision and the `check-release-identity.sh` +
+`release_contract.releaseid` collision/resume preflight. GitHub OIDC access is
+planned to be split by job purpose (`github-actions-role-layout.md`:
+candidate-build, promotion, production-deploy, rollback; validation jobs have
+no AWS access). The per-purpose roles and the immutable-repository mutation are
+**not applied live yet** — the workflow still assumes the single
+`github-actions-onlineshop` role, and the split + repository read-back are
+applied in the consolidated Pass 3 verification pass. The offline gate:
+
+```bash
+bash tests/scripts/ecr_release_tagging_test.sh
+```
+
+Live ECR settings read-back, real put-image behavior, the real OIDC
+environment subject, and the IAM Access Analyzer run are verified in the
+consolidated Pass 3 verification pass, not by the offline gate.
+
+### Controlled staging-to-production promotion (Pass 3, subphase 3.4)
+
+The approved, approval-gated promotion of one verified candidate snapshot from
+staging to production lives in `.github/workflows/promote-release.yml` (manual
+dispatch with `version` + `run_id`; a read-only `preflight` job validates the
+dispatch inputs and the candidate manifest contract before the protected
+`production` Environment; the approved `promote` job runs the full preflight
+after approval/lock with a fresh snapshot and never rebuilds; `approvedBy` is
+derived from the environment-approval evidence via
+`actions/runs/{run}/approvals`, never `github.actor`; the candidate evidence
+artifact is consumed from the exact producing attempt, never the latest;
+`compensate` restores the pre-promotion snapshot on failure (automatic, not
+approval-gated), including the frontend live root from the previous immutable
+prefix) and
+`release/bin/promotion-preflight.sh`/`snapshot-production.sh`/
+`deploy-production.sh`/`verify-production.sh`/`publish-frontend.sh`/
+`finalize-release.sh`/`compensate-production.sh` with the fixture-tested
+`release_contract.promotion` decision layer (dispatch, run evidence, ancestry,
+preflight, snapshot, plan, waiter, frontend publication, verification,
+finalization, compensation). The offline gate:
+
+```bash
+bash tests/scripts/promotion_test.sh
+```
+
+The live owner-approved promotion, the real `production` Environment approval
+and required-reviewer check, real ECR/ECS/S3/CloudFront mutations and read-backs,
+and the real GitHub Release publication are verified in the consolidated Pass 3
+verification pass, not by the offline gate.
+
+### Production hardening (Pass 3, subphase 3.5)
+
+The existing isolated production environment is hardened rather than replaced.
+Read-only inventory and consistency tooling plus mutation tools with mandatory
+verification live in `scripts/` (inventory, production/staging separation,
+frontend S3 REST + CloudFront OAC, CloudTrail coverage), the decision logic and
+offline tests in `release/`, and the explicit non-secret identifiers in
+`scripts/config/{production,staging}.env`. The offline gate:
+
+```bash
+bash tests/scripts/production_hardening_test.sh
+```
+
+- **Task definitions/services:** `release/bin/validate-task-definition.sh`
+  enforces digest-pinned `@sha256:` images, the Fargate CPU/memory matrix,
+  `awsvpc`, named Service Connect port mappings, `awslogs`, health checks,
+  positive `stopTimeout`, `versionConsistency=enabled`, distinct
+  execution-role/task-role duties, full-ARN `secrets[].valueFrom`, and
+  circuit-breaker/safe-rolling service parameters
+  (`minimumHealthyPercent=100`, `maximumPercent=200`, rollback enabled).
+- **Sanitized transforms:** `release/bin/sanitize-task-definition.sh` replaces
+  only the intended container image and proves the diff is image-only and that
+  secrets never leave `secrets[].valueFrom`.
+- **Inventory/separation:** `scripts/inventory-production.sh` and
+  `scripts/verify-production-staging-separation.sh` are read-only and compare
+  the explicit non-secret configs against live state (identity + VPC/Cloud Map
+  topology), failing closed on any drift or shared resource. A genuinely
+  absent resource is reported `missing`; an AWS read that fails is reported
+  `error` (never disguised as drift or silence). Execution role and ECR
+  repositories are shared infrastructure and are not separation violations.
+- **Frontend OAC:** `scripts/verify-frontend-oac.sh` (read-only) and
+  `scripts/migrate-frontend-oac.sh` (`--dry-run`/`--apply` with per-step
+  read-back) move the frontend to an S3 REST origin behind CloudFront Origin
+  Access Control and block direct public bucket access. **Not applied live in
+  3.5** — application is deferred to the consolidated verification pass.
+- **CloudTrail:** `scripts/verify-cloudtrail-coverage.sh` audits management-
+  event coverage (multi-region, logging, delivery) for ECS/ECR/S3/CloudFront/
+  IAM/Secrets Manager.
+- **Lifecycle guards:** the staging-only DB helpers fail fast
+  (`lc_require_environment staging || return 1`); production entry points never
+  reach clean-staging database create/bootstrap/delete paths.
+- **Backup/migration limitation:** no schema-changing production release until
+  Flyway (or equivalent) + forward/backward-compatible rules + a tested
+  backup/restore procedure exist. See
+  `plans/AUTOMATIC-BUILDS-AND-DEPLOY/explanations/PRODUCTION-HARDENING-DECISIONS.md`.
+
+Live hardening read-back (real inventory, real OAC migration, real CloudTrail,
+real service/TD verification, security-group/IAM tightening) is deferred to
+the consolidated Pass 3 verification pass and is not claimed by the offline
+gate.
+
+### Release traceability queries (Pass 3, subphase 3.7)
+
+Read-only operator queries answered in both directions live in
+`plans/AUTOMATIC-BUILDS-AND-DEPLOY/release/` (`release/bin/trace.sh` +
+the fixture-tested `release_contract.traceability` decision layer, index/
+observed-state fixtures under `release/fixtures/traceability/`):
+
+- `trace.sh commit --sha <full-sha>` → candidate run, ECR digests, official releases;
+- `trace.sh release --version <semver>` → source SHA, components, evidence,
+  SBOMs, artifacts (+ ECR release-tag and immutable per-release prefix-marker
+  cross-checks);
+- `trace.sh running` → task-definition ARNs, **running** digests from
+  `tasks[].containers[].imageDigest` (never only the task-definition URI),
+  release identity + approver, frontend identity from the deployed immutable
+  `release.json` marker; paused production is reported honestly with selected
+  task-definition digests and last verified deployment evidence (never a
+  fabricated running digest); a mixed or incomplete running digest set fails
+  closed;
+- `trace.sh digest --digest sha256:<hex>` → ECR tags, OCI revision (attributed
+  to the release manifest, never claimed as an observed label read), candidate
+  run, release identity;
+- `trace.sh audit [--version <semver>]` → manifest ↔ ECR ↔ ECS running digest ↔
+  frontend checksum consistency audit (read-only, reports drift; newest-first
+  by numeric version, independent of index order).
+
+Output is machine-readable JSON (exit 0 only when found AND consistent;
+`NOT_FOUND`/`AMBIGUOUS_*`/`*_MISMATCH`/`OBSERVED_READ_ERROR` exit 1;
+usage errors exit 2); `--human` adds a concise view. Live AWS reads require
+the mandatory identity preflight and non-overridable `--profile dpm-profile
+--region eu-north-1`. A configured production service omitted by
+`describe-services`, or a malformed frontend marker, is a read `error` that
+fails closed as `OBSERVED_READ_ERROR` — never silent drift. The offline gate:
+
+```bash
+bash tests/scripts/release_traceability_test.sh
+```
+
+Live lookups against real AWS/GitHub (the read-only live smoke test) are
+deferred to the consolidated Pass 3 verification pass and are not claimed by
+the offline gate.
+
 ### Before any AWS work
 - Always run `aws sts get-caller-identity --profile dpm-profile --region eu-north-1` first in any new terminal session
 - Always pass `--profile dpm-profile --region eu-north-1` explicitly on every command; AWS resources are region-scoped and invisible across regions

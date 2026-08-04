@@ -1,0 +1,74 @@
+{
+  "paused": false,
+  "services": {
+    "onlineshop-auth": {
+      "desiredCount": 1,
+      "capacityProviderStrategy": [
+        {
+          "capacityProvider": "FARGATE_SPOT",
+          "weight": 1,
+          "base": 1
+        }
+      ],
+      "taskDefinitionArn": "arn:aws:ecs:eu-north-1:799111666795:task-definition/onlineshop-auth:4",
+      "runningDigest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+      "deployments": [
+        {
+          "id": "ecs-svc/0000000000000000001",
+          "rolloutState": "COMPLETED"
+        }
+      ]
+    },
+    "onlineshop-items": {
+      "desiredCount": 1,
+      "capacityProviderStrategy": [
+        {
+          "capacityProvider": "FARGATE_SPOT",
+          "weight": 1,
+          "base": 1
+        }
+      ],
+      "taskDefinitionArn": "arn:aws:ecs:eu-north-1:799111666795:task-definition/onlineshop-items:3",
+      "runningDigest": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+      "loadBalancers": [],
+      "deployments": [
+        {
+          "id": "ecs-svc/0000000000000000002",
+          "rolloutState": "COMPLETED"
+        }
+      ]
+    },
+    "onlineshop-api-gateway": {
+      "desiredCount": 1,
+      "capacityProviderStrategy": [
+        {
+          "capacityProvider": "FARGATE_SPOT",
+          "weight": 1,
+          "base": 1
+        }
+      ],
+      "taskDefinitionArn": "arn:aws:ecs:eu-north-1:799111666795:task-definition/onlineshop-api-gateway:12",
+      "runningDigest": "sha256:3333333333333333333333333333333333333333333333333333333333333333",
+      "loadBalancers": [],
+      "deployments": [
+        {
+          "id": "ecs-svc/0000000000000000003",
+          "rolloutState": "COMPLETED"
+        }
+      ]
+    }
+  },
+  "frontend": {
+    "marker": {
+      "version": "1.1.0",
+      "sourceSha": "deadbeefcafebabe1234567890abcdef12345678",
+      "frontendSha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+    },
+    "indexSha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+  },
+  "officialRelease": {
+    "version": "1.1.0",
+    "gitTag": "v1.1.0",
+    "sourceSha": "deadbeefcafebabe1234567890abcdef12345678"
+  }
+}

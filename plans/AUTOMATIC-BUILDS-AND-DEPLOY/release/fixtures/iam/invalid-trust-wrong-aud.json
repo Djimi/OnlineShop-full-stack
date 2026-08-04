@@ -1,0 +1,24 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Principal": {
+        "Federated": "arn:aws:iam::799111666795:oidc-provider/token.actions.githubusercontent.com"
+      },
+      "Action": "sts:AssumeRoleWithWebIdentity",
+      "Condition": {
+        "StringEquals": {
+          "token.actions.githubusercontent.com:aud": "api://AzureADTokenExchange"
+        },
+        "StringLike": {
+          "token.actions.githubusercontent.com:sub": [
+            "repo:Djimi@8793507/OnlineShop-full-stack@1097550215:ref:refs/heads/main",
+            "repo:Djimi@8793507/OnlineShop-full-stack@1097550215:ref:refs/heads/feature/*",
+            "repo:Djimi@8793507/OnlineShop-full-stack@1097550215:environment:production"
+          ]
+        }
+      }
+    }
+  ]
+}

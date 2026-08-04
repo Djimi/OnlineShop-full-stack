@@ -1,0 +1,128 @@
+{
+  "existingResult": null,
+  "manifest": {
+    "components": {
+      "apiGateway": {
+        "candidateTag": "sha-deadbeefcafebabe1234567890abcdef12345678",
+        "identity": "api-gateway/1.1.0",
+        "imageDigest": "sha256:3333333333333333333333333333333333333333333333333333333333333333",
+        "releaseTag": "release-1.1.0",
+        "repository": "onlineshop-api-gateway",
+        "sbom": "api-gateway.spdx.json",
+        "sourceSha": "deadbeefcafebabe1234567890abcdef12345678",
+        "taskDefinitionArn": "arn:aws:ecs:eu-north-1:799111666795:task-definition/onlineshop-api-gateway:11"
+      },
+      "auth": {
+        "candidateTag": "sha-deadbeefcafebabe1234567890abcdef12345678",
+        "identity": "auth/1.1.0",
+        "imageDigest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+        "releaseTag": "release-1.1.0",
+        "repository": "onlineshop-auth",
+        "sbom": "auth.spdx.json",
+        "sourceSha": "deadbeefcafebabe1234567890abcdef12345678",
+        "taskDefinitionArn": "arn:aws:ecs:eu-north-1:799111666795:task-definition/onlineshop-auth:3"
+      },
+      "frontend": {
+        "artifact": "frontend-dist.tar.gz",
+        "identity": "frontend/1.1.0",
+        "releasePrefix": "_releases/v1.1.0/",
+        "sbom": "frontend.spdx.json",
+        "sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "sourceSha": "deadbeefcafebabe1234567890abcdef12345678",
+        "versionMarker": "release.json"
+      },
+      "items": {
+        "candidateTag": "sha-deadbeefcafebabe1234567890abcdef12345678",
+        "commonSourceSha": "deadbeefcafebabe1234567890abcdef12345678",
+        "identity": "items/1.1.0",
+        "imageDigest": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+        "releaseTag": "release-1.1.0",
+        "repository": "onlineshop-items",
+        "sbom": "items.spdx.json",
+        "sourceSha": "deadbeefcafebabe1234567890abcdef12345678",
+        "taskDefinitionArn": "arn:aws:ecs:eu-north-1:799111666795:task-definition/onlineshop-items:3"
+      }
+    },
+    "release": {
+      "artifactWorkflow": {
+        "conclusion": "success",
+        "event": "push",
+        "ref": "refs/heads/main",
+        "runAttempt": 1,
+        "runId": 98765432,
+        "url": "https://github.com/Djimi/OnlineShop-full-stack/actions/runs/98765432/attempts/1"
+      },
+      "candidateWorkflow": {
+        "conclusion": "success",
+        "event": "push",
+        "ref": "refs/heads/main",
+        "runAttempt": 1,
+        "runId": 98765432,
+        "url": "https://github.com/Djimi/OnlineShop-full-stack/actions/runs/98765432/attempts/1"
+      },
+      "createdAt": "2026-07-30T12:00:00Z",
+      "gitTag": "v1.1.0",
+      "promotionWorkflow": {
+        "actor": "djimi",
+        "approvedAt": "2026-07-30T14:00:00Z",
+        "approvedBy": "djimi",
+        "deployedAt": "2026-07-30T14:15:00.100Z",
+        "runId": 98765433
+      },
+      "repository": "Djimi/OnlineShop-full-stack",
+      "sourceSha": "deadbeefcafebabe1234567890abcdef12345678",
+      "stagingValidation": {
+        "conclusion": "success",
+        "job": "e2e-staging",
+        "validatedAt": "2026-07-30T13:00:00Z"
+      },
+      "status": "official",
+      "version": "1.1.0"
+    },
+    "schemaVersion": 1
+  },
+  "result": {
+    "approver": "djimi",
+    "auditAnnotation": {
+      "path": "rollback-audit-123456791.json",
+      "written": false
+    },
+    "from": {
+      "digests": {
+        "apiGateway": "sha256:3333333333333333333333333333333333333333333333333333333333333333",
+        "auth": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+        "items": "sha256:2222222222222222222222222222222222222222222222222222222222222222"
+      },
+      "frontendSha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "gitTag": "v1.1.0",
+      "sourceSha": "deadbeefcafebabe1234567890abcdef12345678",
+      "version": "1.1.0"
+    },
+    "outcome": "success",
+    "productionVerified": false,
+    "requester": "djimi",
+    "runId": 123456791,
+    "timestamps": {
+      "completedAt": "2026-08-04T15:10:00Z",
+      "startedAt": "2026-08-04T15:00:00Z"
+    },
+    "to": {
+      "digests": {
+        "apiGateway": "sha256:3333333333333333333333333333333333333333333333333333333333333333",
+        "auth": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+        "items": "sha256:2222222222222222222222222222222222222222222222222222222222222222"
+      },
+      "frontendSha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "gitTag": "v1.1.0",
+      "sourceSha": "deadbeefcafebabe1234567890abcdef12345678",
+      "version": "1.1.0"
+    }
+  },
+  "snapshot": {
+    "officialRelease": {
+      "gitTag": "v1.2.1",
+      "sourceSha": "a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4",
+      "version": "1.2.1"
+    }
+  }
+}

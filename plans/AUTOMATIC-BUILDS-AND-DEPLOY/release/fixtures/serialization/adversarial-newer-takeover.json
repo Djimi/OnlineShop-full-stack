@@ -1,0 +1,5 @@
+[
+  { "event": "acquire", "run": 100 },
+  { "event": "release", "run": 200 },
+  { "event": "acquire", "run": 200 }
+]

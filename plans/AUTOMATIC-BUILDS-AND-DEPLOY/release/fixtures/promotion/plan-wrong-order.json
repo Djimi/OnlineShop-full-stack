@@ -1,0 +1,9 @@
+{
+  "components": ["frontend", "auth", "items", "apiGateway"],
+  "circuitBreaker": {
+    "enable": true,
+    "rollback": true
+  },
+  "minimumHealthyPercent": 100,
+  "maximumPercent": 200
+}

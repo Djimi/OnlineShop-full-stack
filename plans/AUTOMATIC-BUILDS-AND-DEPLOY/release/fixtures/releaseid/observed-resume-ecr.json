@@ -1,0 +1,9 @@
+{
+  "gitTag": {"exists": false, "sha": null},
+  "ecr": {
+    "onlineshop-auth": {"releaseDigest": "sha256:50310c92745326299ce463ebd8ad2279a4ff0386a3701246e48165c65d5682b0"},
+    "onlineshop-items": {"releaseDigest": "sha256:1a78d43d2aaaca3cafe41539f5fe211f4ef45152a1fa6af5b85006e93b019452"},
+    "onlineshop-api-gateway": {"releaseDigest": "sha256:31f9bfdf4d15f460167ba2b7ce9ada23278be1a9f115f06c01e5242901e8948e"}
+  },
+  "frontend": {"markerExists": false, "marker": null}
+}

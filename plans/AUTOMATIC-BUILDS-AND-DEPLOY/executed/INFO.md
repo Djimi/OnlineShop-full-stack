@@ -1452,6 +1452,18 @@ aws ecs describe-tasks --cluster onlineshop-cluster --tasks $TASK_ARN \
 | Frontend S3 | Bucket: `onlineshop-frontend-799111666795`, Website endpoint, Public read |
 | CloudFront | Distribution: `EPS8MI3FV3B7X`, Domain: `d2akuwv5pxgajc.cloudfront.net`, S3 + ALB origins |
 | CI/CD | `.github/workflows/build-and-push.yml`, OIDC role `github-actions-onlineshop` |
+| Service Connect namespace | `onlineshop.local` (production), `staging.onlineshop.local` (staging) |
+| Log groups | `/ecs/onlineshop-auth`, `/ecs/onlineshop-items`, `/ecs/onlineshop-api-gateway` (production) |
+| Execution role | `arn:aws:iam::799111666795:role/ecsTaskExecutionRole` |
+
+Pass 3, subphase 3.5 hardening is **not yet applied live**: the frontend still
+uses the public S3 website origin (migration to an S3 REST origin behind a
+CloudFront Origin Access Control is implemented in
+`scripts/migrate-frontend-oac.sh` and `scripts/verify-frontend-oac.sh` but is
+deferred to the consolidated verification pass), and the explicit non-secret
+production identifiers now live in `scripts/config/production.env` for the
+read-only inventory/separation checks. See
+`explanations/PRODUCTION-HARDENING-DECISIONS.md`.
 
 **Cost when paused:** ~$1.25/month (secrets + ECR + Cloud Map). Resume: `bash scripts/resume-playground.sh`.
 **Cost when running (Spot 24/7):** ~$49.00/month (compute + IPv4 + ALB). Pause: `bash scripts/pause-playground.sh`.
@@ -2081,3 +2093,320 @@ every invalid fixture rejected with its expected primary error code; CLI output
 deterministic; `--check-checksum` guard verified; `ruff` and `shellcheck` clean.
 The schema is Draft-07 metaschema-valid. No AWS CLI command was run; no
 production or staging environment was touched; nothing was committed.
+
+---
+
+## Pass 3, subphase 3.2 — Candidate build evidence and immutable artifacts
+
+Implemented on top of 3.1 in the same `release/` directory and in
+`.github/workflows/build-and-deploy.yml`.
+
+| Path | Purpose |
+|---|---|
+| `release/src/release_contract/candidate.py` | Canonical-producer reuse decision, canonical-set check, candidate-manifest builder + `decide`/`set-check`/`build-manifest` CLI |
+| `release/src/release_contract/artifact.py` | GitHub artifact identity resolution (reject duplicate/expired) + evidence bundle verification |
+| `release/src/release_contract/frontend.py` | Safe tar.gz validation + sorted per-file checksum-manifest verification |
+| `release/src/release_contract/serialization.py` | Staging serialization model (offline proof of no race / no preemption) |
+| `release/src/release_contract/components.py` | Extended: `oci_labels()`, `build_run_label()`, `run_url()`, trusted event/ref constants |
+| `release/bin/package-frontend.sh` | Reproducible `frontend-dist.tar.gz` + sorted checksum manifest + archive SHA-256 |
+| `release/bin/unpack-frontend.sh` | Safe extraction (rejects traversal/links/devices) + checksum verification |
+| `release/bin/generate-sbom.sh` | SPDX JSON SBOM with pinned Syft `v1.50.0` (archive SHA-256 verified; `SYFT_TOOL` override for tests) |
+| `release/bin/publish-candidate-image.sh` | Idempotent `sha-<sha>` push / reuse / fail-closed decision |
+| `release/bin/image-labels.sh` | Read ECR digest + OCI labels by tag (`docker buildx imagetools inspect` config blob; exit 3 = tag absent) |
+| `release/bin/verify-producer-set.sh` | One canonical producer set across the three backends |
+| `release/bin/emit-candidate-evidence.sh` | Assemble the facts-index evidence bundle + sorted `checksums.txt` + verify |
+| `release/bin/emit-candidate-manifest.sh` | Render a schema-valid candidate manifest from evidence + owner SemVer |
+| `release/bin/record-artifact.sh` | Record the GitHub artifact ID, URL, and service-reported digest from the `actions/upload-artifact@v4` step outputs |
+| `release/fixtures/candidate|artifact|serialization/*` | 3.2 fixtures (existing images, artifact listings, event timelines) |
+| `release/tests/test_candidate.py` `test_artifact.py` `test_frontend.py` `test_serialization.py` | New Python suites (117 total across all suites) |
+| `release/requirements.txt` | `jsonschema==4.26.0`, `PyYAML==6.0.3` (pinned) |
+| `tests/scripts/candidate_evidence_test.sh` | 3.2 offline verification gate (incl. workflow YAML static checks) |
+| `.github/workflows/build-and-deploy.yml` | OCI labels, idempotent publish steps, SHA-pinned Actions, serialized `e2e-staging`, new `candidate-evidence` job |
+
+Pinned release-critical Actions (full commit SHA, version comment):
+`actions/checkout@v4` → `11d5960a326750d5838078e36cf38b85af677262`,
+`actions/setup-java@v4` → `d7793b545071e98d581d3bf084a51c3213318a07`,
+`actions/setup-node@v4` → `49933ea5288caeca8642d1e84afbd3f7d6820020`,
+`actions/cache@v4` → `0057852bfaa89a56745cba8c7296529d2fc39830`,
+`actions/upload-artifact@v4` → `ea165f8d65b6e75b540449e92b4886f43607fa02`,
+`docker/setup-buildx-action@v3` → `8d2750c68a42422c14e847fe6c8ac0403b4cbd6f`,
+`docker/build-push-action@v6` → `10e90e3645eae34f1e60eeb005ba3a3d33f178e8`,
+`aws-actions/configure-aws-credentials@v4` → `ff717079ee2060e4bcee96c4779b553acc87447c`,
+`aws-actions/amazon-ecr-login@v2` → `d539f0932e70871a027e9d5a9d8fc38589180a64`,
+`dorny/paths-filter@v3` → `6852f92c20ea7fd3b0c25de3b5112db3a98da050`.
+
+Commands run (local only, no AWS profile/region involved):
+
+```bash
+bash tests/scripts/candidate_evidence_test.sh
+bash tests/scripts/release_contract_test.sh
+(cd plans/AUTOMATIC-BUILDS-AND-DEPLOY/release && ruff check src tests && ruff format --check src tests)
+shellcheck plans/AUTOMATIC-BUILDS-AND-DEPLOY/release/bin/*.sh
+```
+
+Verification result: both gates pass — Python tests, workflow YAML
+static checks, reproducible frontend packaging, safe extraction, publish/
+reuse/fail-closed decisions, SBOM stub flow, evidence→candidate-manifest
+fixture flow, artifact identity/digest recording; `ruff` and `shellcheck`
+clean. No AWS CLI command was run; no production or staging environment was
+touched; nothing was committed.
+
+**Deferred live checks (consolidated verification pass):** real ECR label
+read-back, three real ECR digests, a real GitHub artifact ID and its
+service-reported digest, real Syft scans, and a live rerun proving reuse
+instead of rebuild.
+
+---
+
+## Pass 3, subphase 3.3 — ECR release tagging, immutability, and least privilege
+
+Implemented on top of 3.2 in the same `release/` directory, in
+`plans/AUTOMATIC-BUILDS-AND-DEPLOY/`, and in `.github/workflows/build-and-deploy.yml`.
+
+| Path | Purpose |
+|---|---|
+| `release/ecr/immutable-repositories.json` | Desired ECR state: `IMMUTABLE_WITH_EXCLUSION` + exclusions `main-latest`/`branch-*`, `latest` absent |
+| `release/src/release_contract/ecr.py` | Server-side `release-*` mint / reuse / fail-closed decision + post-mutation digest verification (`decide`/`verify` CLI) |
+| `release/src/release_contract/releaseid.py` | Release-identity collision / interrupted-promotion resume decision (`decide` CLI) |
+| `release/src/release_contract/iam.py` | IAM least-privilege + OIDC trust policy validation (`validate-policy`/`validate-trust` CLI) |
+| `release/src/release_contract/components.py` | Extended: tag families (`is_mutable_convenience_tag`, `is_immutable_tag`, `LATEST_ABSENT`), ECR repository ARN helpers |
+| `release/bin/verify-immutable-repositories.sh` | Read-only `describe-repositories` read-back, fail-closed on drift |
+| `release/bin/apply-immutable-repositories.sh` | `put-image-tag-mutability` per repository + immediate read-back |
+| `release/bin/promote-image-digest.sh` | `batch-get-image` + `put-image` server-side promotion + read-back verify; `--dry-run` |
+| `release/bin/check-release-identity.sh` | Read-only GitHub-tag / ECR release-tag / frontend-marker preflight |
+| `release/fixtures/ecr|releaseid|iam/*` | Promotion, identity, and IAM fixtures |
+| `release/tests/test_ecr.py` `test_releaseid.py` `test_iam.py` | New Python suites (158 total across all suites) |
+| `tests/scripts/ecr_release_tagging_test.sh` | 3.3 offline verification gate (10 sections, stateful stub `aws`/`gh`) |
+| `github-actions-candidate-build-policy.json` | ECR push scoped to the three repository ARNs + `ecr:GetAuthorizationToken` on `*` |
+| `github-actions-promotion-policy.json` | Server-side `ecr:PutImage`/`BatchGetImage`/describe scoped to the three ARNs; no layer-upload actions |
+| `github-actions-production-deploy-policy.json` | ECR read + ECS deploy + S3 + CloudFront + scoped `iam:PassRole` with `ecs-tasks.amazonaws.com` |
+| `github-actions-rollback-policy.json` | Production-deploy scope minus `ecr:PutImage` (rollback never mints tags) |
+| `github-actions-oidc-trust-policy.json` | Added `:environment:production` subject alongside `main`/`feature/*` |
+| `github-actions-role-layout.md` | Job → role → policy map, publication job (`contents: write` only), validation jobs (no AWS), residual-risk note |
+| `.github/workflows/build-and-deploy.yml` | Job-level `permissions: {contents: read}` on `frontend`/`e2e-pr` (no `id-token: write`); 3.3 role-split comment |
+
+Key design points:
+- ECR tag mutability is repository-scoped but supports **exclusions**
+  (`IMMUTABLE_WITH_EXCLUSION` + `imageTagMutabilityExclusionFilters`,
+  read back via `describe-repositories`), which is how `sha-*`/`release-*` stay
+  immutable while `main-latest`/`branch-*` advance.
+- Promotion is **server-side and digest-preserving** (`ecr:batch-get-image`
+  returns the exact manifest bytes; `ecr:put-image` re-tags them). The decision
+  module fails closed on any digest that differs from the recorded evidence.
+- `iam:PassRole` is scoped to `ecsTaskExecutionRole` with the
+  `ecs-tasks.amazonaws.com` service condition. The production task-role ARN (if
+  any) is to be confirmed during 3.5 hardening.
+- IAM cannot restrict the image-tag prefix of `ecr:PutImage`; the promotion
+  script's strict digest check + the workflow's tag computation + repository
+  immutability are the controls (documented residual risk).
+
+Commands run (local only, no AWS profile/region involved):
+
+```bash
+bash tests/scripts/ecr_release_tagging_test.sh
+bash tests/scripts/candidate_evidence_test.sh
+bash tests/scripts/release_contract_test.sh
+(cd plans/AUTOMATIC-BUILDS-AND-DEPLOY/release && ruff check src tests)
+shellcheck plans/AUTOMATIC-BUILDS-AND-DEPLOY/release/bin/apply-immutable-repositories.sh \
+  plans/AUTOMATIC-BUILDS-AND-DEPLOY/release/bin/verify-immutable-repositories.sh \
+  plans/AUTOMATIC-BUILDS-AND-DEPLOY/release/bin/promote-image-digest.sh \
+  plans/AUTOMATIC-BUILDS-AND-DEPLOY/release/bin/check-release-identity.sh \
+  tests/scripts/ecr_release_tagging_test.sh
+```
+
+Verification result: all three offline gates pass — Python tests, workflow
+static checks, immutable-repo apply/read-back with drift fail-closed,
+server-side mint/reuse/conflict/dry-run promotion, release-identity
+proceed/resume/collision, IAM + OIDC trust policy validation, mandatory
+profile/region + read-back scan; `ruff check` and `shellcheck` clean for the
+3.3 modules/scripts (a pre-existing `cli.py` `ruff format` deviation inherited
+from subphase 3.1 is left untouched and is not claimed). No AWS CLI
+command was run; no production or staging environment was touched; nothing was
+committed.
+
+**Deferred live checks (consolidated verification pass):** ECR repository
+settings read back against the real repositories; real `put-image-tag-mutability`/
+`batch-get-image`/`put-image` behavior including overwrite-attempt failures and
+convenience-tag advancement; the real OIDC `environment:production` subject
+decoded from an actual job's JWT; IAM Access Analyzer (`aws iam validate-policy`)
+before live policy application.
+
+### Independent 3.3 review corrections (applied after the above)
+
+- `release_contract.ecr` rejects any `expected.repository` outside the canonical
+  `onlineshop-{auth,items,api-gateway}` set.
+- `check-release-identity.sh` dereferences annotated GitHub tag objects to the
+  commit before comparing the `v<version>` tag SHA; the gate stub `gh` routes on
+  the API URL (`sys.argv[2]`) and the gate now covers annotated-tag peel →
+  resume and peel conflict → fail-closed.
+- `release_contract.iam` docstring corrected: only `ecr:GetAuthorizationToken`
+  is unscopable; `GetDownloadUrlForLayer`/`BatchGetImage` support the
+  `repository` resource type.
+- Plan 3.3 checkboxes for deferred live work (repository mutation, role split/
+  switch-over, actual OIDC `sub` validation, IAM Access Analyzer) annotated as
+  offline-only/not-yet-run; AGENTS/docs no longer claim repositories "are
+  configured" or that the account "uses" the `environment:production` subject.
+- All three offline gates re-verified green after these corrections.
+
+### Independent 3.5 review corrections (applied after the above)
+
+Fresh independent review of the 3.5 implementation (offline; no AWS, GitHub,
+or lifecycle actions):
+
+- Service `AGENTS.md` 3.5 sections no longer claim the production task
+  definitions/services "are" hardened — they document the **contract** ("must
+  be", enforced by the validators before registration) and explicitly note no
+  live task-definition/service mutation has happened.
+- Mandatory profile/region enforced at runtime: `lc_init` and
+  `scripts/lib/identifiers.sh` refuse any `LC_PROFILE`/`LC_REGION` other than
+  `dpm-profile`/`eu-north-1`; the gate asserts both config files carry exactly
+  those values.
+- AWS read failures are reported as `error` (never as a missing resource);
+  `release_contract.environments` adds `OBSERVED_READ_ERROR`/`TOPO_READ_ERROR`.
+- Inventory now also verifies the execution role, the ECR repositories, and RDS
+  non-public accessibility (`DB_PUBLIC_ACCESSIBLE`); execution role + ECR stay
+  excluded from separation (shared infrastructure).
+- OAC migration `--apply` runs a no-lockout precondition gate (current bucket
+  policy must grant public read or the CloudFront OAC) before any mutation and
+  waits (bounded) for the CloudFront deployment to reach `Deployed` before
+  tightening the bucket policy.
+- CloudTrail audit proves delivery via a confirmed `LatestDeliveryTime` + no
+  delivery error; docs state management selectors cover all control-plane APIs
+  and request-ID capture is a promotion-phase behaviour.
+- `validate_task_definition` rejects `taskRoleArn == executionRoleArn`
+  (`ROLE_NOT_DISTINCT`).
+- Inventory/separation/OAC/CloudTrail scripts fail loudly when the decision
+  layer produces no valid JSON (no silent `|| true`).
+- Lifecycle guard gate now asserts (via the call-recording stub) that the
+  staging-only DB helpers issue NO AWS call after their guard fails, including
+  in conditional-call contexts, and covers `lc_staging_master_secret_arn`.
+
+All offline gates re-verified green (248 Python tests, ruff + shellcheck +
+`git diff --check` clean).
+
+## Pass 3, subphase 3.4 — Controlled staging-to-production promotion workflow
+
+Implemented on top of 3.1–3.3 in the same `release/` directory and in
+`.github/workflows/promote-release.yml`. Offline only — no AWS/GitHub mutation,
+no workflow run, no lifecycle start/stop:
+
+| Path | Purpose |
+|---|---|
+| `.github/workflows/promote-release.yml` | Manual `workflow_dispatch` promotion (inputs `version` + `run_id`, optional `source_sha`/`database_change`/`migration_reviewed`); read-only `preflight` job (dispatch + manifest contract) before the protected `production` Environment → `promote` job runs the full preflight after approval/lock; consumes the candidate evidence by the exact producing attempt and never rebuilds; `approvedBy` derived from `actions/runs/{run}/approvals`, never `github.actor`; `compensate` job (`if: failure()` on `promote`) restores the snapshot artifact incl. the frontend root; shared non-cancelling `production-mutation` concurrency |
+| `release/src/release_contract/promotion.py` | Fixture-tested decision layer: dispatch / run evidence / ancestry / preflight / snapshot / plan / waiter / frontend publication / verify / finalize / compensate |
+| `release/bin/promotion-preflight.sh` | Combined read-only preflight (run + ancestry + release identity + Decision 8 DB-review gate), `SCHEMA_CHANGE_UNREVIEWED` fail-closed |
+| `release/bin/snapshot-production.sh` | Read-only pre-promotion snapshot (desired counts, capacity strategy, service/TD ARNs, running digests, ALB wiring, frontend marker, paused state) |
+| `release/bin/deploy-production.sh` | Copy current TDs → `sanitize-task-definition.sh` (image-only diff) → `validate-task-definition.sh` → register with read-back → bind waiters to this run's deployments |
+| `release/bin/verify-production.sh` | Read-only post-deploy verification (running digests, service TD ARNs, frontend marker/checksum, ALB health) |
+| `release/bin/publish-frontend.sh` | Assets-first/index-last immutable-prefix publication, no `--delete`, CloudFront invalidation |
+| `release/bin/finalize-release.sh` | After `PROMOTION_PRODUCTION_VERIFIED=true`: server-side `release-<version>` tag mint via `promote-image-digest.sh` + `gh release create`; refuses publication before verification; idempotent resume only for exact partial objects |
+| `release/bin/compensate-production.sh` | Reverse-order restore plan from the snapshot, dry-run supported |
+| `release/bin/check-release-identity.sh` | (reused) release-identity proceed/resume/collision preflight |
+| `release/fixtures/promotion/*` | Valid/invalid dispatch/run/ancestry/preflight/snapshot/plan/waiter/frontend/verify/finalize/compensate fixtures |
+| `release/tests/test_promotion.py` | 51 unit tests |
+| `tests/scripts/promotion_test.sh` | 3.4 offline verification gate (10 sections, stateful AWS + `gh` stubs) |
+| `github-actions-promotion-policy.json` / `github-actions-role-layout.md` | Promotion-purpose role in the per-purpose layout (server-side `ecr:PutImage`/`BatchGetImage`, no layer-upload actions) |
+
+Key design points:
+- **Approval-gated, never rebuilt.** The staging gate is the successful Pass 2
+  `e2e-staging` job of the exact candidate run; the workflow consumes the
+  candidate evidence artifact and the static gate proves no
+  `build-push-action`/`publish-candidate-image.sh` appears.
+- **Time-of-check race closure.** Preflight is read-only before approval and is
+  repeated with a fresh snapshot after approval + concurrency-lock acquisition;
+  only the second run authorizes mutation.
+- **Waiter binding.** Each waiter verifies the deployment/task-definition this
+  run started is `COMPLETED` and running the exact digests — a generically
+  stable service or circuit-breaker rollback is not success.
+- **Paused production is handled honestly.** The snapshot records `paused: true`
+  and verification fails closed (`RUNNING_TASKS_MISSING`) instead of
+  fabricating success; live resume logic is deferred.
+- **Publication gating.** The GitHub release/tags are minted only after
+  `verify-production.sh` succeeds; `release_contract.promotion finalize` fails
+  closed on `PUBLICATION_BEFORE_VERIFICATION`/`RELEASE_TAG_CONFLICT`.
+- **Mandatory profile/region everywhere.** Every `aws` call carries
+  `--profile dpm-profile --region eu-north-1` and every mutation is read back;
+  the gate statically scans for both.
+
+Commands run (local only, no AWS profile/region involved):
+
+```bash
+bash tests/scripts/promotion_test.sh
+bash tests/scripts/candidate_evidence_test.sh
+bash tests/scripts/ecr_release_tagging_test.sh
+bash tests/scripts/production_hardening_test.sh
+bash tests/scripts/release_traceability_test.sh
+bash tests/scripts/release_contract_test.sh
+bash tests/scripts/lifecycle_test.sh
+(cd plans/AUTOMATIC-BUILDS-AND-DEPLOY/release && ruff check src tests && ruff format --check src tests)
+shellcheck plans/AUTOMATIC-BUILDS-AND-DEPLOY/release/bin/promotion-preflight.sh \
+  plans/AUTOMATIC-BUILDS-AND-DEPLOY/release/bin/snapshot-production.sh \
+  plans/AUTOMATIC-BUILDS-AND-DEPLOY/release/bin/deploy-production.sh \
+  plans/AUTOMATIC-BUILDS-AND-DEPLOY/release/bin/verify-production.sh \
+  plans/AUTOMATIC-BUILDS-AND-DEPLOY/release/bin/publish-frontend.sh \
+  plans/AUTOMATIC-BUILDS-AND-DEPLOY/release/bin/finalize-release.sh \
+  plans/AUTOMATIC-BUILDS-AND-DEPLOY/release/bin/compensate-production.sh \
+  tests/scripts/promotion_test.sh
+```
+
+Verification result: `promotion_test.sh` passes (360 Python tests across all
+suites, ruff + shellcheck + `git diff --check` clean) and the other six gates
+all remain green. No AWS CLI command was run against the real account and no
+production or staging environment was touched.
+
+**Deferred live checks (consolidated verification pass):** the real
+owner-approved promotion — the actual `production` Environment approval and
+required-reviewer entitlement check, real ECR/ECS/S3/CloudFront mutations and
+read-backs, the real GitHub Release publication, and switching the workflow to
+the per-purpose roles. The live plan checkboxes in `03_RELEASE_TRACEABILITY.md`
+are annotated accordingly.
+
+## Pass 3, subphase 3.7 — Release traceability queries and operator evidence
+
+Source-controlled artifacts (no AWS resources involved; the live read-only
+smoke test is deferred to the consolidated verification pass):
+
+| Path | Purpose |
+|---|---|
+| `release/src/release_contract/traceability.py` | Pure lookup/audit decision layer + `by-sha`/`by-version`/`running`/`by-digest`/`audit` CLI (machine-readable JSON, fail-closed issues) |
+| `release/bin/trace.sh` | Read-only operator CLI (`commit`/`release`/`running`/`digest`/`audit`); mandatory non-overridable `--profile dpm-profile --region eu-north-1` + `sts get-caller-identity` preflight; `--index` or read-only GitHub Releases auto-fetch; `--observed` offline mode; `--human` view |
+| `release/fixtures/traceability/*.json` | Manifest index (`index.json`), consistent (`observed-ok.json`), paused (`observed-paused.json`), and drift (`observed-drift-{ecr,ecs,frontend}.json`) observed-state fixtures |
+| `release/tests/test_traceability.py` | 61 unit tests (lookups, audit, newest-first ordering, mixed/incomplete running digests, sha-tag digest mismatch, candidate-run conflicts, by-version prefix-marker verification, malformed-marker and partial-read fail-closed, read-error fail-closed, CLI) |
+| `tests/scripts/release_traceability_test.sh` | 3.7 offline verification gate (9 sections, stateful AWS + `gh` stubs, read-only + identity-preflight proof) |
+
+Commands run (local only, no AWS profile/region involved):
+
+```bash
+bash tests/scripts/release_traceability_test.sh
+bash tests/scripts/release_contract_test.sh
+bash tests/scripts/candidate_evidence_test.sh
+bash tests/scripts/ecr_release_tagging_test.sh
+bash tests/scripts/production_hardening_test.sh
+(cd plans/AUTOMATIC-BUILDS-AND-DEPLOY/release && ruff check src tests && ruff format --check src tests)
+shellcheck plans/AUTOMATIC-BUILDS-AND-DEPLOY/release/bin/trace.sh \
+  tests/scripts/release_traceability_test.sh
+```
+
+Verification result: all five offline gates pass (309 Python tests), ruff and
+shellcheck clean, `git diff --check` clean. The lookups are strictly read-only
+(ECR `describe-images`, ECS `list-tasks`/`describe-tasks`/`describe-services`/
+`describe-task-definition`, S3 `get-object`, GitHub `gh api` releases reads)
+and were exercised only against fixtures and a stateful AWS/GitHub stub. No AWS
+CLI command was run against the real account and no production or staging
+environment was touched.
+
+**Independent 3.7 review hardening (applied on top of the initial 3.7 work):**
+newest-official selection and audit ordering now use numeric version keys
+(index-order independent); mixed/incomplete running digest sets fail closed;
+`trace.sh release` verifies the immutable per-release prefix marker;
+`trace.sh commit` fails closed on `sha-*` digest mismatch and candidate-run
+conflicts; the digest lookup attributes the OCI revision to the release
+manifest instead of claiming a label read; a configured service omitted by
+`describe-services` and malformed frontend markers fail closed as
+`OBSERVED_READ_ERROR`; prefix-marker S3 keys are derived from the manifest;
+the GitHub index fetch selects the exact `release-manifest.json` asset; the
+CLI rejects invalid JSON with exit 2.
+
+**Deferred live checks (consolidated verification pass):** the read-only smoke
+test of `trace.sh commit/release/running/digest/audit` against real production
+AWS state and real GitHub Releases.

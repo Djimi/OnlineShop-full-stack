@@ -49,6 +49,13 @@ rl_assert_sha256_hex() {
   fi
 }
 
+rl_assert_image_digest() {
+  local digest="${1:-}"
+  if [[ ! "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+    rl_die "invalid image digest (expected sha256:<64 lowercase hex>): $digest"
+  fi
+}
+
 rl_assert_positive_integer() {
   local value="${1:-}"
   if [[ ! "$value" =~ ^[0-9]+$ ]]; then

@@ -14,7 +14,8 @@
         "StringLike": {
           "token.actions.githubusercontent.com:sub": [
             "repo:Djimi@8793507/OnlineShop-full-stack@1097550215:ref:refs/heads/main",
-            "repo:Djimi@8793507/OnlineShop-full-stack@1097550215:ref:refs/heads/feature/*"
+            "repo:Djimi@8793507/OnlineShop-full-stack@1097550215:ref:refs/heads/feature/*",
+            "repo:Djimi@8793507/OnlineShop-full-stack@1097550215:environment:production"
           ]
         }
       }

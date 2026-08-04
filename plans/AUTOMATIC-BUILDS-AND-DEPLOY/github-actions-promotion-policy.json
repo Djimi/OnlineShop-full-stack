@@ -1,0 +1,28 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "EcrGetAuthorizationToken",
+      "Effect": "Allow",
+      "Action": "ecr:GetAuthorizationToken",
+      "Resource": "*"
+    },
+    {
+      "Sid": "MintReleaseTagsServerSide",
+      "Effect": "Allow",
+      "Action": [
+        "ecr:BatchGetImage",
+        "ecr:DescribeImages",
+        "ecr:DescribeRepositories",
+        "ecr:GetDownloadUrlForLayer",
+        "ecr:ListImages",
+        "ecr:PutImage"
+      ],
+      "Resource": [
+        "arn:aws:ecr:eu-north-1:799111666795:repository/onlineshop-auth",
+        "arn:aws:ecr:eu-north-1:799111666795:repository/onlineshop-items",
+        "arn:aws:ecr:eu-north-1:799111666795:repository/onlineshop-api-gateway"
+      ]
+    }
+  ]
+}

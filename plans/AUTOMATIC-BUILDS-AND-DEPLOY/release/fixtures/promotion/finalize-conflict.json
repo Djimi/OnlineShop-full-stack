@@ -1,0 +1,53 @@
+{
+  "productionVerified": true,
+  "manifest": {
+    "schemaVersion": 1,
+    "release": {
+      "version": "1.2.1",
+      "gitTag": "v1.2.1",
+      "status": "official",
+      "createdAt": "2026-08-04T12:00:00Z",
+      "sourceSha": "a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4",
+      "repository": "Djimi/OnlineShop-full-stack"
+    },
+    "components": {
+      "auth": {
+        "repository": "onlineshop-auth",
+        "imageDigest": "sha256:50310c92745326299ce463ebd8ad2279a4ff0386a3701246e48165c65d5682b0",
+        "releaseTag": "release-1.2.1"
+      },
+      "items": {
+        "repository": "onlineshop-items",
+        "imageDigest": "sha256:1a78d43d2aaaca3cafe41539f5fe211f4ef45152a1fa6af5b85006e93b019452",
+        "releaseTag": "release-1.2.1"
+      },
+      "apiGateway": {
+        "repository": "onlineshop-api-gateway",
+        "imageDigest": "sha256:31f9bfdf4d15f460167ba2b7ce9ada23278be1a9f115f06c01e5242901e8948e",
+        "releaseTag": "release-1.2.1"
+      },
+      "frontend": {
+        "sha256": "b9debb6b25ee6e6e534f7738d27f53f4153dbf361f097336741ae9fb54939ee4"
+      }
+    }
+  },
+  "ecr": {
+    "onlineshop-auth": {
+      "releaseDigest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    "onlineshop-items": {
+      "releaseDigest": "sha256:1a78d43d2aaaca3cafe41539f5fe211f4ef45152a1fa6af5b85006e93b019452"
+    },
+    "onlineshop-api-gateway": {
+      "releaseDigest": null
+    }
+  },
+  "frontendPrefix": {
+    "markerExists": false,
+    "marker": null
+  },
+  "gitTag": {
+    "exists": false,
+    "sha": null
+  }
+}

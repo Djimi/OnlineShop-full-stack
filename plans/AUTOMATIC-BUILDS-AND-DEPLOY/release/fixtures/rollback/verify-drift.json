@@ -1,0 +1,70 @@
+{
+  "alb": {
+    "targetHealth": [
+      {
+        "target": {
+          "id": "10.0.0.10"
+        },
+        "targetHealth": {
+          "state": "healthy"
+        }
+      }
+    ]
+  },
+  "frontend": {
+    "liveMarker": {
+      "exists": true,
+      "marker": {
+        "frontendSha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "sourceSha": "deadbeefcafebabe1234567890abcdef12345678",
+        "version": "1.1.0"
+      }
+    }
+  },
+  "running": [
+    {
+      "containers": [
+        {
+          "imageDigest": "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+          "name": "auth"
+        }
+      ],
+      "lastStatus": "RUNNING",
+      "taskArn": "arn:aws:ecs:eu-north-1:799111666795:task/onlineshop-auth/abc111",
+      "taskDefinitionArn": "arn:aws:ecs:eu-north-1:799111666795:task-definition/onlineshop-auth:7"
+    },
+    {
+      "containers": [
+        {
+          "imageDigest": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+          "name": "items"
+        }
+      ],
+      "lastStatus": "RUNNING",
+      "taskArn": "arn:aws:ecs:eu-north-1:799111666795:task/onlineshop-items/def222",
+      "taskDefinitionArn": "arn:aws:ecs:eu-north-1:799111666795:task-definition/onlineshop-items:6"
+    },
+    {
+      "containers": [
+        {
+          "imageDigest": "sha256:3333333333333333333333333333333333333333333333333333333333333333",
+          "name": "api-gateway"
+        }
+      ],
+      "lastStatus": "RUNNING",
+      "taskArn": "arn:aws:ecs:eu-north-1:799111666795:task/onlineshop-api-gateway/ghi333",
+      "taskDefinitionArn": "arn:aws:ecs:eu-north-1:799111666795:task-definition/onlineshop-api-gateway:15"
+    }
+  ],
+  "services": {
+    "onlineshop-api-gateway": {
+      "taskDefinition": "arn:aws:ecs:eu-north-1:799111666795:task-definition/onlineshop-api-gateway:15"
+    },
+    "onlineshop-auth": {
+      "taskDefinition": "arn:aws:ecs:eu-north-1:799111666795:task-definition/onlineshop-auth:7"
+    },
+    "onlineshop-items": {
+      "taskDefinition": "arn:aws:ecs:eu-north-1:799111666795:task-definition/onlineshop-items:6"
+    }
+  }
+}

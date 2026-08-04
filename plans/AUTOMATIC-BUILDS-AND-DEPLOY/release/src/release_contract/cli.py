@@ -29,8 +29,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="validate-manifest",
         description=(
-            "Validate an OnlineShop release manifest against the versioned "
-            "release contract."
+            "Validate an OnlineShop release manifest against the versioned release contract."
         ),
     )
     parser.add_argument(

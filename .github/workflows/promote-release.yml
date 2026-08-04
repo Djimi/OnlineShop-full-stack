@@ -1,0 +1,396 @@
+name: Promote Release to Production
+
+# Manual owner-approved promotion of one verified candidate snapshot from
+# staging to production (Pass 3, subphase 3.4). Inputs are `version` (canonical
+# v1 SemVer) and a successful candidate `run_id` (or a full SHA with an
+# unambiguous run lookup); an image tag or digest typed by hand is never
+# accepted. The exact digests/archive emitted by the successful `main` run are
+# consumed — nothing is rebuilt here (Decision 4).
+#
+# Control plane:
+#   - The production mutation job is behind the protected `production`
+#     Environment (owner-only required reviewer) and the shared non-cancelling
+#     `production` concurrency group shared with rollback (Decision 10).
+#   - A read-only `preflight` job runs BEFORE approval and validates the
+#     dispatch inputs plus the candidate manifest contract (no AWS access).
+#     After approval + lock acquisition the `promote` job runs the FULL
+#     preflight (run evidence, ancestry, release-identity collision, DB review)
+#     against a fresh snapshot and only that second run authorizes mutation
+#     (time-of-check race closure).
+#   - The successful Pass 2 staging job of the exact candidate run is the
+#     staging gate; no staging rebuild happens.
+#   - The candidate evidence artifact is consumed by the exact run attempt that
+#     produced it (never the latest attempt); ambiguous or duplicate bundles
+#     fail closed.
+#   - `approvedBy` is derived from the GitHub deployment/environment approval
+#     evidence (`actions/runs/{run}/approvals`), never from `github.actor` or
+#     user input.
+#
+# No workflow is executed during substep 3.4 implementation; this file is
+# static-checked by tests/scripts/promotion_test.sh and its live runs are
+# deferred to the consolidated verification pass.
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Canonical release SemVer (MAJOR.MINOR.PATCH, no leading v)'
+        required: true
+        type: string
+      run_id:
+        description: 'Successful candidate workflow run id on main'
+        required: true
+        type: string
+      source_sha:
+        description: 'Optional full commit SHA to disambiguate the run (otherwise the run head_sha is authoritative)'
+        required: false
+        type: string
+      database_change:
+        description: 'Does this candidate include a database/schema change?'
+        required: false
+        type: boolean
+        default: false
+      migration_reviewed:
+        description: 'Decision 8: has a forward/backward-compatible migration + recovery procedure been reviewed?'
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  id-token: write
+  contents: write
+  actions: read
+  deployments: write
+
+concurrency:
+  # One production mutation at a time; superseding/cancelling an in-progress
+  # promotion is an explicit operator action, never automatic (Decision 10).
+  group: production-mutation
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: eu-north-1
+  RELEASE: plans/AUTOMATIC-BUILDS-AND-DEPLOY/release
+  GITHUB_REPOSITORY: ${{ github.repository }}
+
+jobs:
+  # Read-only preflight BEFORE any approval or AWS access. This job has no
+  # id-token and no repository-write permissions (3.3 least privilege); it
+  # validates the dispatch inputs and renders + validates the candidate
+  # manifest contract from the evidence of the exact candidate run attempt.
+  # The FULL preflight (run evidence, ancestry, release-identity collision,
+  # DB-change review) runs in the approved `promote` job after approval and
+  # lock acquisition (time-of-check race closure).
+  preflight:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      run_attempt: ${{ steps.evidence.outputs.run_attempt }}
+    steps:
+      # actions/checkout@v4 (11d5960a326750d5838078e36cf38b85af677262)
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+
+      - name: Validate dispatch inputs (SemVer + run id)
+        id: inputs
+        run: |
+          source "${{ env.RELEASE }}/bin/release-input.sh"
+          rl_assert_semver "${{ github.event.inputs.version }}" || exit 1
+          rl_assert_positive_integer "${{ github.event.inputs.run_id }}" || exit 1
+          if [ -n "${{ github.event.inputs.source_sha }}" ]; then
+            rl_assert_full_sha "${{ github.event.inputs.source_sha }}" || exit 1
+          fi
+          echo "version=${{ github.event.inputs.version }}" >> "$GITHUB_OUTPUT"
+          echo "run_id=${{ github.event.inputs.run_id }}" >> "$GITHUB_OUTPUT"
+          echo "source_sha=${{ github.event.inputs.source_sha }}" >> "$GITHUB_OUTPUT"
+
+      # The preflight job is read-only: it renders the candidate manifest from
+      # the evidence artifact of the EXACT candidate run attempt and validates
+      # it. A run can emit more than one `candidate-evidence-<sha>-<attempt>`
+      # artifact (one per attempt); the selected attempt must be unambiguous,
+      # and the artifact is downloaded from that exact attempt (`--attempt`),
+      # never from the latest attempt.
+      - name: Fetch candidate evidence for the exact run attempt
+        id: evidence
+        run: |
+          source "${{ env.RELEASE }}/bin/release-input.sh"
+          RUN_ID="${{ steps.inputs.outputs.run_id }}"
+          set -euo pipefail
+          # Resolve the run head SHA (the artifact name is candidate-evidence-<sha>-<attempt>).
+          HEAD_SHA=$(gh api "repos/${{ env.GITHUB_REPOSITORY }}/actions/runs/${RUN_ID}" \
+            --jq '.head_sha')
+          [[ "$HEAD_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "cannot resolve run head sha" >&2; exit 1; }
+          # Exactly one unexpired evidence artifact for that SHA; duplicates/ambiguity fail closed.
+          ARTIFACT=$(gh api "repos/${{ env.GITHUB_REPOSITORY }}/actions/runs/${RUN_ID}/artifacts" \
+            --jq "[.artifacts[] | select(.name | startswith(\"candidate-evidence-${HEAD_SHA}-\")) | select(.expired == false) | .name] | if length == 0 then error(\"no unexpired candidate evidence\") elif length > 1 then error(\"ambiguous candidate evidence: \" + (join(\",\"))) else .[0] end")
+          RUN_ATTEMPT="${ARTIFACT##*-}"
+          rl_assert_positive_integer "$RUN_ATTEMPT" || exit 1
+          mkdir -p candidate-evidence
+          gh run download "${RUN_ID}" --attempt "${RUN_ATTEMPT}" -n "${ARTIFACT}" \
+            -D candidate-evidence --repo "${{ env.GITHUB_REPOSITORY }}"
+          jq -e --arg sha "$HEAD_SHA" '.release.sourceSha == $sha' \
+            candidate-evidence/candidate-evidence.json >/dev/null
+          jq -e --argjson attempt "$((10#$RUN_ATTEMPT))" '.release.candidateWorkflow.runAttempt == $attempt' \
+            candidate-evidence/candidate-evidence.json >/dev/null
+          echo "evidence for run ${RUN_ID}/attempt ${RUN_ATTEMPT} downloaded"
+          echo "run_attempt=${RUN_ATTEMPT}" >> "$GITHUB_OUTPUT"
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      # actions/setup-python@v5 (0b93645e9fea731e1acf3a5843feb99726597842)
+      - uses: actions/setup-python@0b93645e9fea731e1acf3a5843feb99726597842
+        with:
+          python-version: '3.12'
+
+      - name: Validate candidate manifest contract
+        run: |
+          pip install -q -r "${{ env.RELEASE }}/requirements.txt"
+          bash "${{ env.RELEASE }}/bin/emit-candidate-manifest.sh" \
+            --evidence candidate-evidence/candidate-evidence.json \
+            --version "${{ steps.inputs.outputs.version }}" \
+            --output candidate-manifest.json
+          bash "${{ env.RELEASE }}/bin/validate-manifest.sh" candidate-manifest.json
+          echo "candidate manifest is schema-valid"
+        env:
+          GITHUB_REPOSITORY: ${{ env.GITHUB_REPOSITORY }}
+
+  # The approved production mutation job. It requires the owner-only protected
+  # `production` Environment approval (Decision 5). On approval it runs the
+  # full preflight with a fresh snapshot before any mutation.
+  promote:
+    needs: preflight
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    environment:
+      name: production
+    steps:
+      # actions/checkout@v4 (11d5960a326750d5838078e36cf38b85af677262)
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+
+      # aws-actions/configure-aws-credentials@v4 (ff717079ee2060e4bcee96c4779b553acc87447c)
+      - uses: aws-actions/configure-aws-credentials@ff717079ee2060e4bcee96c4779b553acc87447c
+        with:
+          role-to-assume: arn:aws:iam::799111666795:role/github-actions-onlineshop
+          aws-region: ${{ env.AWS_REGION }}
+
+      # actions/setup-python@v5 (0b93645e9fea731e1acf3a5843feb99726597842)
+      - uses: actions/setup-python@0b93645e9fea731e1acf3a5843feb99726597842
+        with:
+          python-version: '3.12'
+
+      - name: Configure mandatory AWS CLI profile
+        run: |
+          aws configure set aws_access_key_id "$AWS_ACCESS_KEY_ID" --profile dpm-profile
+          aws configure set aws_secret_access_key "$AWS_SECRET_ACCESS_KEY" --profile dpm-profile
+          aws configure set aws_session_token "$AWS_SESSION_TOKEN" --profile dpm-profile
+          aws sts get-caller-identity --profile dpm-profile --region eu-north-1
+
+      - name: Install release contract dependencies
+        run: pip install -q -r "${{ env.RELEASE }}/requirements.txt"
+
+      - name: Run the full preflight after approval and lock acquisition
+        id: preflight2
+        run: |
+          set -euo pipefail
+          RUN_ID="${{ github.event.inputs.run_id }}"
+          # Pin the evidence bundle to the exact candidate run attempt resolved
+          # by the pre-approval preflight; exactly one unexpired artifact.
+          RUN_ATTEMPT="${{ needs.preflight.outputs.run_attempt }}"
+          ARTIFACT=$(gh api "repos/${{ env.GITHUB_REPOSITORY }}/actions/runs/${RUN_ID}/artifacts" \
+            --jq "[.artifacts[] | select(.name | startswith(\"candidate-evidence-\")) | select(.expired == false) | select(.name | endswith(\"-${RUN_ATTEMPT}\")) | .name] | if length == 0 then error(\"no unexpired candidate evidence for attempt ${RUN_ATTEMPT}\") elif length > 1 then error(\"ambiguous candidate evidence: \" + (join(\",\"))) else .[0] end")
+          gh run download "${RUN_ID}" --attempt "${RUN_ATTEMPT}" -n "${ARTIFACT}" \
+            -D candidate-evidence --repo "${{ env.GITHUB_REPOSITORY }}"
+          bash "${{ env.RELEASE }}/bin/emit-candidate-manifest.sh" \
+            --evidence candidate-evidence/candidate-evidence.json \
+            --version "${{ github.event.inputs.version }}" \
+            --output candidate-manifest.json
+          # The downloaded evidence must be the exact candidate: same SHA,
+          # run id, and attempt as the rendered manifest.
+          jq -e --arg v "${{ github.event.inputs.version }}" '.release.version == $v' candidate-manifest.json >/dev/null
+          jq -e --argjson runId "$((10#$RUN_ID))" '.release.candidateWorkflow.runId == $runId' \
+            candidate-evidence/candidate-evidence.json >/dev/null
+          jq -e --argjson attempt "$((10#$RUN_ATTEMPT))" '.release.candidateWorkflow.runAttempt == $attempt' \
+            candidate-evidence/candidate-evidence.json >/dev/null
+          bash "${{ env.RELEASE }}/bin/promotion-preflight.sh" \
+            --manifest candidate-manifest.json \
+            --db-change "${{ github.event.inputs.database_change == true && 'present' || 'absent' }}" \
+            --migration-reviewed "${{ github.event.inputs.migration_reviewed == true && 'true' || 'false' }}" \
+            --profile dpm-profile --region ${{ env.AWS_REGION }}
+          cp candidate-manifest.json "${{ runner.temp }}/candidate-manifest.json"
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ env.GITHUB_REPOSITORY }}
+
+      - name: Unpack and verify the candidate frontend bytes
+        run: |
+          set -euo pipefail
+          # The exact candidate frontend archive is consumed (never rebuilt):
+          # verify its sha256 against the manifest, then safely extract and
+          # checksum-verify the per-file manifest.
+          ACTUAL=$(sha256sum candidate-evidence/frontend-dist.tar.gz | cut -d' ' -f1)
+          EXPECTED=$(jq -r '.components.frontend.sha256' candidate-manifest.json)
+          [ "$ACTUAL" = "$EXPECTED" ] || {
+            echo "ERROR: frontend archive sha256 $ACTUAL != manifest $EXPECTED" >&2
+            exit 1
+          }
+          bash "${{ env.RELEASE }}/bin/unpack-frontend.sh" \
+            --archive candidate-evidence/frontend-dist.tar.gz \
+            --manifest candidate-evidence/frontend-dist.sha256 \
+            --dest frontend/dist
+
+      - name: Snapshot pre-promotion production state
+        id: snapshot
+        run: |
+          bash "${{ env.RELEASE }}/bin/snapshot-production.sh" \
+            --manifest candidate-manifest.json \
+            --profile dpm-profile --region ${{ env.AWS_REGION }} \
+            > production-snapshot.json
+          echo "snapshot written"
+        env:
+          GITHUB_REPOSITORY: ${{ env.GITHUB_REPOSITORY }}
+
+      - name: Upload pre-promotion snapshot (compensation source)
+        # actions/upload-artifact@v4 (ea165f8d65b6e75b540449e92b4886f43607fa02)
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: production-snapshot
+          path: production-snapshot.json
+          retention-days: 14
+
+      - name: Register digest-pinned task definitions
+        id: deploy
+        run: |
+          set -euo pipefail
+          # deploy-production.sh emits the deployed manifest (candidate bytes +
+          # the registered task-definition ARNs) on stdout; the official
+          # manifest is rendered from it.
+          bash "${{ env.RELEASE }}/bin/deploy-production.sh" \
+            --manifest candidate-manifest.json \
+            --snapshot production-snapshot.json \
+            --ecr-registry 799111666795.dkr.ecr.eu-north-1.amazonaws.com \
+            --profile dpm-profile --region ${{ env.AWS_REGION }} \
+            > deployment-manifest.json
+          jq -e '.components.auth.taskDefinitionArn and .components.items.taskDefinitionArn and .components.apiGateway.taskDefinitionArn' \
+            deployment-manifest.json >/dev/null
+          echo "deployment-manifest written"
+
+      - name: Publish frontend (assets-first/index-last)
+        id: frontend
+        run: |
+          bash "${{ env.RELEASE }}/bin/publish-frontend.sh" \
+            --manifest candidate-manifest.json \
+            --dist frontend/dist \
+            --bucket onlineshop-frontend-799111666795 \
+            --distribution EPS8MI3FV3B7X \
+            --profile dpm-profile --region ${{ env.AWS_REGION }}
+
+      - name: Render the official manifest
+        id: official
+        run: |
+          set -euo pipefail
+          # The official manifest is rendered from the deployed manifest (the
+          # candidate bytes + the registered task-definition ARNs), then
+          # production verification and finalization both use it.
+          # `approvedBy` is derived from the GitHub environment-approval
+          # evidence for this run (`actions/runs/{run}/approvals`), never from
+          # github.actor or user input (Decision 5). It fails closed if the
+          # approved `production` review cannot be resolved.
+          APPROVED_BY=$(gh api "repos/${{ env.GITHUB_REPOSITORY }}/actions/runs/${{ github.run_id }}/approvals" \
+            --jq '[.[] | select(.state == "approved") | select((.environments // []) | any(.name == "production")) | .user.login] | if length == 0 then error("no approved production environment review") else .[0] end')
+          [[ "$APPROVED_BY" =~ ^[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?$ ]] || {
+            echo "ERROR: invalid approver login" >&2
+            exit 1
+          }
+          NOW=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          jq --arg status official \
+            --arg runId "${{ github.run_id }}" \
+            --arg actor "${{ github.actor }}" \
+            --arg approvedBy "$APPROVED_BY" \
+            --arg approvedAt "$NOW" \
+            --arg deployedAt "$NOW" \
+            '.release.status = $status |
+             .release.promotionWorkflow = {runId: ($runId|tonumber), actor: $actor,
+               approvedBy: $approvedBy, approvedAt: $approvedAt, deployedAt: $deployedAt}' \
+            deployment-manifest.json > official-manifest.json
+          jq -e '.release.status == "official"' official-manifest.json >/dev/null
+          bash "${{ env.RELEASE }}/bin/validate-manifest.sh" official-manifest.json
+          cp official-manifest.json "${{ runner.temp }}/official-manifest.json"
+          echo "official-manifest=official-manifest.json" >> "$GITHUB_OUTPUT"
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ env.GITHUB_REPOSITORY }}
+
+      - name: Verify production before publication
+        id: verify
+        run: |
+          bash "${{ env.RELEASE }}/bin/verify-production.sh" \
+            --manifest official-manifest.json \
+            --profile dpm-profile --region ${{ env.AWS_REGION }}
+
+      - name: Finalize (mint release tags + publish GitHub Release)
+        run: |
+          PROMOTION_PRODUCTION_VERIFIED=true bash "${{ env.RELEASE }}/bin/finalize-release.sh" \
+            --manifest official-manifest.json \
+            --evidence-dir candidate-evidence \
+            --profile dpm-profile --region ${{ env.AWS_REGION }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ env.GITHUB_REPOSITORY }}
+
+  # On a failure of the promote job, compensate the changed components to the
+  # exact pre-promotion snapshot in reverse order. This job depends on promote
+  # and reads the snapshot it recorded (stored as a workflow artifact). It runs
+  # only when promote failed. Compensation restores the known-good
+  # pre-promotion state, so it is deliberately NOT behind the protected
+  # `production` environment approval gate — a failing promotion must restore
+  # itself automatically, never wait for another approval.
+  compensate:
+    needs: promote
+    if: failure() && needs.promote.result == 'failure'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      # actions/checkout@v4 (11d5960a326750d5838078e36cf38b85af677262)
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+
+      # aws-actions/configure-aws-credentials@v4 (ff717079ee2060e4bcee96c4779b553acc87447c)
+      - uses: aws-actions/configure-aws-credentials@ff717079ee2060e4bcee96c4779b553acc87447c
+        with:
+          role-to-assume: arn:aws:iam::799111666795:role/github-actions-onlineshop
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Configure mandatory AWS CLI profile
+        run: |
+          aws configure set aws_access_key_id "$AWS_ACCESS_KEY_ID" --profile dpm-profile
+          aws configure set aws_secret_access_key "$AWS_SECRET_ACCESS_KEY" --profile dpm-profile
+          aws configure set aws_session_token "$AWS_SESSION_TOKEN" --profile dpm-profile
+          aws sts get-caller-identity --profile dpm-profile --region eu-north-1
+
+      - name: Download the pre-promotion snapshot
+        # actions/download-artifact@v4 (fa0a91b85d4f404e444e00e005971372dc801d16)
+        # The snapshot was uploaded by the promote job; on failure the
+        # compensate job restores exactly those bytes (Decision 13).
+        uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16
+        with:
+          name: production-snapshot
+          path: snapshot
+          run-id: ${{ github.run_id }}
+          github-token: ${{ github.token }}
+
+      - name: Restore from the pre-promotion snapshot
+        run: |
+          [ -f snapshot/production-snapshot.json ] || {
+            echo "ERROR: pre-promotion snapshot is unavailable; stopping with a mixed-state incident record" >&2
+            exit 1
+          }
+          # Every component the promotion could have mutated is compensated in
+          # reverse deploy order. The frontend restore is a no-op when the live
+          # root already matches the snapshot and a real restore (from the
+          # previous immutable prefix) when it does not.
+          bash "${{ env.RELEASE }}/bin/compensate-production.sh" \
+            --snapshot snapshot/production-snapshot.json \
+            --changed '["frontend","auth","items","apiGateway"]' \
+            --profile dpm-profile --region ${{ env.AWS_REGION }}
+        env:
+          GITHUB_REPOSITORY: ${{ env.GITHUB_REPOSITORY }}

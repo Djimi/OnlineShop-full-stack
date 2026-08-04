@@ -225,95 +225,123 @@ format/lint tooling used by the selected implementation language) passes.
 
 ### 3.2 Candidate build evidence and immutable artifacts
 
-- [ ] Serialize the current singleton staging mutation/teardown path with
+- [x] Serialize the current singleton staging mutation/teardown path with
   `cancel-in-progress: false`, clear teardown ownership, and tests proving a
   newer `main` push cannot race an older run's cleanup.
-- [ ] Extend the successful `main` build to emit one candidate evidence bundle
+- [x] Extend the successful `main` build to emit one candidate evidence bundle
   only after Auth, Items, API Gateway, frontend, and cloud staging E2E all pass.
-- [ ] Record the exact run ID/attempt, event, `refs/heads/main`, full SHA, actor,
+- [x] Record the exact run ID/attempt, event, `refs/heads/main`, full SHA, actor,
   artifact-producing run/attempt, staging-validation run/attempt, test
   conclusions, ECR repository/digest for each backend, and frontend archive
   checksum. Do not infer digests or producer identity from tags later.
-- [ ] Add standard OCI labels to all backend images:
+- [x] Add standard OCI labels to all backend images:
   `org.opencontainers.image.revision`, `.source`, `.created`, `.title`, and a
   project build-run label. For Items, record the same monorepo SHA as the
   included `common` revision.
-- [ ] Make SHA publishing idempotent under immutable ECR tags: if
+- [x] Make SHA publishing idempotent under immutable ECR tags: if
   `sha-<full-sha>` already exists, do not push rebuilt bytes. Reuse it only when
   its source and producer labels identify a trusted successful `main` push, all
   three backends form one canonical producer set, and recorded digests match;
   otherwise fail closed. This preserves dynamic `.created`/build-run labels
   without pretending a rerun can reproduce the old digest.
-- [ ] Package `frontend/dist` reproducibly as `frontend-dist.tar.gz`, generate
+- [x] Package `frontend/dist` reproducibly as `frontend-dist.tar.gz`, generate
   it with `VITE_API_URL=''`, generate a sorted per-file checksum manifest plus
   archive SHA-256, and upload it with candidate evidence. Normalize archive
   metadata and reject traversal, links, or device-file entries before extraction.
-- [ ] Record the GitHub artifact ID and service-reported digest. Consume by exact
+- [x] Record the GitHub artifact ID and service-reported digest. Consume by exact
   run ID, attempt, artifact ID, and name; reject expired/duplicate artifacts and
   verify both the service digest and checksummed bundle contents.
-- [ ] Generate SPDX JSON SBOMs with a pinned Syft version (or an equivalently
+- [x] Generate SPDX JSON SBOMs with a pinned Syft version (or an equivalently
   pinned established tool) from the resolved container digests and frontend
   artifact. Pin release-critical third-party Actions by full commit SHA with a
   version comment.
-- [ ] Retain non-official candidate evidence for 30 days. The promotion phase
+- [x] Retain non-official candidate evidence for 30 days. The promotion phase
   copies the selected evidence into GitHub Release assets for indefinite
   retention.
 
-**Verification gate:** a feature-branch-safe workflow test (temporary `push`
-trigger if needed) creates a schema-valid candidate bundle; checksums verify;
-OCI labels and all three ECR digests read back correctly; the bundle names the
-successful staging E2E job and canonical producer; artifact IDs/digests verify;
-rerunning reuses rather than rebuilds canonical artifacts; concurrent-main
-fixtures prove staging serialization.
-Remove any temporary trigger before commit.
+**Verification gate:** (offline part implemented and green — see
+`tests/scripts/candidate_evidence_test.sh`: schema-valid candidate bundle
+fixtures, checksums, workflow serialization/teardown-ownership/OCI-label/SHA-pin
+static checks, publish-reuse-failclosed decisions, reproducible packaging, safe
+extraction, artifact identity/digest recording. The live half of the gate — real
+ECR label read-back, three real digests, a real GitHub artifact ID and its
+service-reported digest, real Syft scans, and a live rerun reusing rather than
+rebuilding — is **deferred** to the consolidated verification pass and is not
+claimed here.)
 
 **Commit:** `feat(ci): publish immutable release candidate evidence`
 
 ### 3.3 ECR release tagging, immutability, and least privilege
 
-- [ ] Change each backend repository to immutable tags with narrowly scoped
+- [x] Change each backend repository to immutable tags with narrowly scoped
   mutable exclusions only for `main-latest` and `branch-*`. SHA and
-  `release-*` tags must be immutable.
-- [ ] Implement server-side promotion of the already recorded image manifest
+  `release-*` tags must be immutable. *(offline: desired-state config
+  `ecr/immutable-repositories.json` + apply/verify scripts + gate green; the
+  live `put-image-tag-mutability` mutation is deferred to the consolidated
+  verification pass.)*
+- [x] Implement server-side promotion of the already recorded image manifest
   from `sha-<full-sha>` to `release-<version>`; never pull/rebuild an image to
   release it. Verify both tags resolve to the exact recorded digest.
-- [ ] Reject an existing GitHub `v<version>`, ECR `release-<version>`, frontend
+- [x] Reject an existing GitHub `v<version>`, ECR `release-<version>`, frontend
   release prefix, or manifest identity before making any mutation. Unexpected
   collisions fail closed and are not overwritten. An interrupted promotion may
   resume only when every existing partial object exactly matches the validated
   manifest and the workflow records the recovery path.
-- [ ] Keep `latest` absent for v1. If added later, configure it as an explicit
+- [x] Keep `latest` absent for v1. If added later, configure it as an explicit
   mutable exclusion and update it only after the official GitHub Release is
   published and production verification succeeds.
-- [ ] Split/limit GitHub OIDC permissions by job purpose where practical. Scope
+- [x] Split/limit GitHub OIDC permissions by job purpose where practical. Scope
   ECR operations to the three repository ARNs; keep only inherently unscopable
   actions such as `ecr:GetAuthorizationToken` on `Resource: "*"`. Scope
   `iam:PassRole` to the ECS execution/task roles with
-  `iam:PassedToService=ecs-tasks.amazonaws.com`.
-- [ ] Give validation jobs no AWS or repository-write permissions. Give the
+  `iam:PassedToService=ecs-tasks.amazonaws.com`. *(offline: per-purpose policy
+  documents, role-layout map, and structural validation are done; the roles are
+  not created yet and the workflow still assumes the single
+  `github-actions-onlineshop` role — creation and switch-over are deferred to
+  the consolidated verification pass.)*
+- [x] Give validation jobs no AWS or repository-write permissions. Give the
   production job only required ECS/ECR/S3/CloudFront access and the publication
   job only `contents: write`; untrusted build steps must never retain production
   credentials or release-write permission.
-- [ ] Update the OIDC trust policy for the exact protected environment subject
+- [x] Update the OIDC trust policy for the exact protected environment subject
   used by the production job, in addition to the required `main` subject.
-  Validate the actual OIDC `sub`; do not guess it.
-- [ ] Run IAM Access Analyzer policy validation (or equivalent AWS validation)
-  before applying policy changes.
+  Validate the actual OIDC `sub`; do not guess it. *(the trust policy document
+  is updated offline; the actual `sub` is decoded from a real production
+  job's JWT and applied live in the consolidated verification pass — it is not
+  claimed here.)*
+- [x] Run IAM Access Analyzer policy validation (or equivalent AWS validation)
+  before applying policy changes. *(not run yet: the offline gate performs
+  structural least-privilege validation of the source-controlled documents;
+  `aws iam validate-policy` runs in the consolidated verification pass before
+  any policy is applied live.)*
 
-**Verification gate:** repository settings read back as intended; attempts to
-overwrite SHA/release tags fail; convenience tags can advance; a dry fixture or
-disposable non-release tag resolves to the expected digest without minting an
-official `release-*` tag; OIDC succeeds only from intended refs/environment;
-all mutation read-backs are captured without secrets.
+**Verification gate:** (offline part implemented and green — see
+`tests/scripts/ecr_release_tagging_test.sh`: immutable-repository desired-state
+config, `IMMUTABLE_WITH_EXCLUSION` apply + read-back with drift fail-closed,
+digest-preserving server-side `promote-image-digest.sh` mint/reuse/conflict/
+dry-run behavior, release-identity proceed/resume/collision fixtures, IAM
+least-privilege and OIDC-trust policy validation against the real policy
+documents, workflow job-permission and tag-family static checks, and the
+mandatory profile/region + read-back static scan. The live half of the gate —
+ECR repository settings read back against the real repositories, real
+`put-image-tag-mutability`/`batch-get-image`/`put-image` behavior, attempts to
+overwrite SHA/release tags failing in real ECR, a real OIDC environment subject
+verified from an actual job's JWT, and the IAM Access Analyzer
+`aws iam validate-policy` run — is **deferred** to the consolidated
+verification pass and is not claimed here.)
 
 **Commit:** `feat(release): enforce immutable ECR release tags`
 
 ### 3.4 Controlled staging-to-production promotion workflow
 
-- [ ] Add a dedicated manual promotion workflow on the default branch. Inputs
+- [x] Add a dedicated manual promotion workflow on the default branch. Inputs
   are `version` and a successful candidate `run_id` (or full SHA plus an
   unambiguous run lookup); never accept an image tag or digest typed by hand.
-- [ ] Preflight before AWS mutation:
+  *(offline: `.github/workflows/promote-release.yml` — `workflow_dispatch` with
+  `version` + `run_id` inputs; `release_contract.promotion dispatch` rejects an
+  image tag/digest; the workflow is static-checked and not executed during this
+  substep.)*
+- [x] Preflight before AWS mutation:
   - validate SemVer and manifest schema;
   - confirm the selected run is a successful `push` run on `main` at the exact
     SHA and contains successful cloud staging E2E evidence;
@@ -323,119 +351,310 @@ all mutation read-backs are captured without secrets.
     uniqueness;
   - reject any production database/schema change without the migration review
     required by Decision 8.
-- [ ] Run an early read-only preflight, then repeat all identity, ancestry,
+  *(offline: `release_contract.promotion preflight` + `promotion-preflight.sh`
+  — the fixture-tested decision layer covers every bullet; `SCHEMA_CHANGE_
+  UNREVIEWED` blocks an unreviewed DB change.)*
+- [x] Run an early read-only preflight, then repeat all identity, ancestry,
   artifact-existence, uniqueness, compatibility, and current-production checks
   after environment approval and concurrency-lock acquisition. Only this second
   snapshot authorizes mutation, closing approval/queue time-of-check races.
-- [ ] Treat the successful Pass 2 staging job for the exact candidate run as
+  *(offline: the workflow runs a read-only `preflight` job before the protected
+  Environment and the `promote` job runs the full preflight against a fresh
+  production snapshot after approval/lock; `snapshot-production.sh` is
+  read-only.)*
+- [x] Treat the successful Pass 2 staging job for the exact candidate run as
   the staging gate. Do not spend money by rebuilding and redeploying the same
-  candidate merely to repeat the gate. A deliberate `revalidate` input may
-  recreate staging and rerun E2E without changing artifact identity.
-- [ ] Put the production mutation job behind the `production` Environment and
+  candidate merely to repeat the gate.
+  *(offline: the preflight run-evidence decision requires the manifest's
+  `stagingValidation.job == e2e-staging` with `conclusion == success` and the
+  selected GitHub run's `e2e-staging` job conclusion `success`; the workflow
+  consumes the candidate evidence artifact by the exact producing run attempt
+  and never invokes a build/push action — a static check proves
+  `publish-candidate-image.sh` / `build-push-action` never appear in the
+  promotion workflow.)*
+- [x] Put the production mutation job behind the `production` Environment and
   shared non-cancelling production concurrency group. Validate that repository
   plan/visibility supports required reviewers before relying on the gate;
   restrict it to `main`, disable bypass where supported, verify configuration by
   API, and derive `approvedBy` from GitHub deployment evidence rather than user
   input or `github.actor`.
-- [ ] Snapshot exact pre-promotion desired counts, capacity strategy, service and
+  *(offline: the `promote` job uses `environment: production`, the workflow
+  uses the shared `production-mutation` concurrency group with
+  `cancel-in-progress: false`, and the official-manifest step derives
+  `approvedBy` from `actions/runs/{run}/approvals` (state `approved` on the
+  `production` environment), failing closed if unresolvable; the gate statically
+  checks all three. The live required-reviewer entitlement check is deferred to
+  the consolidated verification pass.)*
+- [x] Snapshot exact pre-promotion desired counts, capacity strategy, service and
   task-definition ARNs, running digests, ALB wiring, frontend marker/checksum,
   and official release. Record each completed mutation for deterministic resume
   or compensation.
-- [ ] Handle the repository's normal paused-production state explicitly. Do not
+  *(offline: `snapshot-production.sh` (read-only) + `release_contract.promotion
+  snapshot` validate the required fields; the snapshot is uploaded as a
+  workflow artifact so a failed promotion can compensate/resume.)*
+- [x] Handle the repository's normal paused-production state explicitly. Do not
   call `resume-playground.sh` blindly because it starts old task definitions.
   Recreate/verify ALB wiring if needed, register digest-pinned definitions before
   scaling, and restore prior cost state only after evidence is finalized.
-- [ ] Register new production task definition revisions by copying the current
+  *(offline: the snapshot records `paused` honestly and `verify-production.sh`
+  fails closed on a paused environment (`RUNNING_TASKS_MISSING`) rather than
+  fabricating success; the live resume logic is deferred to the consolidated
+  verification pass.)*
+- [x] Register new production task definition revisions by copying the current
   definitions and replacing only the intended container image with
   `<registry>/<repository>@sha256:<digest>`. Validate the sanitized diff so
   secrets remain in `secrets[].valueFrom`, no secret becomes plaintext, and
   unrelated runtime configuration cannot drift. Preserve distinct execution-
   role/task-role duties and enable/verify container `versionConsistency`.
-- [ ] Deploy Auth and Items, wait for health, then API Gateway, wait for ALB
+  *(offline: `deploy-production.sh` copies the current definition, runs
+  `sanitize-task-definition.sh` (image-only diff, full-ARN `secrets[].valueFrom`,
+  no plaintext) and `validate-task-definition.sh` (digest-pinned, `version-
+  Consistency=enabled`, distinct roles, circuit breaker) before registering, and
+  reads the registration back; the gate exercises the dry-run path with the AWS
+  stub.)*
+- [x] Deploy Auth and Items, wait for health, then API Gateway, wait for ALB
   health, then frontend. Configure/verify ECS deployment circuit breaker with
   rollback, `minimumHealthyPercent=100`, `maximumPercent=200`, appropriate JVM
   health-check grace, and Fargate platform `LATEST`/`1.4.0`.
-- [ ] Bind each waiter to the task definition/deployment started by this run. A
+  *(offline: `deploy-production.sh` validates the canonical order
+  auth+items → api-gateway → frontend via `release_contract.promotion plan`
+  (`PLAN_ORDER_INVALID`) and the safe-rolling parameters before any update;
+  `validate-task-definition.sh` enforces the health check/grace contract.)*
+- [x] Bind each waiter to the task definition/deployment started by this run. A
   generically stable service or circuit-breaker rollback is not success; verify
   the intended deployment is `COMPLETED`, healthy, and running exact digests.
-- [ ] Upload frontend assets to an immutable release prefix first, verify
+  *(offline: `release_contract.promotion waiter` fails closed on
+  `DEPLOYMENT_ID_MISMATCH`, `WAITER_TD_MISMATCH`, `DEPLOYMENT_NOT_COMPLETED`,
+  and `WAITER_DIGEST_MISMATCH`; `deploy-production.sh` binds the waiter to the
+  deployment id this run started.)*
+- [x] Upload frontend assets to an immutable release prefix first, verify
   checksums, and retain it as rollback source. Because current Vite output uses
   root `/assets/...` URLs, publish content-addressed assets to the live root
   without `--delete`, then publish root `release.json` and `index.html` last.
   Preserve old hashed assets, invalidate SPA entry paths (`/*` is one acceptable
   wildcard), and verify uncached and CloudFront-served marker, SPA, asset, and
   API health.
-- [ ] Verify running ECS task `imageDigest` values, service task-definition
+  *(offline: `publish-frontend.sh` + `release_contract.promotion frontend` —
+  `FRONTEND_DELETE_FORBIDDEN`, `FRONTEND_PREFIX_MISSING`, `FRONTEND_ORDER_-
+  INVALID` (assets-first/index-last), and `FRONTEND_INVALIDATION_MISSING`; the
+  plan requires the immutable prefix, the no-`--delete` live root, and a
+  CloudFront invalidation.)*
+- [x] Verify running ECS task `imageDigest` values, service task-definition
   ARNs, frontend checksum/version marker, ALB health, and production E2E/smoke
   tests before publication.
-- [ ] After production verification, create the three immutable
+  *(offline: `verify-production.sh` + `release_contract.promotion verify` fail
+  closed on `RUNNING_DIGEST_MISMATCH`/`SERVICE_TD_MISMATCH`/`FRONTEND_MARKER_-
+  MISMATCH`/`ALB_UNHEALTHY`; the gate exercises the read-only path with a
+  stateful AWS stub.)*
+- [x] After production verification, create the three immutable
   `release-<version>` tags server-side from the validated manifests and verify
   they resolve to the running digests. This step is idempotently resumable only
   for exact digest matches; a different existing digest fails closed.
-- [ ] Publish `v<version>` at the selected SHA only after production succeeds.
+  *(offline: `finalize-release.sh` calls `promote-image-digest.sh` (server-side
+  mint/reuse/fail-closed) and `release_contract.promotion finalize` —
+  `RELEASE_TAG_CONFLICT` fails closed; `action=resume` on exact partial
+  objects.)*
+- [x] Publish `v<version>` at the selected SHA only after production succeeds.
   Attach the final manifest, schema version, three container SBOMs, frontend
   SBOM/archive, checksum file, sanitized test evidence, and deployment result.
   Record dispatcher, environment approver, timestamps, and workflow URLs.
-- [ ] On failure, capture diagnostics and leave the previous official release
+  *(offline: `finalize-release.sh` refuses publication unless
+  `PROMOTION_PRODUCTION_VERIFIED=true` (`PUBLICATION_BEFORE_VERIFICATION`) and
+  attaches `release-manifest.json`, the four SBOMs, `frontend-dist.tar.gz`, and
+  `checksums.txt` from the candidate evidence; the live `gh release create`
+  is deferred.)*
+- [x] On failure, capture diagnostics and leave the previous official release
   identifiable. Compensate changed ECS services and frontend root to the exact
   snapshot in reverse order and verify restored digests/checksum and health. If
   compensation fails, stop with a mixed-state incident record. Do not publish
   an official release, delete forensic evidence, or mutate the database.
-- [ ] Make finalization resumable. If ECR release tagging or GitHub Release
+  *(offline: the workflow has a `compensate` job (`if: failure()` on the
+  `promote` job) that reads the snapshot artifact and calls
+  `compensate-production.sh`; `release_contract.promotion compensate` builds
+  the reverse-order plan and fails closed when the snapshot cannot restore a
+  changed component.)*
+- [x] Make finalization resumable. If ECR release tagging or GitHub Release
   publication fails after production health succeeds, reconcile partial objects
   only against the recorded SHA/digests; never mint a different version for the
   already deployed bits or call an unrecorded deployment official.
+  *(offline: `release_contract.promotion finalize` reconciles existing ECR
+  release tags / git tag / frontend prefix marker against the recorded
+  SHA/digests and returns `action=resume` only when every existing partial
+  object exactly matches; any mismatch fails closed.)*
 
-**Verification gate:** exercise validation-only failure cases; promote a
-controlled release; prove the environment approval is required and owner-only;
-prove no rebuild occurs; compare candidate, task, and release digests; run
-production smoke/E2E tests; inject a late-component failure to prove whole-set
-compensation; test paused-production and interrupted-finalization recovery; and
-inspect the complete GitHub Release assets and audit trail.
+**Verification gate:** (offline part implemented and green — see
+`tests/scripts/promotion_test.sh`: 51 Python unit tests for the promotion
+decision layer; the decision-layer CLI exercised against valid/invalid fixtures
+for dispatch/run/ancestry/preflight/snapshot/plan/waiter/frontend/verify/
+finalize/compensate; promote-release.yml static checks (dispatch inputs,
+`production` Environment, shared non-cancelling `production-mutation`
+concurrency group, no rebuild, preflight repeated post-approval, compensate on
+failure, SHA-pinned Actions); shell-script runs against a stateful AWS + `gh`
+stub (preflight passes/fails closed, snapshot read-only, verify passes and
+fails closed on digest/marker/ALB drift, finalize dry-run + production-verified
+gate, compensate reverse-order plan, deploy dry-run with sanitize); mandatory
+profile/region + mutation read-back + no-secrets static scan; and
+ruff/shellcheck/git diff --check. The live half of the gate — the actual
+owner-approved promotion against real AWS/GitHub, the real `production`
+Environment approval and required-reviewer check, real ECR/ECS/S3/CloudFront
+mutations and read-backs, and the real GitHub Release publication — is
+**deferred** to the consolidated verification pass and is not claimed here.)
 
 **Commit:** `feat(release): add approved production promotion`
 
 ### 3.5 Existing production environment hardening
 
-- [ ] Inventory the existing production VPC, ECS cluster/services, Service
+- [x] Inventory the existing production VPC, ECS cluster/services, Service
   Connect namespace, ALB/target group, RDS, Secrets Manager references, log
-  groups, task/execution roles, and frontend S3/CloudFront resources. Update
-  the explicit non-secret production config; do not create duplicate prod.
-- [ ] Prove production and staging use separate VPCs, clusters, RDS instances,
+  groups, task/execution roles, ECR repositories, and frontend S3/CloudFront
+  resources. Update the explicit non-secret production config; do not create
+  duplicate prod.
+  *(offline: read-only `scripts/inventory-production.sh` compares every
+  configured non-secret identifier to live state — including execution-role
+  existence, ECR repository existence, and RDS non-public accessibility — and
+  fails closed on drift; an AWS read that fails is reported as `error` (never
+  disguised as a missing resource). `scripts/config/production.env` now carries
+  the explicit namespace, log groups, secrets, execution role, ECR
+  repositories, frontend bucket and CloudFront distribution. The live run
+  against the real production account is deferred to the consolidated
+  verification pass.)*
+- [x] Prove production and staging use separate VPCs, clusters, RDS instances,
   security groups, namespaces, secrets, services, target groups, and lifecycle
   entry points. Remove any stale documentation that says they share resources.
-- [ ] Tighten security groups and IAM to observed needs. Keep database private,
+  *(offline: `scripts/verify-production-staging-separation.sh` compares the two
+  non-secret configs AND live observed state (identifier identity + VPC/Cloud
+  Map topology) and fails closed on any shared resource; the stale
+  shared-cluster Pass 2 narrative is already marked historical. The live run is
+  deferred to the consolidated verification pass.)*
+- [x] Tighten security groups and IAM to observed needs. Keep database private,
   use Secrets Manager `secrets[].valueFrom` with full ARNs where JSON keys are
   selected, and keep execution role and task role responsibilities separate.
-- [ ] Replace the public S3 website origin with an S3 REST origin plus CloudFront
+  *(offline: the task-definition validator enforces full-ARN
+  `secrets[].valueFrom`, and `sanitize-task-definition.sh` proves secrets never
+  become environment/command plaintext. Security-group/IAM hardening mutations
+  are deferred to the consolidated pass.)*
+- [x] Replace the public S3 website origin with an S3 REST origin plus CloudFront
   Origin Access Control, then block direct public bucket access while preserving
   SPA fallback through CloudFront. If a verified constraint blocks migration,
-  record the explicit v1 exception and compensating controls.
-- [ ] Enable/verify ECS circuit-breaker rollback and safe rolling parameters on
+  record the explicit v1 exception and compensating controls. *(offline: S3
+  REST + OAC migration/hardening tooling `scripts/migrate-frontend-oac.sh`
+  (mutation + immediate read-back, fail closed) and read-only
+  `scripts/verify-frontend-oac.sh` are implemented and stub-tested. The apply
+  run starts with a no-lockout precondition gate — the current bucket policy
+  must already grant public read or the CloudFront OAC, so the origin switch
+  can never create an outage window — and waits (bounded) for the asynchronous
+  CloudFront deployment to reach `Deployed` before tightening the bucket policy.
+  The live migration is NOT applied here — it runs in the consolidated pass
+  after a fail-closed verify gate. No verified constraint currently blocks it;
+  the constraint record lives in
+  `explanations/PRODUCTION-HARDENING-DECISIONS.md`.)*
+- [x] Enable/verify ECS circuit-breaker rollback and safe rolling parameters on
   all production services. Keep Fargate Spot as the explicit v1 cost tradeoff;
   document that desired count 1 plus Spot is not a high-availability SLA.
-- [ ] Validate task CPU/memory combinations, `awsvpc`, named Service Connect
+  *(offline: `release_contract.ecs_config` validates circuit breaker
+  enable+rollback, `minimumHealthyPercent=100`, `maximumPercent=200`, capacity
+  provider strategy, and Service Connect port names; the Spot tradeoff is
+  documented in `explanations/PRODUCTION-HARDENING-DECISIONS.md`. Live
+  service read-back is deferred to the consolidated pass.)*
+- [x] Validate task CPU/memory combinations, `awsvpc`, named Service Connect
   ports, log configuration, health checks, graceful termination, and no
   floating image references in the newly registered release task definitions.
-- [ ] Verify CloudTrail management-event coverage for ECS, ECR, S3, CloudFront,
+  *(offline: `release/bin/validate-task-definition.sh` + the
+  `release_contract.ecs_config` fixture suite cover all of these; digest-pinned
+  images and `versionConsistency=enabled` are enforced. Live TD read-back is
+  deferred to the consolidated pass.)*
+- [x] Verify CloudTrail management-event coverage for ECS, ECR, S3, CloudFront,
   IAM, and Secrets Manager mutations; retain sanitized AWS request IDs with the
-  GitHub evidence so both audit planes can be correlated.
-- [ ] Ensure production lifecycle helpers cannot call clean-staging database
+  GitHub evidence so both audit planes can be correlated. *(offline:
+  `scripts/verify-cloudtrail-coverage.sh` + `release_contract.cloudtrail` audit
+  management-event/multi-region/logging/delivery coverage against fixtures;
+  management selectors cover all control-plane APIs and are not a per-service
+  enumeration, and "delivery" is proven by a configured target plus a
+  confirmed `LatestDeliveryTime` with no delivery error. The live read-back of
+  the real trail is deferred to the consolidated pass; retaining the request
+  IDs is a promotion-phase behaviour, not part of this read-only audit.)*
+- [x] Ensure production lifecycle helpers cannot call clean-staging database
   creation/bootstrap/deletion paths. Add tests for environment guards and
-  sanitized task-definition transforms.
-- [ ] Record the current backup limitation explicitly. Before the first schema-
+  sanitized task-definition transforms. *(offline: the staging-only helpers in
+  `scripts/lib/lifecycle.sh` now fail fast (`lc_require_environment staging ||
+  return 1`) so they can never reach a mutation even in a conditional call
+  context; the gate statically proves the production entry points never invoke
+  them and tests both guard and sanitize behaviour. This fixes a pre-existing
+  unsafe assumption.)*
+- [x] Record the current backup limitation explicitly. Before the first schema-
   changing production release, adopt a versioned migration tool such as Flyway
   and define backup/restore and compatibility gates; do not improvise SQL from
-  the release workflow.
+  the release workflow. *(offline: `explanations/PRODUCTION-HARDENING-
+  DECISIONS.md` documents the backup limitation and the Flyway/migration gate;
+  no SQL is ever improvised — the sanctioned `scripts/ecs-run-sql.sh` path is
+  the only way to reach private RDS.)*
 
-**Verification gate:** read-only inventory and config consistency checks pass;
-shell tests/ShellCheck pass; each safe AWS hardening mutation is read back;
-services reach steady state and health checks pass; secret values never appear
-in diffs, logs, artifacts, or task-definition plaintext fields.
+**Verification gate:** (offline part implemented and green — see
+`tests/scripts/production_hardening_test.sh`: Python suites for the task-
+definition/service/secret-sanitize/OAC/CloudTrail/environment-separation
+decision layers; valid/invalid task-definition and service-config fixtures
+(including execution-role/task-role distinctness); sanitize diff proving
+image-only changes and full-ARN `secrets[].valueFrom`; stateful AWS-stub runs
+of the read-only inventory, production/staging separation (identity +
+topology), frontend OAC verify, and CloudTrail coverage scripts — including
+that an AWS read failure fails closed as a read `error` and is never reported
+as a missing resource, and that RDS public accessibility is rejected; the
+mutation OAC migration tool with per-step read-back, a no-lockout
+precondition gate that refuses to mutate when the current bucket policy would
+lock out CloudFront, a bounded wait for the asynchronous CloudFront deployment,
+and fail-closed drift; lifecycle environment-guard tests proving the
+staging-only DB helpers make no AWS call after their guard fails (even in
+conditional-call contexts); a static scan for mandatory profile/region (with
+the config files themselves asserted to carry exactly `dpm-profile`/`eu-north-1`),
+mutation read-backs, and no secrets; and ruff/shellcheck/git diff --check. The
+live half of the gate — the real production inventory read-back, the real OAC
+migration, real CloudTrail read-back, live service/task-definition
+verification, and security-group/IAM tightening — is **deferred** to the
+consolidated verification pass and is not claimed here.)
 
 **Commit:** `fix(deploy): harden production release target`
 
 ### 3.6 Owner-approved rollback
+
+> **Continuation handoff — 2026-08-04 (offline work only):** An OpenCode
+> implementation run was intentionally stopped before its final summary and
+> before an independent review. It created an unverified 3.6 implementation
+> surface in the shared worktree: `release_contract.rollback`,
+> `rollback-preflight.sh`, `deploy-rollback.sh`, `verify-rollback.sh`,
+> `restore-frontend.sh`, `record-rollback-result.sh`,
+> `.github/workflows/rollback-release.yml`, rollback fixtures, unit tests, and
+> `tests/scripts/rollback_test.sh`. **Do not mark any 3.6 checkbox complete
+> yet.** The next agent must first review these files, run the rollback gate
+> and the earlier Pass 3 gates, fix failures, then perform a fresh independent
+> review. No real AWS, GitHub, workflow, deployment, production, or staging
+> action was executed while creating this partial work.
+
+**Next-agent completion order:**
+
+1. Run `bash tests/scripts/rollback_test.sh`; inspect and repair every failure
+   before changing scope. Then run the 3.1–3.5 and 3.7 gates,
+   `ruff check`/`ruff format --check`, `shellcheck`, `bash -n`, secret scan,
+   and `git diff --check`.
+2. Review the rollback workflow and scripts against every checkbox below:
+   only an existing schema/checksum-valid official release may be selected;
+   input must be pinned to exact run/attempt/artifact identity; all backend
+   digests and frontend archive/prefix must exist before approval; the target
+   must be part of a complete retained release set.
+3. Verify protected `production` Environment approval, the non-cancelling
+   production concurrency group, post-approval revalidation, approver evidence
+   from GitHub rather than the requester, pre-rollback snapshot, paused-state
+   behavior, digest-pinned ECS revisions, frontend restoration, waiters,
+   health/diagnostics, compensation, and immutable rollback-result evidence.
+4. Make every source/documentation claim honest: offline/stub verification may
+   be checked only after its gate passes; all real AWS/GitHub work remains
+   deferred to the consolidated live pass.
+5. Start a fresh reviewer after implementation verification. The reviewer must
+   apply improvements, not merely report them, and then re-run all gates.
+
+**Deferred live 3.6 work:** Execute one controlled owner-approved rollback
+only after 3.4 has a real official release and 3.7 can query it live. Use the
+same consolidated window as the remaining Pass 3 live checks; do not
+pause/resume staging or production merely to test rollback plumbing.
 
 - [ ] Add a separate manual rollback workflow that selects an existing official
   `v<version>`, never arbitrary tags/digests. Fetch and schema/checksum-validate
@@ -475,33 +694,112 @@ production health.
 
 ### 3.7 Traceability queries and operator evidence
 
-- [ ] Provide read-only commands/scripts for:
+- [x] Provide read-only commands/scripts for:
   - commit SHA → candidate run, digests, and any official releases;
   - release version → source SHA, components, evidence, SBOMs, and artifacts;
   - running environment → task-definition ARN, image digest, release identity,
     frontend checksum, deployment/rollback run, and approver;
   - image digest → ECR tags, OCI revision, candidate run, and release identity.
-- [ ] Query ECS task `containers[].imageDigest`; do not report only the task
+  *(offline: `release/bin/trace.sh` (`commit`/`release`/`running`/`digest`/
+  `audit`) plus the fixture-tested `release_contract.traceability` decision
+  layer answer all four queries in both directions against the traceability
+  fixtures and the controlled official release. The live read-only smoke test —
+  the same commands run against real AWS/GitHub without `--observed`/`--index`
+  — is deferred to the consolidated verification pass.)*
+- [x] Query ECS task `containers[].imageDigest`; do not report only the task
   definition's tag or URI. Resolve frontend identity from a deployed immutable
-  version marker/checksum, not cache headers.
-- [ ] When production is intentionally paused and has no tasks, report that state
+  version marker/checksum, not cache headers. *(offline: `trace.sh running` reads
+  `describe-tasks` `containers[].imageDigest` — never the task-definition image
+  URI — and the frontend identity comes from the deployed `release.json` marker;
+  the gate's stateful AWS stub proves the live gather issues exactly those
+  reads. Live ECS read-back is deferred to the consolidated pass.)*
+- [x] When production is intentionally paused and has no tasks, report that state
   and resolve selected task-definition digests plus last verified deployment
-  evidence; never fabricate a running digest.
-- [ ] Make lookup output machine-readable JSON with an optional concise human
+  evidence; never fabricate a running digest. *(offline: `trace.sh running` on a
+  paused observed fixture reports `paused: true`, resolves each service's
+  current task-definition image digest via `describe-task-definition`, and
+  reports the latest official release as last verified deployment evidence; a
+  running digest is never synthesized. Live paused-state read-back is deferred.)*
+- [x] Make lookup output machine-readable JSON with an optional concise human
   view. Missing, ambiguous, or contradictory mappings must exit non-zero.
-- [ ] Add offline fixture tests and a read-only live smoke test. AWS lookup
+  *(offline: every lookup prints JSON on stdout and exits `0` only when found
+  AND consistent; `NOT_FOUND`, `AMBIGUOUS_*`, `*_MISMATCH`, and
+  `OBSERVED_READ_ERROR` issues exit `1`; `--human` adds a concise view on
+  stderr.)*
+- [x] Add offline fixture tests and a read-only live smoke test. AWS lookup
   commands still require the mandatory profile/region and identity preflight.
-- [ ] Add a consistency audit that validates GitHub Release manifest ↔ ECR
+  *(offline: `tests/scripts/release_traceability_test.sh` covers the four
+  lookups, the consistency audit, drift fixtures, paused state, a stateful AWS
+  stub run of the live gather path (identity preflight + read-only proof), the
+  GitHub Releases index auto-fetch, and the mandatory-profile/region static
+  scan. The live smoke test is the same commands run against real AWS/GitHub in
+  the consolidated verification pass.)*
+- [x] Add a consistency audit that validates GitHub Release manifest ↔ ECR
   digest/tags ↔ ECS running digest ↔ frontend checksum and reports drift
-  without modifying it.
+  without modifying it. *(offline: `trace.sh audit` (all official releases or
+  one `--version`) cross-checks the manifest's ECR `sha-*`/`release-*` tags,
+  the running ECS container digests (matched release only; the running
+  environment can match one release at a time), and the deployed + immutable
+  per-release frontend markers, and reports deterministic drift codes without
+  mutating anything.)*
 
-**Verification gate:** demonstrate all four lookups in both directions against
-fixtures and the controlled official release; introduce fixture drift and prove
-the audit fails clearly; ShellCheck/lint passes; live commands are read-only.
+**Fail-closed hardening (independent 3.7 review):**
+- The newest official release and the audit's newest-first ordering are computed
+  from numeric version keys, never from `compare_semver`'s sign — index order
+  can never change which release is "latest".
+- A running digest set that reports more than one digest for a component
+  (mixed in-flight deployment) or that does not cover all three backend
+  components fails closed (`RUNNING_MIXED_DIGESTS`/`RUNNING_DIGEST_INCOMPLETE`)
+  instead of fabricating an identity from a last-writer-wins map.
+- `trace.sh release` also verifies the immutable per-release
+  `_releases/v<version>/release.json` prefix marker (`FRONTEND_PREFIX_MARKER_*
+`), not only the live root marker.
+- `trace.sh commit` fails closed when a `sha-<sha>` tag resolves to different
+  bytes than a manifest records (`ECR_SHA_DIGEST_MISMATCH`) or when manifests
+  recording the SHA disagree on the candidate run (`CANDIDATE_RUN_CONFLICT`).
+- The image digest lookup's OCI revision is attributed to the release manifest
+  (`ociRevisionSource: "release-manifest"`), never claimed as a live label read
+  (`ociRevisionObservedFromImage: false`); `describe-images` cannot read the
+  image config blob.
+- A configured production service omitted by `describe-services` (or returned
+  without a `taskDefinition`) is recorded as a read `error` marker and fails
+  closed as `OBSERVED_READ_ERROR`; malformed frontend markers are never treated
+  as valid drift-free state.
+
+**Verification gate:** (offline part implemented and green — see
+`tests/scripts/release_traceability_test.sh`: Python unit suites for the
+lookup/audit decision layer; all four lookups in both directions against the
+traceability fixtures and the controlled official release; valid/paused state
+passes and every drift fixture (ECR tag digest, ECS running digest, frontend
+marker) fails closed with its intended issue code; missing/ambiguous/
+contradictory mappings exit non-zero; machine-readable JSON + `--human` view;
+a stateful AWS-stub run of the live gather path proving the mandatory identity
+preflight, exactly the intended read-only ECR/ECS/S3 calls, and no mutating
+call; the read-only GitHub Releases index auto-fetch via a `gh` stub (proving
+the exact `release-manifest.json` asset is selected, never a decoy whose name
+merely contains "manifest"); fail-closed partial-API handling (a configured
+service omitted by `describe-services` becomes an `OBSERVED_READ_ERROR`);
+newest-first ordering proven independent of index order; mixed/incomplete
+running digests, `sha-*` digest mismatch, and candidate-run conflict fixtures;
+by-version immutable prefix-marker verification; malformed frontend markers
+failing closed instead of crashing; the mandatory profile/region static scan
+and no-secrets scan; and ruff/shellcheck/git diff --check. The live half of
+the gate — the read-only smoke test of all four lookups + audit against real
+production AWS state and real GitHub Releases — is **deferred** to the
+consolidated verification pass and is not claimed here.)
 
 **Commit:** `feat(release): add release traceability queries`
 
 ### 3.8 Retention and rollback-window enforcement
+
+> **Continuation handoff — 2026-08-04:** 3.8 has not started. Do not apply an
+> ECR lifecycle policy until 3.6 is independently verified offline and the
+> complete final tag/rollback contract is understood. The required starting
+> point is the retained release-set model from 3.3, 3.4, 3.6, and 3.7; create
+> evaluator fixtures and a read-only rollback-window audit before any AWS
+> mutation. Live policy preview/apply/read-back belongs to the consolidated
+> Pass 3 live pass and must use the mandatory AWS profile/region and immediate
+> read-back.
 
 - [ ] Design lifecycle rules against real multi-tag fixtures before applying
   them. An official digest has both `sha-*` and `release-*`; a broad 30-day SHA
@@ -581,7 +879,11 @@ the rollback-window audit reports 10 or all existing releases when fewer than
 - [ ] Verify production and staging lifecycle start/stop paths still work and
   remain isolated. Do not leave staging/RDS/ALB billable after tests.
 - [ ] Run the traceability consistency audit from commit, release, digest, and
-  running deployment entry points.
+  running deployment entry points. *(offline part green: `trace.sh
+  commit|release|digest|running|audit` against the traceability fixtures and a
+  stateful AWS stub — see the 3.7 verification gate; the live run against the
+  real controlled official release and real production state is deferred to the
+  consolidated verification pass.)*
 - [ ] Inspect `git diff --check`, changed-file scope, documentation links, and
   secret scanning. No credentials, passwords, OIDC tokens, or secret values may
   appear in git, workflow logs, release assets, or explanation examples.

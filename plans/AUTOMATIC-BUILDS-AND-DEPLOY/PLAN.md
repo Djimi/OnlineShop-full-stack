@@ -100,6 +100,20 @@ Every step executed in this plan **MUST** update [`executed/INFO.md`](./executed
 - [x] **Pass 1** — MVP: Running on AWS (DONE — ECS + RDS + CI/CD + S3 + CloudFront + frontend deployed; ALB active during verification, now paused)
 - [x] **Pass 2** — CI Pipeline Hardening & Staging (DONE — workflow with change detection + test gates + selective builds + Docker tagging; staging infra provisioned + smoke tested; branch protection applied via `gh api`)
 - [ ] **Pass 3** — Release, Traceability & Promotion
+  - [x] 3.1 Release contract and local validation foundation
+  - [x] 3.2 Candidate build evidence and immutable artifacts (offline implementation + gate green in `tests/scripts/candidate_evidence_test.sh`; live ECR/GitHub/Syft verification deferred to the consolidated pass)
+  - [x] 3.3 ECR release tagging, immutability, and least privilege (offline implementation + gate green in `tests/scripts/ecr_release_tagging_test.sh`; live ECR settings read-back, real put-image behavior, OIDC environment subject, and IAM Access Analyzer deferred to the consolidated pass)
+  - [x] 3.4 Controlled staging-to-production promotion workflow (offline implementation + gate green in `tests/scripts/promotion_test.sh`: the `release_contract.promotion` decision layer — dispatch/run/ancestry/preflight/snapshot/plan/waiter/frontend/verify/finalize/compensate; `promote-release.yml` static checks incl. attempt-pinned candidate-evidence consumption and `approvedBy` from `actions/runs/{run}/approvals` (never `github.actor`); `promotion-preflight.sh`/`snapshot-production.sh`/`deploy-production.sh`/`verify-production.sh`/`publish-frontend.sh`/`finalize-release.sh`/`compensate-production.sh` offline runs with a stateful AWS + `gh` stub, incl. immutable prefix-marker publication and frontend restoration; mandatory profile/region + mutation read-back + no-secrets scan; ruff/shellcheck/`git diff --check`. The live owner-approved promotion, the real `production` Environment approval, real ECR/ECS/S3/CloudFront mutations and read-backs, and the real GitHub Release publication are deferred to the consolidated pass)
+  - [x] 3.5 Production hardening (offline implementation + gate green in `tests/scripts/production_hardening_test.sh`: task-definition/service-config validation, sanitized task-definition transforms, read-only inventory + production/staging separation + CloudTrail coverage tooling, frontend S3 REST + OAC migration tool, lifecycle environment guards, and the Fargate Spot/backup-limitation decisions in `explanations/PRODUCTION-HARDENING-DECISIONS.md`; live inventory read-back, OAC migration, CloudTrail read-back, and service/SG/IAM tightening deferred to the consolidated pass)
+  - [x] 3.7 Release traceability (offline implementation + gate green in `tests/scripts/release_traceability_test.sh`: the four read-only lookups — commit/release/running/digest — plus the manifest↔ECR↔ECS-running-digest↔frontend consistency audit via `release/bin/trace.sh` + `release_contract.traceability`, offline fixtures for consistent/paused/drift state, a stateful AWS-stub proof of the live gather path (identity preflight + read-only), the read-only GitHub Releases index auto-fetch, and mandatory profile/region fail-closed semantics; the read-only live smoke test against real AWS/GitHub deferred to the consolidated pass)
+  - [ ] 3.6 Owner-approved rollback — partial offline files exist but are
+    unverified after an intentionally stopped OpenCode run. See the detailed
+    3.6 continuation handoff in `03_RELEASE_TRACEABILITY.md`; begin with
+    `bash tests/scripts/rollback_test.sh`, then independently review and
+    revalidate before marking complete. No live action was run.
+  - [ ] 3.8 Retention and rollback-window enforcement — not started; begins
+    only after independently verified 3.6 rollback semantics and must use
+    evaluator fixtures + read-only retention audit before live policy changes.
 - [ ] **Pass 4** — Operational Maturity
 - [ ] **Pass 5** — Future Improvements (non-mandatory)
 

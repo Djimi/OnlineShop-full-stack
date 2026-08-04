@@ -1,0 +1,7 @@
+{
+  "component": "auth",
+  "deploymentId": "ecs-svc/9999999999999999999",
+  "taskDefinitionArn": "arn:aws:ecs:eu-north-1:799111666795:task-definition/onlineshop-auth:5",
+  "rolloutState": "COMPLETED",
+  "runningDigest": "sha256:50310c92745326299ce463ebd8ad2279a4ff0386a3701246e48165c65d5682b0"
+}
