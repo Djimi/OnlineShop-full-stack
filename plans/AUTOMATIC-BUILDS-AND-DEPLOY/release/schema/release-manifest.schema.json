@@ -1,0 +1,298 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/Djimi/OnlineShop-full-stack/blob/main/plans/AUTOMATIC-BUILDS-AND-DEPLOY/release/schema/release-manifest.schema.json",
+  "title": "OnlineShop release manifest",
+  "description": "Versioned contract for OnlineShop candidate and official release manifests (Pass 3, decision set in plans/AUTOMATIC-BUILDS-AND-DEPLOY/03_RELEASE_TRACEABILITY.md). One SemVer identifies one monorepo commit and all four deployable components. SHA-256 digests and the full 40-character monorepo SHA are authoritative; SemVer and mutable tags are never deployment inputs.",
+  "type": "object",
+  "properties": {
+    "schemaVersion": {
+      "const": 1,
+      "description": "Manifest schema version. Field renames/removals require a version bump plus updated fixtures, lookup tools, and documentation."
+    },
+    "release": {
+      "type": "object"
+    },
+    "components": {
+      "type": "object"
+    }
+  },
+  "required": ["schemaVersion", "release", "components"],
+  "additionalProperties": false,
+  "anyOf": [
+    { "$ref": "#/definitions/candidateManifest" },
+    { "$ref": "#/definitions/officialManifest" }
+  ],
+  "definitions": {
+    "semver": {
+      "type": "string",
+      "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$",
+      "maxLength": 32,
+      "description": "Canonical v1 release label MAJOR.MINOR.PATCH. No leading zeroes, prerelease identifiers, build metadata, or optional leading 'v' (Decision 12)."
+    },
+    "gitTag": {
+      "type": "string",
+      "pattern": "^v(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$",
+      "maxLength": 33
+    },
+    "releaseTag": {
+      "type": "string",
+      "pattern": "^release-(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$",
+      "maxLength": 41
+    },
+    "fullSha": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$",
+      "maxLength": 40,
+      "description": "Full 40-character lowercase monorepo commit SHA."
+    },
+    "candidateTag": {
+      "type": "string",
+      "pattern": "^sha-[0-9a-f]{40}$",
+      "maxLength": 45
+    },
+    "sha256Hex": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$",
+      "maxLength": 64,
+      "description": "Lowercase SHA-256 hex digest (frontend artifact checksum)."
+    },
+    "imageDigest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "maxLength": 71,
+      "description": "ECR image digest in registry@sha256:<hex> form (the digest part only)."
+    },
+    "identity": {
+      "type": "string",
+      "pattern": "^(auth|items|api-gateway|frontend)/(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$",
+      "maxLength": 48,
+      "description": "Component-scoped identity <component>/<semver>. The component name and version are cross-validated against the manifest."
+    },
+    "ecrRepository": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9._-]{0,127}$",
+      "maxLength": 128,
+      "description": "ECR repository name (onlineshop-<service>). Cross-validated against the canonical component-to-repository map."
+    },
+    "backendSbom": {
+      "type": "string",
+      "pattern": "^(auth|items|api-gateway)\\.spdx\\.json$",
+      "maxLength": 40
+    },
+    "frontendSbom": {
+      "const": "frontend.spdx.json"
+    },
+    "frontendArtifact": {
+      "const": "frontend-dist.tar.gz"
+    },
+    "versionMarker": {
+      "const": "release.json"
+    },
+    "releasePrefix": {
+      "type": "string",
+      "pattern": "^_releases/v(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)/$",
+      "maxLength": 128,
+      "description": "Immutable S3 release prefix used as the frontend rollback source."
+    },
+    "ownerRepository": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$",
+      "maxLength": 256,
+      "description": "GitHub owner/repository, e.g. Djimi/OnlineShop-full-stack."
+    },
+    "httpUrl": {
+      "type": "string",
+      "pattern": "^https?://[A-Za-z0-9._~:/?#\\[\\]@!$&'()*+,;=%+-]+$",
+      "maxLength": 2048
+    },
+    "rfc3339Utc": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]+)?Z$",
+      "maxLength": 32,
+      "description": "RFC 3339 UTC timestamp with mandatory Z suffix, optional fractional seconds."
+    },
+    "githubLogin": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?$",
+      "maxLength": 39
+    },
+    "taskDefinitionArn": {
+      "type": "string",
+      "pattern": "^arn:aws:ecs:[a-z0-9-]+:[0-9]{12}:task-definition/[A-Za-z0-9_-]+:[0-9]+$",
+      "maxLength": 256,
+      "description": "Production ECS task definition ARN, present only on official manifests."
+    },
+    "workflowEvidence": {
+      "type": "object",
+      "properties": {
+        "runId": { "type": "integer", "minimum": 1 },
+        "runAttempt": { "type": "integer", "minimum": 1 },
+        "url": { "$ref": "#/definitions/httpUrl" },
+        "event": { "const": "push" },
+        "ref": { "const": "refs/heads/main" },
+        "conclusion": { "const": "success" }
+      },
+      "required": ["runId", "runAttempt", "url", "event", "ref", "conclusion"],
+      "additionalProperties": false,
+      "description": "Evidence of the trusted, successful main push workflow run that produced the candidate (Decision 11)."
+    },
+    "stagingValidation": {
+      "type": "object",
+      "properties": {
+        "job": { "const": "e2e-staging" },
+        "conclusion": { "const": "success" },
+        "validatedAt": { "$ref": "#/definitions/rfc3339Utc" }
+      },
+      "required": ["job", "conclusion", "validatedAt"],
+      "additionalProperties": false,
+      "description": "The successful Pass 2 cloud staging E2E job is the staging gate (Decision 5/6)."
+    },
+    "promotionWorkflow": {
+      "type": "object",
+      "properties": {
+        "runId": { "type": "integer", "minimum": 1 },
+        "actor": { "$ref": "#/definitions/githubLogin" },
+        "approvedBy": { "$ref": "#/definitions/githubLogin" },
+        "approvedAt": { "$ref": "#/definitions/rfc3339Utc" },
+        "deployedAt": { "$ref": "#/definitions/rfc3339Utc" }
+      },
+      "required": ["runId", "actor", "approvedBy", "approvedAt", "deployedAt"],
+      "additionalProperties": false,
+      "description": "Owner-approved promotion evidence. Present only on official manifests."
+    },
+    "backendComponentCandidate": {
+      "type": "object",
+      "properties": {
+        "identity": { "$ref": "#/definitions/identity" },
+        "sourceSha": { "$ref": "#/definitions/fullSha" },
+        "commonSourceSha": { "$ref": "#/definitions/fullSha" },
+        "repository": { "$ref": "#/definitions/ecrRepository" },
+        "imageDigest": { "$ref": "#/definitions/imageDigest" },
+        "candidateTag": { "$ref": "#/definitions/candidateTag" },
+        "releaseTag": { "$ref": "#/definitions/releaseTag" },
+        "sbom": { "$ref": "#/definitions/backendSbom" }
+      },
+      "required": ["identity", "sourceSha", "repository", "imageDigest", "candidateTag", "releaseTag", "sbom"],
+      "additionalProperties": false,
+      "description": "Backend component record on a candidate manifest. Production task-definition ARN is forbidden until promotion."
+    },
+    "backendComponentOfficial": {
+      "type": "object",
+      "properties": {
+        "identity": { "$ref": "#/definitions/identity" },
+        "sourceSha": { "$ref": "#/definitions/fullSha" },
+        "commonSourceSha": { "$ref": "#/definitions/fullSha" },
+        "repository": { "$ref": "#/definitions/ecrRepository" },
+        "imageDigest": { "$ref": "#/definitions/imageDigest" },
+        "candidateTag": { "$ref": "#/definitions/candidateTag" },
+        "releaseTag": { "$ref": "#/definitions/releaseTag" },
+        "sbom": { "$ref": "#/definitions/backendSbom" },
+        "taskDefinitionArn": { "$ref": "#/definitions/taskDefinitionArn" }
+      },
+      "required": ["identity", "sourceSha", "repository", "imageDigest", "candidateTag", "releaseTag", "sbom", "taskDefinitionArn"],
+      "additionalProperties": false,
+      "description": "Backend component record on an official manifest. The production task-definition ARN is required."
+    },
+    "itemsBackendComponentCandidate": {
+      "allOf": [{ "$ref": "#/definitions/backendComponentCandidate" }],
+      "required": ["commonSourceSha"],
+      "description": "Items records the monorepo SHA of the included common library; it must equal release.sourceSha."
+    },
+    "itemsBackendComponentOfficial": {
+      "allOf": [{ "$ref": "#/definitions/backendComponentOfficial" }],
+      "required": ["commonSourceSha"]
+    },
+    "frontendComponent": {
+      "type": "object",
+      "properties": {
+        "identity": { "$ref": "#/definitions/identity" },
+        "sourceSha": { "$ref": "#/definitions/fullSha" },
+        "artifact": { "$ref": "#/definitions/frontendArtifact" },
+        "sha256": { "$ref": "#/definitions/sha256Hex" },
+        "sbom": { "$ref": "#/definitions/frontendSbom" },
+        "releasePrefix": { "$ref": "#/definitions/releasePrefix" },
+        "versionMarker": { "$ref": "#/definitions/versionMarker" }
+      },
+      "required": ["identity", "sourceSha", "artifact", "sha256", "sbom", "releasePrefix", "versionMarker"],
+      "additionalProperties": false,
+      "description": "Frontend is a checksummed static artifact, not an ECR image (Decision 7)."
+    },
+    "componentsCandidate": {
+      "type": "object",
+      "properties": {
+        "auth": { "$ref": "#/definitions/backendComponentCandidate" },
+        "items": { "$ref": "#/definitions/itemsBackendComponentCandidate" },
+        "apiGateway": { "$ref": "#/definitions/backendComponentCandidate" },
+        "frontend": { "$ref": "#/definitions/frontendComponent" }
+      },
+      "required": ["auth", "items", "apiGateway", "frontend"],
+      "additionalProperties": false
+    },
+    "componentsOfficial": {
+      "type": "object",
+      "properties": {
+        "auth": { "$ref": "#/definitions/backendComponentOfficial" },
+        "items": { "$ref": "#/definitions/itemsBackendComponentOfficial" },
+        "apiGateway": { "$ref": "#/definitions/backendComponentOfficial" },
+        "frontend": { "$ref": "#/definitions/frontendComponent" }
+      },
+      "required": ["auth", "items", "apiGateway", "frontend"],
+      "additionalProperties": false
+    },
+    "releaseCandidate": {
+      "type": "object",
+      "properties": {
+        "version": { "$ref": "#/definitions/semver" },
+        "gitTag": { "$ref": "#/definitions/gitTag" },
+        "status": { "const": "candidate" },
+        "createdAt": { "$ref": "#/definitions/rfc3339Utc" },
+        "sourceSha": { "$ref": "#/definitions/fullSha" },
+        "repository": { "$ref": "#/definitions/ownerRepository" },
+        "candidateWorkflow": { "$ref": "#/definitions/workflowEvidence" },
+        "artifactWorkflow": { "$ref": "#/definitions/workflowEvidence" },
+        "stagingValidation": { "$ref": "#/definitions/stagingValidation" }
+      },
+      "required": ["version", "gitTag", "status", "createdAt", "sourceSha", "repository", "candidateWorkflow", "artifactWorkflow", "stagingValidation"],
+      "additionalProperties": false,
+      "description": "Candidate state. promotionWorkflow is forbidden: only the promotion workflow may convert a validated candidate to official."
+    },
+    "releaseOfficial": {
+      "type": "object",
+      "properties": {
+        "version": { "$ref": "#/definitions/semver" },
+        "gitTag": { "$ref": "#/definitions/gitTag" },
+        "status": { "const": "official" },
+        "createdAt": { "$ref": "#/definitions/rfc3339Utc" },
+        "sourceSha": { "$ref": "#/definitions/fullSha" },
+        "repository": { "$ref": "#/definitions/ownerRepository" },
+        "candidateWorkflow": { "$ref": "#/definitions/workflowEvidence" },
+        "artifactWorkflow": { "$ref": "#/definitions/workflowEvidence" },
+        "stagingValidation": { "$ref": "#/definitions/stagingValidation" },
+        "promotionWorkflow": { "$ref": "#/definitions/promotionWorkflow" }
+      },
+      "required": ["version", "gitTag", "status", "createdAt", "sourceSha", "repository", "candidateWorkflow", "artifactWorkflow", "stagingValidation", "promotionWorkflow"],
+      "additionalProperties": false,
+      "description": "Official state. promotionWorkflow is required; official publication happens only after approved production verification (Decision 6)."
+    },
+    "candidateManifest": {
+      "type": "object",
+      "properties": {
+        "schemaVersion": { "const": 1 },
+        "release": { "$ref": "#/definitions/releaseCandidate" },
+        "components": { "$ref": "#/definitions/componentsCandidate" }
+      },
+      "required": ["schemaVersion", "release", "components"],
+      "additionalProperties": false
+    },
+    "officialManifest": {
+      "type": "object",
+      "properties": {
+        "schemaVersion": { "const": 1 },
+        "release": { "$ref": "#/definitions/releaseOfficial" },
+        "components": { "$ref": "#/definitions/componentsOfficial" }
+      },
+      "required": ["schemaVersion", "release", "components"],
+      "additionalProperties": false
+    }
+  }
+}

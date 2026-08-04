@@ -13,8 +13,11 @@ stack.
 **Exit criteria:** A manually selected, successful `main` candidate can be
 promoted exactly once under an owner-approved semantic release label. The exact
 container digests validated in staging and the checksummed frontend candidate
-artifact are deployed to production without rebuilding. A GitHub Release permanently records the
-manifest, SBOMs, checksums, CI/staging evidence, and approval/deployment result.
+artifact are deployed to production without rebuilding. A GitHub Release retains
+the manifest, SBOMs, checksums, CI/staging evidence, and approval/deployment result
+under the repository's release-retention policy. Release assets are durable audit
+records, not write-once storage, so checksums, permissions, and consistency audits
+must make later alteration or deletion detectable.
 The latest 10 official releases can be selected for owner-approved application
 rollback, and all forward and reverse traceability queries below are verified.
 
@@ -69,6 +72,23 @@ reinterpret.
     same GitHub Actions concurrency group with `cancel-in-progress: false`.
     Superseding or cancelling an in-progress production mutation is an explicit
     operator action, never automatic concurrency behavior.
+11. **Canonical artifact producer.** The first trusted, successful `main` push
+    that publishes `sha-<full-sha>` owns those bytes. A rerun may revalidate and
+    reuse them but must not rebuild and overwrite them or claim to have produced
+    them. Evidence records both the artifact-producing run/attempt and the run
+    that performed staging validation. Existing SHA tags produced from any other
+    event/ref fail closed.
+12. **Restricted v1 release labels.** v1 accepts canonical stable SemVer only:
+    `MAJOR.MINOR.PATCH`, with no leading zeroes, prerelease identifiers, build
+    metadata, or optional leading `v`. This keeps Git, GitHub, ECR, S3, and JSON
+    identities identical and avoids Docker-tag encoding and SemVer precedence
+    ambiguity. Broader SemVer support requires an explicit version-to-storage
+    encoding contract.
+13. **Recoverable monorepo mutation.** ECS circuit-breaker rollback protects one
+    service, not the four-component release set. Promotion and rollback therefore
+    snapshot the exact pre-operation ECS/frontend state, record progress, and
+    compensate to that snapshot when a later component fails. A mixed deployment
+    is an incident, never a successful or official release.
 
 ---
 
@@ -95,6 +115,19 @@ against it. The minimum contract is:
       "ref": "refs/heads/main",
       "conclusion": "success"
     },
+    "artifactWorkflow": {
+      "runId": 123456789,
+      "runAttempt": 1,
+      "url": "<github-run-url>",
+      "event": "push",
+      "ref": "refs/heads/main",
+      "conclusion": "success"
+    },
+    "stagingValidation": {
+      "job": "e2e-staging",
+      "conclusion": "success",
+      "validatedAt": "<RFC-3339 UTC>"
+    },
     "promotionWorkflow": {
       "runId": 123456790,
       "actor": "<github-login>",
@@ -111,7 +144,8 @@ against it. The minimum contract is:
       "imageDigest": "sha256:<digest>",
       "candidateTag": "sha-<full-sha>",
       "releaseTag": "release-1.2.1",
-      "sbom": "auth.spdx.json"
+      "sbom": "auth.spdx.json",
+      "taskDefinitionArn": "<production-task-definition-arn>"
     },
     "items": {
       "identity": "items/1.2.1",
@@ -121,7 +155,8 @@ against it. The minimum contract is:
       "imageDigest": "sha256:<digest>",
       "candidateTag": "sha-<full-sha>",
       "releaseTag": "release-1.2.1",
-      "sbom": "items.spdx.json"
+      "sbom": "items.spdx.json",
+      "taskDefinitionArn": "<production-task-definition-arn>"
     },
     "apiGateway": {
       "identity": "api-gateway/1.2.1",
@@ -130,14 +165,17 @@ against it. The minimum contract is:
       "imageDigest": "sha256:<digest>",
       "candidateTag": "sha-<full-sha>",
       "releaseTag": "release-1.2.1",
-      "sbom": "api-gateway.spdx.json"
+      "sbom": "api-gateway.spdx.json",
+      "taskDefinitionArn": "<production-task-definition-arn>"
     },
     "frontend": {
       "identity": "frontend/1.2.1",
       "sourceSha": "<full-sha>",
       "artifact": "frontend-dist.tar.gz",
       "sha256": "<artifact-checksum>",
-      "sbom": "frontend.spdx.json"
+      "sbom": "frontend.spdx.json",
+      "releasePrefix": "_releases/v1.2.1/",
+      "versionMarker": "release.json"
     }
   }
 }
@@ -158,19 +196,25 @@ must be followed immediately by a read-back. Never print secret values.
 
 ### 3.1 Release contract and local validation foundation
 
-- [ ] Add the release manifest JSON Schema, valid/invalid fixtures, and a local
+- [x] Add the release manifest JSON Schema, valid/invalid fixtures, and a local
   validator with deterministic error messages.
-- [ ] Add local helpers for SemVer validation/comparison, full-SHA validation,
+- [x] Add local helpers for SemVer validation/comparison, full-SHA validation,
   manifest checksums, and component/repository mapping. Do not parse security-
   sensitive JSON with regex or ad-hoc shell string concatenation.
-- [ ] Encode the atomic release identity decisions above, including the rule
-  that `items.commonSourceSha == release.sourceSha`.
-- [ ] Define candidate and official manifest states. Only the promotion
-  workflow may convert a validated candidate record to `official`.
-- [ ] Add tests for malformed SemVer, duplicate/non-increasing versions,
-  abbreviated/invalid SHAs, missing component fields, digest/checksum errors,
-  and unsupported schema versions.
-- [ ] Document the exact generated files and which are source-controlled versus
+- [x] Pass dispatch inputs through environment variables or argument arrays only
+  after strict validation. Never interpolate them directly into shell, JSON,
+  GitHub CLI, or AWS CLI commands.
+- [x] Encode the atomic release identity decisions above, including the rule
+  that `items.commonSourceSha == release.sourceSha`, every component SHA matches
+  it, and component identities, versions, repositories, and tags agree.
+- [x] Define candidate and official manifest states. Only the promotion
+  workflow may convert a validated candidate record to `official`; enforce
+  state-specific required/forbidden fields in the schema.
+- [x] Add tests for malformed SemVer, duplicate/non-increasing versions,
+  abbreviated/invalid SHAs, missing component fields, cross-field mismatches,
+  digest/checksum errors, prerelease/build-metadata labels, unsafe input
+  characters, and unsupported schema versions.
+- [x] Document the exact generated files and which are source-controlled versus
   ephemeral workflow output.
 
 **Verification gate:** schema validation tests pass; every valid fixture is
@@ -181,22 +225,32 @@ format/lint tooling used by the selected implementation language) passes.
 
 ### 3.2 Candidate build evidence and immutable artifacts
 
+- [ ] Serialize the current singleton staging mutation/teardown path with
+  `cancel-in-progress: false`, clear teardown ownership, and tests proving a
+  newer `main` push cannot race an older run's cleanup.
 - [ ] Extend the successful `main` build to emit one candidate evidence bundle
   only after Auth, Items, API Gateway, frontend, and cloud staging E2E all pass.
 - [ ] Record the exact run ID/attempt, event, `refs/heads/main`, full SHA, actor,
-  test conclusions, ECR repository/digest for each backend, and frontend
-  archive checksum. Do not infer digests from tags later.
+  artifact-producing run/attempt, staging-validation run/attempt, test
+  conclusions, ECR repository/digest for each backend, and frontend archive
+  checksum. Do not infer digests or producer identity from tags later.
 - [ ] Add standard OCI labels to all backend images:
   `org.opencontainers.image.revision`, `.source`, `.created`, `.title`, and a
   project build-run label. For Items, record the same monorepo SHA as the
   included `common` revision.
 - [ ] Make SHA publishing idempotent under immutable ECR tags: if
-  `sha-<full-sha>` already exists, fail on a digest/OCI-label mismatch and reuse
-  it only when identity matches. A rerun must not overwrite an existing SHA
-  tag with newly rebuilt bytes.
+  `sha-<full-sha>` already exists, do not push rebuilt bytes. Reuse it only when
+  its source and producer labels identify a trusted successful `main` push, all
+  three backends form one canonical producer set, and recorded digests match;
+  otherwise fail closed. This preserves dynamic `.created`/build-run labels
+  without pretending a rerun can reproduce the old digest.
 - [ ] Package `frontend/dist` reproducibly as `frontend-dist.tar.gz`, generate
-  SHA-256 checksums, and upload it with candidate evidence. Validate archive
-  paths before extraction to prevent traversal.
+  it with `VITE_API_URL=''`, generate a sorted per-file checksum manifest plus
+  archive SHA-256, and upload it with candidate evidence. Normalize archive
+  metadata and reject traversal, links, or device-file entries before extraction.
+- [ ] Record the GitHub artifact ID and service-reported digest. Consume by exact
+  run ID, attempt, artifact ID, and name; reject expired/duplicate artifacts and
+  verify both the service digest and checksummed bundle contents.
 - [ ] Generate SPDX JSON SBOMs with a pinned Syft version (or an equivalently
   pinned established tool) from the resolved container digests and frontend
   artifact. Pin release-critical third-party Actions by full commit SHA with a
@@ -208,7 +262,9 @@ format/lint tooling used by the selected implementation language) passes.
 **Verification gate:** a feature-branch-safe workflow test (temporary `push`
 trigger if needed) creates a schema-valid candidate bundle; checksums verify;
 OCI labels and all three ECR digests read back correctly; the bundle names the
-successful staging E2E job; rerunning against an existing SHA is idempotent.
+successful staging E2E job and canonical producer; artifact IDs/digests verify;
+rerunning reuses rather than rebuilds canonical artifacts; concurrent-main
+fixtures prove staging serialization.
 Remove any temporary trigger before commit.
 
 **Commit:** `feat(ci): publish immutable release candidate evidence`
@@ -234,6 +290,10 @@ Remove any temporary trigger before commit.
   actions such as `ecr:GetAuthorizationToken` on `Resource: "*"`. Scope
   `iam:PassRole` to the ECS execution/task roles with
   `iam:PassedToService=ecs-tasks.amazonaws.com`.
+- [ ] Give validation jobs no AWS or repository-write permissions. Give the
+  production job only required ECS/ECR/S3/CloudFront access and the publication
+  job only `contents: write`; untrusted build steps must never retain production
+  credentials or release-write permission.
 - [ ] Update the OIDC trust policy for the exact protected environment subject
   used by the production job, in addition to the required `main` subject.
   Validate the actual OIDC `sub`; do not guess it.
@@ -263,25 +323,48 @@ all mutation read-backs are captured without secrets.
     uniqueness;
   - reject any production database/schema change without the migration review
     required by Decision 8.
+- [ ] Run an early read-only preflight, then repeat all identity, ancestry,
+  artifact-existence, uniqueness, compatibility, and current-production checks
+  after environment approval and concurrency-lock acquisition. Only this second
+  snapshot authorizes mutation, closing approval/queue time-of-check races.
 - [ ] Treat the successful Pass 2 staging job for the exact candidate run as
   the staging gate. Do not spend money by rebuilding and redeploying the same
   candidate merely to repeat the gate. A deliberate `revalidate` input may
   recreate staging and rerun E2E without changing artifact identity.
 - [ ] Put the production mutation job behind the `production` Environment and
   shared non-cancelling production concurrency group. Validate that repository
-  plan/visibility supports required reviewers before relying on the gate.
+  plan/visibility supports required reviewers before relying on the gate;
+  restrict it to `main`, disable bypass where supported, verify configuration by
+  API, and derive `approvedBy` from GitHub deployment evidence rather than user
+  input or `github.actor`.
+- [ ] Snapshot exact pre-promotion desired counts, capacity strategy, service and
+  task-definition ARNs, running digests, ALB wiring, frontend marker/checksum,
+  and official release. Record each completed mutation for deterministic resume
+  or compensation.
+- [ ] Handle the repository's normal paused-production state explicitly. Do not
+  call `resume-playground.sh` blindly because it starts old task definitions.
+  Recreate/verify ALB wiring if needed, register digest-pinned definitions before
+  scaling, and restore prior cost state only after evidence is finalized.
 - [ ] Register new production task definition revisions by copying the current
   definitions and replacing only the intended container image with
   `<registry>/<repository>@sha256:<digest>`. Validate the sanitized diff so
-  secrets remain in `secrets[].valueFrom` and no secret becomes plaintext.
+  secrets remain in `secrets[].valueFrom`, no secret becomes plaintext, and
+  unrelated runtime configuration cannot drift. Preserve distinct execution-
+  role/task-role duties and enable/verify container `versionConsistency`.
 - [ ] Deploy Auth and Items, wait for health, then API Gateway, wait for ALB
   health, then frontend. Configure/verify ECS deployment circuit breaker with
   rollback, `minimumHealthyPercent=100`, `maximumPercent=200`, appropriate JVM
   health-check grace, and Fargate platform `LATEST`/`1.4.0`.
+- [ ] Bind each waiter to the task definition/deployment started by this run. A
+  generically stable service or circuit-breaker rollback is not success; verify
+  the intended deployment is `COMPLETED`, healthy, and running exact digests.
 - [ ] Upload frontend assets to an immutable release prefix first, verify
-  checksums, copy static assets before `index.html`, preserve previous hashed
-  assets during the rollback window, invalidate only necessary CloudFront
-  paths, and verify both asset and API health.
+  checksums, and retain it as rollback source. Because current Vite output uses
+  root `/assets/...` URLs, publish content-addressed assets to the live root
+  without `--delete`, then publish root `release.json` and `index.html` last.
+  Preserve old hashed assets, invalidate SPA entry paths (`/*` is one acceptable
+  wildcard), and verify uncached and CloudFront-served marker, SPA, asset, and
+  API health.
 - [ ] Verify running ECS task `imageDigest` values, service task-definition
   ARNs, frontend checksum/version marker, ALB health, and production E2E/smoke
   tests before publication.
@@ -294,14 +377,21 @@ all mutation read-backs are captured without secrets.
   SBOM/archive, checksum file, sanitized test evidence, and deployment result.
   Record dispatcher, environment approver, timestamps, and workflow URLs.
 - [ ] On failure, capture diagnostics and leave the previous official release
-  identifiable. Do not publish an official GitHub Release. Do not automatically
-  delete forensic evidence or mutate the database.
+  identifiable. Compensate changed ECS services and frontend root to the exact
+  snapshot in reverse order and verify restored digests/checksum and health. If
+  compensation fails, stop with a mixed-state incident record. Do not publish
+  an official release, delete forensic evidence, or mutate the database.
+- [ ] Make finalization resumable. If ECR release tagging or GitHub Release
+  publication fails after production health succeeds, reconcile partial objects
+  only against the recorded SHA/digests; never mint a different version for the
+  already deployed bits or call an unrecorded deployment official.
 
 **Verification gate:** exercise validation-only failure cases; promote a
 controlled release; prove the environment approval is required and owner-only;
 prove no rebuild occurs; compare candidate, task, and release digests; run
-production smoke/E2E tests; inspect the complete GitHub Release assets and
-audit trail.
+production smoke/E2E tests; inject a late-component failure to prove whole-set
+compensation; test paused-production and interrupted-finalization recovery; and
+inspect the complete GitHub Release assets and audit trail.
 
 **Commit:** `feat(release): add approved production promotion`
 
@@ -317,12 +407,19 @@ audit trail.
 - [ ] Tighten security groups and IAM to observed needs. Keep database private,
   use Secrets Manager `secrets[].valueFrom` with full ARNs where JSON keys are
   selected, and keep execution role and task role responsibilities separate.
+- [ ] Replace the public S3 website origin with an S3 REST origin plus CloudFront
+  Origin Access Control, then block direct public bucket access while preserving
+  SPA fallback through CloudFront. If a verified constraint blocks migration,
+  record the explicit v1 exception and compensating controls.
 - [ ] Enable/verify ECS circuit-breaker rollback and safe rolling parameters on
   all production services. Keep Fargate Spot as the explicit v1 cost tradeoff;
   document that desired count 1 plus Spot is not a high-availability SLA.
 - [ ] Validate task CPU/memory combinations, `awsvpc`, named Service Connect
   ports, log configuration, health checks, graceful termination, and no
   floating image references in the newly registered release task definitions.
+- [ ] Verify CloudTrail management-event coverage for ECS, ECR, S3, CloudFront,
+  IAM, and Secrets Manager mutations; retain sanitized AWS request IDs with the
+  GitHub evidence so both audit planes can be correlated.
 - [ ] Ensure production lifecycle helpers cannot call clean-staging database
   creation/bootstrap/deletion paths. Add tests for environment guards and
   sanitized task-definition transforms.
@@ -344,11 +441,17 @@ in diffs, logs, artifacts, or task-definition plaintext fields.
   `v<version>`, never arbitrary tags/digests. Fetch and schema/checksum-validate
   its release assets and confirm all required ECR digests/frontend archive
   still exist before approval.
+- [ ] Resolve targets only from the intersection of the latest 10 complete
+  official sets across all backend repositories and frontend prefixes. Reject
+  metadata-only, partially retained, draft, or tampered releases.
 - [ ] Show a pre-approval summary of current versus target component identities,
   digests, task definitions, frontend checksum, source SHAs, and database-
   compatibility warning.
 - [ ] Use the same protected `production` Environment and non-cancelling
   production concurrency group as forward promotion.
+- [ ] Repeat target/current-state validation after approval and lock acquisition,
+  derive the approver from GitHub evidence, snapshot pre-rollback state for
+  compensation, and handle paused production exactly as forward promotion does.
 - [ ] Register new task-definition revisions pinned to the selected official
   digests and restore frontend from the retained immutable archive/prefix. Do
   not move or depend on mutable tags and do not create a new official release.
@@ -359,8 +462,9 @@ in diffs, logs, artifacts, or task-definition plaintext fields.
   the deployment/audit record without editing the immutable original release
   manifest.
 - [ ] If rollback fails, stop further automatic mutation, preserve diagnostics,
-  and report both current actual state and last known-good state. Never attempt
-  database reversal automatically.
+  compensate changed components to the pre-rollback snapshot, and report actual,
+  pre-operation, and last-known-good states. If compensation also fails, leave a
+  clear mixed-state incident. Never reverse the database automatically.
 
 **Verification gate:** validate rejection of unknown/expired/tampered releases;
 perform release N → N-1 → N in a controlled test; confirm exact backend digests
@@ -380,6 +484,9 @@ production health.
 - [ ] Query ECS task `containers[].imageDigest`; do not report only the task
   definition's tag or URI. Resolve frontend identity from a deployed immutable
   version marker/checksum, not cache headers.
+- [ ] When production is intentionally paused and has no tasks, report that state
+  and resolve selected task-definition digests plus last verified deployment
+  evidence; never fabricate a running digest.
 - [ ] Make lookup output machine-readable JSON with an optional concise human
   view. Missing, ambiguous, or contradictory mappings must exit non-zero.
 - [ ] Add offline fixture tests and a read-only live smoke test. AWS lookup
@@ -399,6 +506,10 @@ the audit fails clearly; ShellCheck/lint passes; live commands are read-only.
 - [ ] Design lifecycle rules against real multi-tag fixtures before applying
   them. An official digest has both `sha-*` and `release-*`; a broad 30-day SHA
   rule must not delete one of the newest 10 official release images.
+- [ ] Give the `release-*` keep-10 rule highest priority and prove with AWS ECR
+  evaluator fixtures that retained multi-tag release images cannot be selected
+  by lower-priority candidate rules. Do not treat a lifecycle rule as a generic
+  negative/exclusion filter.
 - [ ] Keep the most recent 10 `release-*` images per backend repository, expire
   non-official SHA/branch/main candidates after approximately 30 days, and
   expire untagged images after a short documented grace period.
@@ -499,6 +610,11 @@ the rollback-window audit reports 10 or all existing releases when fewer than
 | ✅ Rollback depended on a human choosing a mutable tag | Rollback accepts only a validated official release manifest and deploys digests/checksums. |
 | ✅ Retention ignored images carrying both SHA and release tags | Lifecycle policies require multi-tag fixtures, preview, and official-rule protection before application. |
 | ✅ Parallel/cancelled workflow races were unspecified | Promotion and rollback share one non-cancelling production concurrency group. |
+| ✅ SHA-tag reruns conflicted with dynamic build labels | The canonical producer is recorded separately; trusted reruns reuse its exact bytes and record their own validation identity. |
+| ✅ Per-service rollback could leave a mixed monorepo release | Every production mutation snapshots pre-state and compensates the full changed set on a later failure. |
+| ✅ Approval and uniqueness checks could become stale while queued | Promotion and rollback repeat authoritative preflight after approval and lock acquisition. |
+| ✅ Frontend immutable-prefix wording did not match Vite root asset URLs | The immutable prefix is the rollback source; live hashed assets are copied without deletion and marker/index are published last. |
+| ✅ Paused production behavior was undefined | Workflows activate digest-pinned definitions without transiently starting stale task definitions and preserve the prior cost state. |
 
 ### Open implementation risks
 
@@ -506,10 +622,12 @@ the rollback-window audit reports 10 or all existing releases when fewer than
 |---|---|
 | GitHub required-reviewer support varies by repository visibility/plan | Verify entitlement before implementation. If unavailable, stop and choose an auditable owner-only approval mechanism; do not silently replace approval with an unprotected dispatch. |
 | Existing ECR repositories/tags may conflict with immutable-with-exclusion settings | Inventory and simulate first. Preserve existing SHA identities; never delete or overwrite merely to make migration pass. |
+| A pre-existing SHA tag may have been produced by a feature/manual run | Accept only a producer proven to be a successful trusted `main` push; fail closed and require explicit remediation for any collision. |
 | Existing production task definitions may contain drift or floating tags | Sanitize and diff copies; pin new revisions by digest and preserve secret references/roles/network settings. |
 | There is no mature production database migration/rollback mechanism | Block schema-changing releases until Flyway (or equivalent), compatibility rules, and recovery procedure exist. Application rollback must not pretend to reverse data. |
 | Desired-count-one Fargate Spot production can be interrupted | Accept explicitly for v1 cost goals, configure safe rolling/circuit breaker behavior, and document that this is not HA. |
 | Frontend root replacement is not transactionally atomic | Use immutable archives/prefixes, assets-first/index-last, retain hashed assets, version marker/checksum verification, and CloudFront invalidation. |
+| GitHub Releases/assets are privileged mutable objects, not WORM storage | Minimize release-write permission, checksum every asset, audit for drift/deletion, and treat cryptographic/WORM archival as later hardening. |
 | Existing documentation from Pass 2 contains stale shared-cluster wording | Correct it only after the in-flight Pass 2 documentation changes settle; propagate the final isolated-environment truth recursively. |
 
 ---

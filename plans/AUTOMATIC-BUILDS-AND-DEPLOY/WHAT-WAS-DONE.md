@@ -331,3 +331,53 @@ curl -s -o /dev/null -w "%{http_code}" -X OPTIONS "$CF/auth/login" -H "Origin: h
   staging teardown under `if: always()`.
 - [x] Staging deploy preflights the immutable tag across all three ECR
   repositories, preventing partial service updates when an artifact is missing.
+
+---
+
+## Pass 3 — Release, Traceability & Promotion (2026-08-04)
+
+### 3.1 Release contract and local validation foundation ✅
+
+Implemented entirely under `plans/AUTOMATIC-BUILDS-AND-DEPLOY/release/` (see
+`README.md` there for the full contract and usage):
+
+- **Versioned JSON Schema** `schema/release-manifest.schema.json` (Draft-07):
+  candidate vs official state discrimination via `anyOf`
+  (`candidateManifest` / `officialManifest`), `additionalProperties: false` at
+  every level, and strict patterns for SemVer, 40-char SHAs, image digests,
+  SHA-256 checksums, RFC-3339 UTC timestamps, ECR tags, task-definition ARNs,
+  and URLs. State rules live in the schema: candidates forbid
+  `promotionWorkflow` and backend `taskDefinitionArn`; officials require them.
+- **Deterministic local validator** in Python (`src/release_contract/`):
+  strict `json.load` parsing (no regex JSON parsing), a control-character scan
+  that rejects escaped `\u0000` etc. before schema validation, the pinned
+  `jsonschema` engine (draft-07, `referencing` registry, no deprecated
+  `RefResolver`), and normalized `{code, field, message}` issues that are
+  stable across jsonschema versions. Every invalid fixture fails with its
+  documented primary error code.
+- **Helpers**: `semver.py` (validate/compare/strict-increase — rejects leading
+  `v`, prerelease, build metadata, leading zeroes, non-ASCII shell metachar
+  characters), `checksums.py` (file SHA-256, canonical sorted-key manifest
+  checksum), `components.py` (component→repository/identity/tag/prefix mapping,
+  single source of truth for `sha-*`, `release-*`, `v*`, `_releases/v*/`
+  derivations), `crossrules.py` (atomic-identity rules: every component SHA and
+  `items.commonSourceSha` equals `release.sourceSha`, identities/versions/
+  repositories/tags agree).
+- **Fixtures**: 2 valid (candidate + official `1.2.1`) and 37 invalid fixtures
+  under `fixtures/`, with `fixtures/invalid/EXPECTED.md` as the authoritative
+  fixture→primary-error-code table that the tests parse (docs and tests cannot
+  drift).
+- **Strict shell input helpers** `bin/release-input.sh` (SemVer, full SHA,
+  SHA-256 hex, positive int, GitHub login, HTTP(S) URL, regular file) and an
+  argv-only wrapper `bin/validate-manifest.sh` that never interpolates input
+  into command strings.
+- **Automated tests**: 61 Python `unittest` tests plus
+  `tests/scripts/release_contract_test.sh` (repo-level gate that runs the
+  Python suite, CLI fixture checks, determinism, and the checksum guard, and
+  lints with `ruff` and `shellcheck`).
+
+**Verification:** the full gate passes — 61/61 Python tests; every valid
+fixture accepted; every invalid fixture rejected with its expected primary code;
+CLI output deterministic; `--check-checksum` guard verified; `ruff check` and
+`shellcheck` clean (installed via `pip install ruff shellcheck-py`;
+`requirements.txt` pins `jsonschema==4.26.0`). No AWS CLI commands were run.

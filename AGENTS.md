@@ -120,6 +120,20 @@ All services, databases, Redis, Kafka, and the frontend are defined in `docker-c
 
 See [docs/CI_CD_GOTCHAS.md](./docs/CI_CD_GOTCHAS.md) for the full pitfall checklist. Always read that file before working on CI/CD or AWS infra.
 
+### Release contract (Pass 3, subphase 3.1)
+
+The versioned release manifest contract, its deterministic local validator,
+valid/invalid fixtures, strict dispatch-input helpers, and tests live in
+`plans/AUTOMATIC-BUILDS-AND-DEPLOY/release/` (see its `README.md`). Every later
+release subphase (candidate evidence, promotion, rollback, traceability,
+retention) consumes this contract. Always validate candidate/official manifests
+with the bundled validator — never parse security-sensitive JSON with regex or
+ad-hoc shell string concatenation — and run the gate:
+
+```bash
+bash tests/scripts/release_contract_test.sh
+```
+
 ### Before any AWS work
 - Always run `aws sts get-caller-identity --profile dpm-profile --region eu-north-1` first in any new terminal session
 - Always pass `--profile dpm-profile --region eu-north-1` explicitly on every command; AWS resources are region-scoped and invisible across regions

@@ -2043,3 +2043,41 @@ snapshot restore results are retained only as an audit trail.
   RDS absence was reported, and both scripts completed successfully in about
   20 seconds. No AWS resource was created, changed, or deleted by these no-op
   verification runs.
+
+---
+
+## Pass 3 — Release, Traceability & Promotion
+
+### 3.1 Release contract and local validation foundation (2026-08-04)
+
+Source-controlled artifacts (no AWS resources involved):
+
+| Path | Purpose |
+|---|---|
+| `plans/AUTOMATIC-BUILDS-AND-DEPLOY/release/schema/release-manifest.schema.json` | Versioned Draft-07 JSON Schema (candidate/official states via `anyOf`) |
+| `plans/AUTOMATIC-BUILDS-AND-DEPLOY/release/fixtures/valid/*.json` | 2 accepted manifests |
+| `plans/AUTOMATIC-BUILDS-AND-DEPLOY/release/fixtures/invalid/*.json` | 37 rejected manifests |
+| `plans/AUTOMATIC-BUILDS-AND-DEPLOY/release/fixtures/invalid/EXPECTED.md` | Authoritative fixture → primary error code table (parsed by tests) |
+| `plans/AUTOMATIC-BUILDS-AND-DEPLOY/release/src/release_contract/*.py` | Python validator + semver/checksum/component/cross-field helpers |
+| `plans/AUTOMATIC-BUILDS-AND-DEPLOY/release/bin/validate-manifest.sh` | argv-only shell CLI wrapper |
+| `plans/AUTOMATIC-BUILDS-AND-DEPLOY/release/bin/release-input.sh` | Strict dispatch-input shell validators |
+| `plans/AUTOMATIC-BUILDS-AND-DEPLOY/release/tests/*.py` | 61 Python unit/validation tests |
+| `tests/scripts/release_contract_test.sh` | Repo-level verification gate |
+| `plans/AUTOMATIC-BUILDS-AND-DEPLOY/release/requirements.txt` | `jsonschema==4.26.0` (pinned) |
+
+Commands run (local only, no AWS profile/region involved):
+
+```bash
+python3 -m pip install --user jsonschema ruff shellcheck-py
+bash tests/scripts/release_contract_test.sh
+(cd plans/AUTOMATIC-BUILDS-AND-DEPLOY/release && ruff check src tests)
+shellcheck plans/AUTOMATIC-BUILDS-AND-DEPLOY/release/bin/validate-manifest.sh \
+  plans/AUTOMATIC-BUILDS-AND-DEPLOY/release/bin/release-input.sh \
+  tests/scripts/release_contract_test.sh
+```
+
+Verification result: 61/61 Python tests pass; every valid fixture accepted;
+every invalid fixture rejected with its expected primary error code; CLI output
+deterministic; `--check-checksum` guard verified; `ruff` and `shellcheck` clean.
+The schema is Draft-07 metaschema-valid. No AWS CLI command was run; no
+production or staging environment was touched; nothing was committed.

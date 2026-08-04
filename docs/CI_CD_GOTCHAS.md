@@ -12,6 +12,39 @@
 
 ---
 
+## Release contract (Pass 3, subphase 3.1)
+
+The versioned release-manifest JSON Schema, deterministic local validator,
+valid/invalid fixtures, strict dispatch-input helpers, and tests live in
+`plans/AUTOMATIC-BUILDS-AND-DEPLOY/release/` (see its `README.md`).
+
+- **Validate any candidate/official manifest** (never parse security-sensitive
+  JSON with regex or ad-hoc shell concatenation):
+  ```bash
+  RELEASE=plans/AUTOMATIC-BUILDS-AND-DEPLOY/release
+  bash "$RELEASE/bin/validate-manifest.sh" manifest.json --human
+  ```
+  Exit `0` = valid, `1` = invalid, `2` = usage/IO error. Issues are emitted as
+  deterministic `{code, field, message}` JSON; `--check-checksum <sha256>`
+  guards the canonical manifest checksum.
+- **Gate:** `bash tests/scripts/release_contract_test.sh` runs the 61-test
+  Python suite, CLI fixture checks, determinism/checksum checks, and (when
+  present) `ruff` + `shellcheck`. Pin the validator dependency with
+  `pip install -r "$RELEASE/requirements.txt"` (`jsonschema==4.26.0`).
+- **ShellCheck fallback:** `shellcheck` is not always preinstalled; install the
+  bundled binary with `pip install shellcheck-py`, or download from
+  https://www.shellcheck.net/. If unavailable, the gate reports it explicitly
+  instead of silently passing.
+- **Dispatch inputs:** validate them with
+  `source "$RELEASE/bin/release-input.sh"` (`rl_assert_semver`,
+  `rl_assert_full_sha`, `rl_assert_sha256_hex`, `rl_assert_positive_integer`,
+  `rl_assert_github_login`, `rl_assert_http_url`, `rl_assert_regular_file`),
+  then pass them to downstream commands only as environment variables or
+  argument-array entries — never interpolated into shell/JSON/GitHub-CLI/AWS
+  CLI command strings.
+
+---
+
 ## AWS Context
 
 | Property | Value |
