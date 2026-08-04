@@ -5,6 +5,7 @@ import { ItemCard } from '../components/features/ItemCard';
 import { Button } from '../components/common/Button';
 import { Search, Filter } from 'lucide-react';
 import toast from 'react-hot-toast';
+import { getApiErrorMessage } from '../utils/apiError';
 
 export default function ItemsCatalog() {
   const [items, setItems] = useState<ItemDTO[]>([]);
@@ -17,11 +18,8 @@ export default function ItemsCatalog() {
         setIsLoading(true);
         const data = await itemsService.getAllItems();
         setItems(data);
-      } catch (error: any) {
-        const errorMessage =
-          error.response?.data?.detail ||
-          error.message ||
-          'Failed to load items';
+      } catch (error: unknown) {
+        const errorMessage = getApiErrorMessage(error, 'Failed to load items');
         toast.error(errorMessage);
         console.error('Error fetching items:', error);
       } finally {

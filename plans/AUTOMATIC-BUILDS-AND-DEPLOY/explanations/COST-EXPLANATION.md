@@ -294,7 +294,7 @@ Add EventBridge scheduled scaling and a cost anomaly alarm (as planned in `04_OP
 
 - [x] **Switch to Fargate Spot** — done for items + gateway. Auth needs Spot switch + image fix.
 - [ ] **Fix auth: push missing image tag to ECR** — auth task stuck on `CannotPullContainerError` since ~July 27.
-- [ ] **Create `pause-playground.sh` and `resume-playground.sh`** — manual on/off when not coding
+- [x] **Create `scripts/pause-playground.sh` and `scripts/resume-playground.sh`** — manual on/off when not coding
 - [ ] **Add billing alert at $10/month** — AWS Budgets, free, catches cost surprises
 - [ ] **Be aware of public IPv4 charge** — $0.005/hr per IP ($10.95/month for 3 tasks). Scales to 0 with tasks — no charge when paused.
 - [ ] **Consider consolidating API Gateway + Auth into one service** — reduces Fargate task count from 3 to 2, saves ~$3.15/month Spot + $3.65/month IPv4 = ~$6.80/month (architectural change, evaluate in Pass 2)

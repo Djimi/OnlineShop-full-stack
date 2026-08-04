@@ -1,5 +1,11 @@
 # Pass 2 — CI Pipeline Hardening & Staging: Implementation Details
 
+> Historical implementation record: the shared-cluster staging design below
+> was replaced on 2026-08-04. The authoritative design is the fully isolated
+> staging environment in [02_CI_PIPELINE_HARDENING.md](../02_CI_PIPELINE_HARDENING.md)
+> and [executed/INFO.md](../executed/INFO.md). The legacy
+> `scripts/setup-staging-env.sh` now exits before making changes.
+
 ## Overview
 
 Pass 2 transformed the manual MVP deployment (Pass 1) into an automated CI/CD pipeline with proper test gates, selective service builds, branch protection, and a staging environment. This document explains every change in detail.

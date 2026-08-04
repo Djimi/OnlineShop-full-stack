@@ -1888,3 +1888,81 @@ Replaces the old `build-and-push.yml` with:
 | Created `scripts/ecs-run-sql.sh` | Sanctioned private-RDS SQL runner: base64 SQL transport, `--cli-input-json file://`, `ON_ERROR_STOP=1`, PGPASSWORD via `secrets[].valueFrom` only, correct log-stream resolution, self deregister+delete of its TD revision | Smoke test `SELECT version()` ✅; TD residue 0 ✅ |
 
 **Standing rules added to `AGENTS.md`:** no blocking poll loops; no plaintext secrets in task definitions; private RDS only via `scripts/ecs-run-sql.sh` with `--verify`.
+
+---
+
+## Pass 2 Completion Audit and Isolated Staging Replacement (2026-08-04)
+
+### GitHub and CI
+
+- Repository merge settings changed to squash-only (`allow_merge_commit=false`,
+  `allow_rebase_merge=false`, `allow_squash_merge=true`) and verified via API.
+- `main` protection enforces administrators, strict up-to-date checks, one
+  approval, stale-review dismissal, and required checks: `auth`, `items`,
+  `api-gateway`, `frontend`, `e2e-pr`.
+- Workflow adds frontend npm install/lint/build and blocking PR E2E against a
+  disposable Compose stack. Local reproduction passed all three E2E tests.
+- Main staging job resumes isolated staging, deploys the immutable SHA, runs
+  E2E, and pauses staging under `if: always()`.
+
+### Independent staging resource inventory
+
+| Resource | Identifier |
+|---|---|
+| VPC | `vpc-0e9b2c6911cf3d4e0` (`10.42.0.0/16`) |
+| Public subnets | `subnet-04f5da5a8cf1b1350` (`eu-north-1a`), `subnet-06b823d8d6b24333b` (`eu-north-1b`) |
+| Internet gateway | `igw-0ecb8c45b94d72a9d` |
+| Route table | `rtb-0a65209cbae61df32` |
+| ALB security group | `sg-0e4c072113dd8d1e9` |
+| ECS security group | `sg-0edd7fa1813d03018` |
+| RDS security group | `sg-08c5d1008d1ce54ae` |
+| ECS cluster | `onlineshop-staging-cluster` |
+| Cloud Map namespace | `staging.onlineshop.local` / `ns-3pbrjpwzgrtai75v` |
+| RDS subnet group | `onlineshop-staging-db-subnets` |
+| Active RDS name | `onlineshop-staging-postgres` (exists only while running) |
+| Idle RDS snapshot | `onlineshop-staging-latest` (encrypted) |
+| ALB name | `onlineshop-staging-v2-alb` (exists only while running) |
+| Target group | `onlineshop-staging-tg-v2` / `8a9b0471c381e60b` |
+| Task definitions | `onlineshop-auth-staging-v2`, `onlineshop-items-staging-v2`, `onlineshop-api-gateway-staging-v2` |
+| ECS services | `onlineshop-auth-staging`, `onlineshop-items-staging`, `onlineshop-api-gateway-staging` |
+
+Staging databases `auth_staging` and `items_staging` were created on the
+isolated RDS instance. Schema and seed mutations were executed through the
+staging-configured `ecs-run-sql.sh`; read-back proved `users` + `sessions`, the
+`testuser` seed, `items`, and five item rows. Application credentials continue
+to come from the staging-only Secrets Manager entries.
+
+### Lifecycle and validation
+
+- First staging E2E run: one transient 502 occurred before all Service Connect
+  tasks converged; rerun after health convergence passed 3/3 tests.
+- Pause verification: services `desired/running/pending=0`, staging ALB absent,
+  RDS absent, encrypted 20 GiB final snapshot `available`.
+- Resume verification: snapshot restore recreated RDS in the staging VPC and
+  recreated a new ALB/listener without touching production.
+- Old shared staging ALB/TG and the three legacy services in the production
+  cluster were deleted and verified absent/inactive. Legacy task-definition
+  families have no ACTIVE or INACTIVE revisions remaining.
+- Production resume audit found deleted ECR tags in old task definitions.
+  Production revisions were updated to immutable
+  `sha-06658a68e7ce6583e59069bc004065cc0b541e39` images.
+- A full restore from `onlineshop-staging-latest` was tested; readiness reached
+  HTTP 401 for the invalid-token probe and cloud E2E passed 3/3 after restore.
+- Final state was verified paused independently: both clusters have all three
+  services at zero and neither ALB exists; staging RDS is absent and its
+  encrypted 20 GiB snapshot is `available`.
+- Operational lifecycle scripts were moved to the repository-level `scripts/`
+  directory. The old shared-environment setup script is hard-disabled.
+
+### IAM and secret hygiene
+
+- `github-actions-onlineshop/ecs-deploy-staging` now includes constrained
+  `iam:PassRole`, staging service updates, lifecycle RDS/ALB permissions, and
+  read-only health inspection. Applied policy is stored in
+  `github-actions-staging-deploy-policy.json`.
+- `ecsTaskExecutionRole` can read application secrets and RDS-managed secrets;
+  policy source is `ecs-task-secrets-policy.json`.
+- A plaintext production master password found in the local `.env` was treated
+  as compromised: RDS master password rotated, `onlineshop/rds/master`
+  `AWSCURRENT` updated, and the plaintext `.env` line removed. No replacement
+  value was printed or written to the repository.

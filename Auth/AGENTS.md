@@ -51,6 +51,10 @@ Standard Spring Boot layered architecture: `controller/` → `service/` → `rep
 
 The CI pipeline runs `./mvnw verify` before publishing Auth images. Pull-request builds create Docker images without requesting AWS credentials or pushing to ECR.
 
+After a successful `main` build, the immutable Auth image is deployed to the
+independent staging ECS cluster. Staging uses its own VPC and RDS database; it
+does not use the production cluster or production database.
+
 ## Database
 
 - Schema: [init-db/01-schema.sql](./init-db/01-schema.sql)

@@ -5,6 +5,7 @@ import { itemsService } from '../services/itemsService';
 import { Button } from '../components/common/Button';
 import { ArrowLeft, AlertCircle, CheckCircle, Package } from 'lucide-react';
 import toast from 'react-hot-toast';
+import { getApiErrorMessage } from '../utils/apiError';
 
 export default function ItemDetail() {
   const { id } = useParams<{ id: string }>();
@@ -26,13 +27,8 @@ export default function ItemDetail() {
         setError(null);
         const data = await itemsService.getItemById(id);
         setItem(data);
-      } catch (error: any) {
-        const errorMessage =
-          error.response?.status === 404
-            ? 'Item not found'
-            : error.response?.data?.detail ||
-              error.message ||
-              'Failed to load item details';
+      } catch (error: unknown) {
+        const errorMessage = getApiErrorMessage(error, 'Failed to load item details');
         setError(errorMessage);
         toast.error(errorMessage);
         console.error('Error fetching item:', error);

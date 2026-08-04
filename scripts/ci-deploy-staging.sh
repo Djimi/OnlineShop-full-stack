@@ -9,9 +9,9 @@ if [ -z "$IMAGE_TAG" ]; then
   exit 1
 fi
 
-CLUSTER="onlineshop-cluster"
+CLUSTER="onlineshop-staging-cluster"
 ECR_BASE="799111666795.dkr.ecr.eu-north-1.amazonaws.com"
-AWS_ARGS="--region eu-north-1"
+AWS_ARGS="--profile dpm-profile --region eu-north-1"
 
 echo "=== Deploying tag '$IMAGE_TAG' to staging ==="
 
@@ -35,7 +35,7 @@ for svc_entry in "${SERVICES[@]}"; do
 
   if [ -z "$TD_ARN" ] || [ "$TD_ARN" = "None" ]; then
     echo "ERROR: Service '$SERVICE_NAME' not found in cluster '$CLUSTER'"
-    echo "Run scripts/setup-staging-env.sh first to create staging infrastructure."
+    echo "Run the isolated staging provisioning/lifecycle scripts first."
     exit 1
   fi
 
@@ -82,21 +82,21 @@ for svc_entry in "${SERVICES[@]}"; do
     --desired-count 1 \
     --no-cli-pager > /dev/null
 
-  echo "Waiting for deployment to stabilize (60s timeout)..."
-  aws ecs wait services-stable $AWS_ARGS \
+  echo "Waiting for deployment to stabilize..."
+  if ! aws ecs wait services-stable $AWS_ARGS \
     --cluster "$CLUSTER" \
-    --services "$SERVICE_NAME" \
-    --max-wait 60 2>/dev/null || {
-    echo "WARNING: Timed out waiting for '$SERVICE_NAME'. Checking task status..."
+    --services "$SERVICE_NAME"; then
+    echo "ERROR: '$SERVICE_NAME' did not stabilize. Checking task status..."
     TASK_ARN=$(aws ecs list-tasks $AWS_ARGS --cluster "$CLUSTER" --service-name "$SERVICE_NAME" --query 'taskArns[0]' --output text)
     if [ -n "$TASK_ARN" ] && [ "$TASK_ARN" != "None" ]; then
       aws ecs describe-tasks $AWS_ARGS --cluster "$CLUSTER" --tasks "$TASK_ARN" \
         --query 'tasks[0].{lastStatus:lastStatus,healthStatus:healthStatus,reason:stopReason}' \
         --output table
     fi
-  }
+    exit 1
+  fi
 
-  echo "'$SERVICE_NAME' deployment initiated."
+  echo "'$SERVICE_NAME' deployment is stable."
 done
 
 echo ""

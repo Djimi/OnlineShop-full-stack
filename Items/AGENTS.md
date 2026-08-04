@@ -42,6 +42,10 @@ cd Items
 
 The CI pipeline builds `common`, runs `./mvnw verify`, and then publishes the Items image on branch pushes. Pull-request builds create Docker images without requesting AWS credentials or pushing to ECR.
 
+After a successful `main` build, the immutable Items image is deployed to the
+independent staging ECS cluster. Staging uses its own VPC and RDS database; it
+does not use the production cluster or production database.
+
 ## Docker Compose Build
 
 Run from the repository root:

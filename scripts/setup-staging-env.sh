@@ -1,6 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+echo "ERROR: this legacy shared-production staging setup is retired." >&2
+echo "Use scripts/resume-staging.sh; current staging is isolated and already provisioned." >&2
+exit 1
+
+# Historical implementation below is intentionally unreachable and retained
+# only as an audit record of the replaced environment.
+
 echo "=== OnlineShop Staging Environment Setup ==="
 echo "This script creates a staging environment in the existing onlineshop-cluster."
 echo "Staging services are scaled to 0 by default (on-demand)."

@@ -38,7 +38,10 @@ VITE_API_URL='' npm run build
 
 ## CI/CD
 
-The current Java-service CI pipeline does not build or publish the frontend. Frontend changes require the frontend-specific build and deployment process documented above.
+Pull requests and feature-branch pushes run `npm ci`, `npm run lint`, and
+`npm run build` when frontend paths change. The pipeline validates the frontend
+but does not publish it; AWS publication remains a separate deployment step.
+The frontend validation is a required `main` branch-protection check.
 
 ### Deploy to AWS
 ```bash

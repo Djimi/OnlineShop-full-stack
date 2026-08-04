@@ -87,8 +87,8 @@ Every step executed in this plan **MUST** update [`executed/INFO.md`](./executed
 | File | When to Update |
 |------|---------------|
 | [`WHAT-WAS-DONE.md`](./WHAT-WAS-DONE.md) | Any infrastructure change, deployment fix, configuration update, or code change that affects runtime |
-| [`scripts/resume-playground.sh`](./scripts/resume-playground.sh) | If services, ports, security groups, or task definitions change |
-| [`scripts/pause-playground.sh`](./scripts/pause-playground.sh) | If services, ports, or ALB configuration changes |
+| [`scripts/resume-playground.sh`](../../scripts/resume-playground.sh) | If services, ports, security groups, or task definitions change |
+| [`scripts/pause-playground.sh`](../../scripts/pause-playground.sh) | If services, ports, or ALB configuration changes |
 
 **Why:** These files are the source of truth for automation. Drift = broken automation = manual work.
 
@@ -124,4 +124,4 @@ Every step executed in this plan **MUST** update [`executed/INFO.md`](./executed
 | Issue | Notes |
 |-------|-------|
 | ✅ Duplicate `build-and-push.yml` workflow | Removed; `build-and-deploy.yml` is the single active CI/CD workflow after merge |
-| ⬜ Staging services don't auto-scale to 0 after E2E | Deliberate in Pass 2; automated teardown planned for Pass 3 |
+| ✅ Staging remained billable after E2E | Main CI now pauses staging in an `always()` step: ECS→0, ALB deletion, encrypted RDS snapshot + DB deletion |

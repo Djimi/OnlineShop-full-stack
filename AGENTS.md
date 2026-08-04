@@ -152,11 +152,23 @@ When not actively developing, pause the AWS playground to save ~$38/month:
 
 ```bash
 # Stop the playground (scale ECS to 0 + delete ALB) — reduces to ~$1.25/month
-bash plans/AUTOMATIC-BUILDS-AND-DEPLOY/scripts/pause-playground.sh
+bash scripts/pause-playground.sh
 
 # Start the playground (recreate ALB + scale ECS to 1) — wait ~3-5 min for startup
-bash plans/AUTOMATIC-BUILDS-AND-DEPLOY/scripts/resume-playground.sh
+bash scripts/resume-playground.sh
 ```
+
+Production and staging are independent environments. Staging has its own VPC,
+ECS cluster, RDS instance, security groups, Cloud Map namespace, and ALB:
+
+```bash
+# Start/stop isolated staging (defaults to Fargate Spot when running)
+bash scripts/resume-staging.sh
+bash scripts/pause-staging.sh
+```
+
+`pause-staging.sh` snapshots and deletes staging RDS; merely stopping RDS is
+not sufficient because AWS automatically restarts it after seven days.
 
 **Cost summary:**
 

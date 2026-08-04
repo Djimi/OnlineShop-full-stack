@@ -6,11 +6,10 @@ set -euo pipefail
 # Recreates ALB infrastructure, wires it to API Gateway ECS service,
 # and scales all services to desired-count=1.
 #
-# Usage:  bash resume-playground.sh [--spot]
+# Usage:  bash resume-playground.sh [--on-demand]
 #
-#   --spot   Use FARGATE_SPOT capacity provider (cheaper, but spot interruptions
-#            possible). Falls back to FARGATE if spot capacity is unavailable.
-#   (none)   Use FARGATE capacity provider (default, reliable, ~2x spot price).
+#   (none)       Use FARGATE_SPOT (cost-optimized default).
+#   --on-demand  Use regular FARGATE for deterministic short validation sessions.
 #
 # Cost (FARGATE):        ~$76.00/month  (3 tasks × $0.05/hr + ALB + IPs)
 # Cost (FARGATE_SPOT):   ~$49.00/month  (3 tasks × $0.02/hr + ALB + IPs)
@@ -18,12 +17,12 @@ set -euo pipefail
 ###############################################################################
 
 # --- Argument parsing ---
-USE_SPOT=false
+USE_SPOT=true
 for arg in "$@"; do
   case "$arg" in
-    --spot) USE_SPOT=true ;;
-    --help) echo "Usage: bash resume-playground.sh [--spot]"; exit 0 ;;
-    *) echo "Unknown argument: $arg"; echo "Usage: bash resume-playground.sh [--spot]"; exit 1 ;;
+    --on-demand) USE_SPOT=false ;;
+    --help) echo "Usage: bash resume-playground.sh [--on-demand]"; exit 0 ;;
+    *) echo "Unknown argument: $arg"; echo "Usage: bash resume-playground.sh [--on-demand]"; exit 1 ;;
   esac
 done
 
@@ -51,7 +50,7 @@ ITEMS_TD="onlineshop-items"
 GW_TD="onlineshop-api-gateway"
 
 echo "=== RESUME PLAYGROUND ==="
-echo "Capacity provider: $CAPACITY_PROVIDER (use --spot for FARGATE_SPOT)"
+echo "Capacity provider: $CAPACITY_PROVIDER (use --on-demand for regular FARGATE)"
 echo "This will recreate ALB infrastructure and scale ECS services to 1."
 echo ""
 
@@ -127,54 +126,34 @@ else
   echo "  Using existing ALB: $ALB_ARN"
 fi
 
-# --- Step 3: Create target group ---
-: ${ALREADY_HAS_TG:=true}
-: ${TG_ARN:=""}
-if [ "$ALREADY_HAS_TG" = false ] || [ "$NEEDS_ALB" = true ]; then
-  if [ -z "$TG_ARN" ]; then
-    echo ""
-    echo "[3/8] Creating target group ($TG_NAME)..."
-    TG_ARN=$(aws elbv2 create-target-group --profile dpm-profile --region eu-north-1 \
-      --name "$TG_NAME" \
-      --protocol HTTP \
-      --port 10000 \
-      --target-type ip \
-      --vpc-id "$VPC_ID" \
-      --health-check-path "/actuator/health" \
-      --health-check-protocol HTTP \
-      --health-check-port "10000" \
-      --health-check-interval-seconds 30 \
-      --healthy-threshold-count 3 \
-      --unhealthy-threshold-count 3 \
-      --health-check-timeout-seconds 5 \
-      --query 'TargetGroups[0].TargetGroupArn' --output text)
-    echo "  Target group created: $TG_ARN"
-  else
-    echo ""
-    echo "[3/8] Using existing target group ($TG_NAME): $TG_ARN"
-  fi
+# --- Steps 3-4: Reuse the free target group; recreate only missing hourly ALB pieces ---
+TG_ARN=$(aws elbv2 describe-target-groups --profile dpm-profile --region eu-north-1 \
+  --names "$TG_NAME" --query 'TargetGroups[0].TargetGroupArn' --output text 2>/dev/null || true)
+if [ -z "$TG_ARN" ] || [ "$TG_ARN" = "None" ]; then
+  TG_ARN=$(aws elbv2 create-target-group --profile dpm-profile --region eu-north-1 \
+    --name "$TG_NAME" --protocol HTTP --port 10000 --target-type ip --vpc-id "$VPC_ID" \
+    --health-check-path "/actuator/health" --health-check-protocol HTTP \
+    --health-check-port traffic-port --health-check-interval-seconds 30 \
+    --healthy-threshold-count 3 --unhealthy-threshold-count 3 --health-check-timeout-seconds 5 \
+    --query 'TargetGroups[0].TargetGroupArn' --output text)
+  aws elbv2 describe-target-groups --profile dpm-profile --region eu-north-1 \
+    --target-group-arns "$TG_ARN" --query 'TargetGroups[0].{Arn:TargetGroupArn,Vpc:VpcId}'
+fi
 
-  # --- Step 4: Create listener ---
-  echo ""
-  echo "[4/8] Creating listener (port 80 → $TG_NAME)..."
-  aws elbv2 create-listener --profile dpm-profile --region eu-north-1 \
-    --load-balancer-arn "$ALB_ARN" \
-    --protocol HTTP \
-    --port 80 \
-    --default-actions Type=forward,TargetGroupArn="$TG_ARN"
-  echo "  Listener created on port 80"
-else
-  echo "  Target group and listener already exist, skipping creation."
-  # Ensure we have the right TG_ARN from the existing setup
-  if [ -z "$TG_ARN" ]; then
-    TG_ARN=$(aws elbv2 describe-target-groups --profile dpm-profile --region eu-north-1 \
-      --names "$TG_NAME" --query 'TargetGroups[0].TargetGroupArn' --output text)
-  fi
+LISTENER_ARN=$(aws elbv2 describe-listeners --profile dpm-profile --region eu-north-1 \
+  --load-balancer-arn "$ALB_ARN" --query 'Listeners[0].ListenerArn' --output text 2>/dev/null || true)
+if [ -z "$LISTENER_ARN" ] || [ "$LISTENER_ARN" = "None" ]; then
+  LISTENER_ARN=$(aws elbv2 create-listener --profile dpm-profile --region eu-north-1 \
+    --load-balancer-arn "$ALB_ARN" --protocol HTTP --port 80 \
+    --default-actions Type=forward,TargetGroupArn="$TG_ARN" \
+    --query 'Listeners[0].ListenerArn' --output text)
+  aws elbv2 describe-listeners --profile dpm-profile --region eu-north-1 \
+    --listener-arns "$LISTENER_ARN" --query 'Listeners[0].{Arn:ListenerArn,Port:Port}'
 fi
 
 # --- Step 5: Wire API Gateway service to target group ---
 : ${NEEDS_WIRING:=false}
-if [ "$NEEDS_ALB" = true ] || [ "$ALREADY_HAS_TG" = false ]; then
+if [ "$NEEDS_ALB" = true ]; then
   NEEDS_WIRING=true
 fi
 
@@ -185,33 +164,15 @@ if [ "$NEEDS_WIRING" = true ]; then
     --cluster "$CLUSTER" \
     --service "$GW_SERVICE" \
     --load-balancers targetGroupArn="$TG_ARN",containerName=api-gateway,containerPort=10000 \
-    --force-new-deployment
+    --force-new-deployment >/dev/null
+  aws ecs describe-services --profile dpm-profile --region eu-north-1 \
+    --cluster "$CLUSTER" --services "$GW_SERVICE" \
+    --query 'services[0].{Name:serviceName,LoadBalancers:loadBalancers}'
   echo "  API Gateway service updated with target group $TG_ARN"
 else
   echo ""
   echo "[5/8] Infrastructure already wired, skipping."
 fi
-
-# --- Helper: detect FARGATE_SPOT capacity failures from service events ---
-check_capacity_failure() {
-  local svc=$1
-  aws ecs describe-services --profile dpm-profile --region eu-north-1 \
-    --cluster "$CLUSTER" --services "$svc" \
-    --query "services[0].events[?contains(message, 'Capacity is unavailable')].message | [0]" \
-    --output text 2>/dev/null
-}
-
-# --- Helper: switch a service from FARGATE_SPOT to FARGATE ---
-switch_to_fargate_fallback() {
-  local svc=$1
-  echo "  $svc: FARGATE_SPOT has no capacity. Falling back to FARGATE..."
-  aws ecs update-service --profile dpm-profile --region eu-north-1 \
-    --cluster "$CLUSTER" --service "$svc" \
-    --capacity-provider-strategy capacityProvider=FARGATE,weight=1,base=1 \
-    --force-new-deployment \
-    --query 'service.capacityProviderStrategy[*].capacityProvider[]' --output text >/dev/null
-  echo "  $svc: switched to FARGATE, new deployment triggered"
-}
 
 # --- Step 6: Scale all services to desired-count=1 and set capacity provider ---
 echo ""
@@ -233,14 +194,20 @@ for svc in onlineshop-auth onlineshop-items onlineshop-api-gateway; do
     aws ecs update-service --profile dpm-profile --region eu-north-1 \
       --cluster "$CLUSTER" --service "$svc" \
       --capacity-provider-strategy "capacityProvider=$CAPACITY_PROVIDER,weight=1,base=1" \
-      --force-new-deployment
+      --force-new-deployment >/dev/null
+    aws ecs describe-services --profile dpm-profile --region eu-north-1 \
+      --cluster "$CLUSTER" --services "$svc" \
+      --query 'services[0].{Name:serviceName,Desired:desiredCount,Capacity:capacityProviderStrategy}'
     echo "  $svc: capacity updated"
   else
     aws ecs update-service --profile dpm-profile --region eu-north-1 \
       --cluster "$CLUSTER" --service "$svc" \
       --desired-count 1 \
       --capacity-provider-strategy "capacityProvider=$CAPACITY_PROVIDER,weight=1,base=1" \
-      --force-new-deployment
+      --force-new-deployment >/dev/null
+    aws ecs describe-services --profile dpm-profile --region eu-north-1 \
+      --cluster "$CLUSTER" --services "$svc" \
+      --query 'services[0].{Name:serviceName,Desired:desiredCount,Capacity:capacityProviderStrategy}'
     echo "  $svc: scaled to 1 ($CAPACITY_PROVIDER)"
   fi
 done
@@ -250,57 +217,13 @@ echo ""
 echo "[7/8] Waiting for all services to reach steady state..."
 echo "  Spring Boot startup takes ~3 minutes per task."
 
-MAX_WAIT=600
-WAITED=0
-INTERVAL=15
-declare -A SWITCHED_TO_FARGATE
-
-while [ $WAITED -lt $MAX_WAIT ]; do
-  ALL_STEADY=true
-  for svc in onlineshop-auth onlineshop-items onlineshop-api-gateway; do
-    STATUS=$(aws ecs describe-services --profile dpm-profile --region eu-north-1 \
-      --cluster "$CLUSTER" --services "$svc" \
-      --query 'services[0].deployments[0].rolloutState' --output text 2>/dev/null || echo "UNKNOWN")
-
-    RUNNING=$(aws ecs describe-services --profile dpm-profile --region eu-north-1 \
-      --cluster "$CLUSTER" --services "$svc" \
-      --query 'services[0].runningCount' --output text 2>/dev/null || echo "0")
-
-    DESIRED=$(aws ecs describe-services --profile dpm-profile --region eu-north-1 \
-      --cluster "$CLUSTER" --services "$svc" \
-      --query 'services[0].desiredCount' --output text 2>/dev/null || echo "0")
-
-    if [ "$STATUS" = "FAILED" ]; then
-      echo "  FATAL: $svc deployment FAILED"
-      exit 1
-    fi
-
-    # If --spot is used and capacity is unavailable, fall back to FARGATE
-    if [ "$USE_SPOT" = true ] && [ "$RUNNING" = "0" ] && [ "$DESIRED" != "0" ] && [ "${SWITCHED_TO_FARGATE[$svc]:-}" != "true" ] && [ $WAITED -ge 60 ]; then
-      CAP_FAIL=$(check_capacity_failure "$svc")
-      if [ -n "$CAP_FAIL" ]; then
-        switch_to_fargate_fallback "$svc"
-        SWITCHED_TO_FARGATE[$svc]=true
-        ALL_STEADY=false
-        continue
-      fi
-    fi
-
-    if [ "$STATUS" != "COMPLETED" ] || [ "$RUNNING" != "1" ]; then
-      ALL_STEADY=false
-      echo "  $svc: rolloutState=$STATUS running=$RUNNING"
-    fi
-  done
-
-  if [ "$ALL_STEADY" = true ]; then
-    echo "  All services steady!"
-    break
-  fi
-
-  sleep $INTERVAL
-  WAITED=$((WAITED + INTERVAL))
-  echo "  Waited ${WAITED}s / ${MAX_WAIT}s..."
-done
+aws ecs wait services-stable --profile dpm-profile --region eu-north-1 \
+  --cluster "$CLUSTER" \
+  --services onlineshop-auth onlineshop-items onlineshop-api-gateway
+aws ecs describe-services --profile dpm-profile --region eu-north-1 \
+  --cluster "$CLUSTER" \
+  --services onlineshop-auth onlineshop-items onlineshop-api-gateway \
+  --query 'services[].{Name:serviceName,Desired:desiredCount,Running:runningCount,Rollout:deployments[0].rolloutState}'
 
 echo ""
 echo "=== RESUME COMPLETE ==="
@@ -332,5 +255,14 @@ fi
 echo "  (includes ~\$10.95/month public IPv4 charge for 3 in-use IPs)"
 echo ""
 echo "Test endpoint: curl http://$ALB_DNS/items"
+ready=false
+for attempt in $(seq 1 12); do
+  status=$(curl --silent --output /dev/null --write-out '%{http_code}' \
+    --header 'Authorization: Bearer production-readiness-invalid-token' \
+    "http://$ALB_DNS/items" || true)
+  if [ "$status" = "401" ]; then ready=true; break; fi
+  sleep 5
+done
+[ "$ready" = true ] || { echo "FATAL: production API did not become ready within 60 seconds" >&2; exit 1; }
 echo ""
-echo "To pause: bash plans/AUTOMATIC-BUILDS-AND-DEPLOY/scripts/pause-playground.sh"
+echo "To pause: bash scripts/pause-playground.sh"

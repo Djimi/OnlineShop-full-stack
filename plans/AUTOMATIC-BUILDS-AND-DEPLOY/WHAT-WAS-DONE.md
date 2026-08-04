@@ -286,12 +286,28 @@ curl -s -o /dev/null -w "%{http_code}" -X OPTIONS "$CF/auth/login" -H "Origin: h
 - `scripts/ci-deploy-staging.sh` — Deploys images to staging ECS services
 - `scripts/setup-staging-env.sh` — Guided setup for staging infrastructure (prints commands)
 
-### Pending (needs AWS re-authentication)
+### Phase 2 completion audit (2026-08-04) ✅
 
-- [ ] IAM role update: add ECS deploy + ELB describe permissions
-- [ ] Staging databases: `auth_staging`, `items_staging` on RDS
-- [ ] Staging Secrets Manager entries
-- [ ] Staging ALB + target group + listener
-- [ ] Staging task definitions (3 services)
-- [ ] Staging ECS services (3, desired:0)
-- [ ] Branch protection on `main`
+- [x] Branch protection enforced for administrators; squash-only; required
+  checks are `auth`, `items`, `api-gateway`, `frontend`, and `e2e-pr`.
+- [x] Frontend lint/build validation added; four unsafe `any` error handlers
+  replaced with a typed shared Axios error helper.
+- [x] Blocking PR E2E runs against a disposable Docker Compose candidate.
+- [x] GitHub OIDC role has scoped staging deployment and `iam:PassRole`
+  permission restricted to `ecsTaskExecutionRole` and ECS Tasks.
+- [x] Old staging resources detached from the production cluster and ALB removed.
+- [x] Independent staging environment provisioned: dedicated VPC, subnets,
+  route table/IGW, three security groups, ECS cluster, Cloud Map namespace,
+  RDS, ALB/TG, task definitions, services, logs, and staging databases.
+- [x] Staging lifecycle is independently startable/stoppable. Stop creates an
+  encrypted RDS snapshot and deletes the DB and ALB; secrets and baseline
+  resources remain.
+- [x] Independent staging E2E passed after initial provisioning.
+- [x] Snapshot restore path passed readiness and cloud E2E 3/3; both production
+  and staging were then independently paused and verified.
+- [x] Production lifecycle hardened and stale deleted ECR image references
+  replaced with immutable `sha-06658a68e7ce6583e59069bc004065cc0b541e39` task revisions.
+- [x] Exposed plaintext RDS master credential rotated; the replacement exists
+  only in Secrets Manager and the plaintext `.env` entry was removed.
+- [x] Production and staging lifecycle scripts moved to repository-level
+  `scripts/`; obsolete shared-staging setup is hard-disabled.

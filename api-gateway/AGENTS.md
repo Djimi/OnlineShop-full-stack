@@ -25,6 +25,10 @@ docker compose up -d --build api-gateway
 
 The CI pipeline runs `./mvnw verify` before publishing the API Gateway image. Pull-request builds create Docker images without requesting AWS credentials or pushing to ECR.
 
+Pull requests also run blocking E2E tests against an isolated Docker Compose
+candidate. Successful `main` builds deploy to the independent staging VPC and
+run the same E2E suite through the staging ALB before staging is paused.
+
 ## Responsibilities
 
 - **Routing**: `/auth/**` → Auth (rewritten to `/api/v1/auth/**`), `/items/**` → Items (rewritten to `/api/v1/items/**`).
