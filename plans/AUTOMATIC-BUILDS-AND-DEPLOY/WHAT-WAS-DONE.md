@@ -284,7 +284,9 @@ curl -s -o /dev/null -w "%{http_code}" -X OPTIONS "$CF/auth/login" -H "Origin: h
 ### 2.7 — Staging Scripts Created ✅
 
 - `scripts/ci-deploy-staging.sh` — Deploys images to staging ECS services
-- `scripts/setup-staging-env.sh` — Guided setup for staging infrastructure (prints commands)
+- `scripts/resume-staging.sh` — Creates and verifies a clean database before ECS startup
+- `scripts/pause-staging.sh` — Tears down ECS, ALB, and RDS without retaining a snapshot
+- `scripts/setup-staging-env.sh` — Retired compatibility entry point
 
 ### Phase 2 completion audit (2026-08-04) ✅
 
@@ -299,9 +301,9 @@ curl -s -o /dev/null -w "%{http_code}" -X OPTIONS "$CF/auth/login" -H "Origin: h
 - [x] Independent staging environment provisioned: dedicated VPC, subnets,
   route table/IGW, three security groups, ECS cluster, Cloud Map namespace,
   RDS, ALB/TG, task definitions, services, logs, and staging databases.
-- [x] Staging lifecycle is independently startable/stoppable. Stop creates an
-  encrypted RDS snapshot and deletes the DB and ALB; secrets and baseline
-  resources remain.
+- [x] Staging lifecycle is independently startable/stoppable. Start creates a
+  clean database from repository SQL and verifies least-privilege access; stop
+  deletes the DB and ALB without snapshot retention by default.
 - [x] Independent staging E2E passed after initial provisioning.
 - [x] Snapshot restore path passed readiness and cloud E2E 3/3; both production
   and staging were then independently paused and verified.
@@ -311,3 +313,21 @@ curl -s -o /dev/null -w "%{http_code}" -X OPTIONS "$CF/auth/login" -H "Origin: h
   only in Secrets Manager and the plaintext `.env` entry was removed.
 - [x] Production and staging lifecycle scripts moved to repository-level
   `scripts/`; obsolete shared-staging setup is hard-disabled.
+
+### Phase 2.9 deterministic staging and lifecycle refactor (2026-08-04) ✅
+
+- [x] Removed the runtime dependency on `onlineshop-staging-latest`.
+- [x] RDS master credentials are generated and managed by RDS for every run;
+  application passwords remain injected from the staging-only secrets.
+- [x] Auth/Items databases, roles, schemas, grants, and deterministic seeds are
+  applied and read back before ECS services start.
+- [x] Shared ALB/ECS/RDS/wait/readiness helpers and explicit production/staging
+  configs replace duplicated lifecycle implementations.
+- [x] All production/staging pause and resume paths now emit UTC timestamped,
+  numbered steps with typical duration ranges. Shared lifecycle helpers expose
+  resource mutations, no-ops, waiters, readiness retries, and verification;
+  completion logs report actual total runtime.
+- [x] CI captures failure diagnostics, preserves them as an artifact, and runs
+  staging teardown under `if: always()`.
+- [x] Staging deploy preflights the immutable tag across all three ECR
+  repositories, preventing partial service updates when an artifact is missing.

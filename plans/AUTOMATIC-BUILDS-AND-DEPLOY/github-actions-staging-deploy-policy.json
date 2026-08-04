@@ -5,11 +5,26 @@
       "Sid": "RegisterAndInspectStagingTasks",
       "Effect": "Allow",
       "Action": [
+        "ecs:DescribeClusters",
         "ecs:DescribeTaskDefinition",
         "ecs:RegisterTaskDefinition",
+        "ecs:DeregisterTaskDefinition",
+        "ecs:DeleteTaskDefinitions",
+        "ecs:RunTask",
+        "ecs:TagResource",
         "ecs:DescribeServices",
         "ecs:ListTasks",
         "ecs:DescribeTasks"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "ValidateIsolatedStagingNetwork",
+      "Effect": "Allow",
+      "Action": [
+        "ec2:DescribeVpcs",
+        "ec2:DescribeSubnets",
+        "ec2:DescribeSecurityGroups"
       ],
       "Resource": "*"
     },
@@ -36,6 +51,7 @@
       "Action": [
         "elasticloadbalancing:CreateLoadBalancer",
         "elasticloadbalancing:CreateListener",
+        "elasticloadbalancing:ModifyTargetGroupAttributes",
         "elasticloadbalancing:AddTags"
       ],
       "Resource": "*"
@@ -57,7 +73,8 @@
       "Effect": "Allow",
       "Action": [
         "rds:DescribeDBInstances",
-        "rds:DescribeDBSnapshots"
+        "rds:DescribeDBSnapshots",
+        "rds:DescribeDBSubnetGroups"
       ],
       "Resource": "*"
     },
@@ -65,15 +82,48 @@
       "Sid": "ManageEphemeralStagingDatabase",
       "Effect": "Allow",
       "Action": [
-        "rds:RestoreDBInstanceFromDBSnapshot",
+        "rds:CreateDBInstance",
         "rds:ModifyDBInstance",
         "rds:DeleteDBInstance",
-        "rds:DeleteDBSnapshot",
+        "rds:CreateDBSnapshot",
+        "rds:CreateTenantDatabase",
+        "rds:DeleteTenantDatabase",
         "rds:AddTagsToResource"
       ],
       "Resource": [
         "arn:aws:rds:eu-north-1:799111666795:db:onlineshop-staging-postgres",
         "arn:aws:rds:eu-north-1:799111666795:snapshot:onlineshop-staging-*"
+      ]
+    },
+    {
+      "Sid": "InspectStagingBootstrapSecrets",
+      "Effect": "Allow",
+      "Action": "secretsmanager:DescribeSecret",
+      "Resource": [
+        "arn:aws:secretsmanager:eu-north-1:799111666795:secret:onlineshop/auth/db-staging-*",
+        "arn:aws:secretsmanager:eu-north-1:799111666795:secret:onlineshop/items/db-staging-*",
+        "arn:aws:secretsmanager:eu-north-1:799111666795:secret:rds!db-*"
+      ]
+    },
+    {
+      "Sid": "InspectStagingSqlRunnerLogs",
+      "Effect": "Allow",
+      "Action": "logs:DescribeLogGroups",
+      "Resource": "*"
+    },
+    {
+      "Sid": "StagingSqlRunnerLogs",
+      "Effect": "Allow",
+      "Action": [
+        "logs:CreateLogGroup",
+        "logs:GetLogEvents",
+        "logs:TagLogGroup",
+        "logs:TagResource",
+        "logs:Unmask"
+      ],
+      "Resource": [
+        "arn:aws:logs:eu-north-1:799111666795:log-group:/ecs/onlineshop-staging-sql-runner",
+        "arn:aws:logs:eu-north-1:799111666795:log-group:/ecs/onlineshop-staging-sql-runner:log-stream:*"
       ]
     },
     {
@@ -84,6 +134,17 @@
       "Condition": {
         "StringEquals": {
           "iam:PassedToService": "ecs-tasks.amazonaws.com"
+        }
+      }
+    },
+    {
+      "Sid": "PassRoleToRdsOnly",
+      "Effect": "Allow",
+      "Action": "iam:PassRole",
+      "Resource": "arn:aws:iam::799111666795:role/rds-monitoring-role",
+      "Condition": {
+        "StringEquals": {
+          "iam:PassedToService": "rds.amazonaws.com"
         }
       }
     }

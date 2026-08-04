@@ -44,7 +44,10 @@ The CI pipeline builds `common`, runs `./mvnw verify`, and then publishes the It
 
 After a successful `main` build, the immutable Items image is deployed to the
 independent staging ECS cluster. Staging uses its own VPC and RDS database; it
-does not use the production cluster or production database.
+does not use the production cluster or production database. Each staging run
+creates an empty RDS instance, applies `init-db/01-schema.sql` and
+`init-db/02-data.sql`, verifies the restricted Items user, runs E2E, and deletes
+the instance without retaining state.
 
 ## Docker Compose Build
 
@@ -167,3 +170,7 @@ Main configuration: [src/main/resources/application.yml](./src/main/resources/ap
 ## AWS CLI Conventions
 
 For AWS CLI commands (infrastructure queries, deployments, etc.), see the root [AGENTS.md](../AGENTS.md) — all AWS commands MUST include `--profile dpm-profile --region eu-north-1`.
+
+Repository pause/resume scripts log UTC timestamped steps, typical durations,
+resource-level AWS progress, and actual total runtime. Treat duration values as
+operational estimates, not timeout guarantees.

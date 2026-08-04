@@ -157,3 +157,36 @@ scripts/ecs-run-sql.sh --database <db> --file <schema.sql> --verify "\dt"
 - **Verify in the same run** — a schema apply that exits 0 may have applied nothing (escaping bugs silently no-op'd a whole schema once). Always pass `--verify`.
 - `\c dbname` psql meta-commands work in `-f` files, but prefer one script run per database — clearer logs, clearer failures.
 - `CREATE TABLE IF NOT EXISTS` still errors on real problems (missing FK target), but a malformed file can no-op silently — `--verify` is the only proof.
+
+## Deterministic Staging Database Lifecycle
+
+- `scripts/resume-staging.sh` must start from an absent staging DB. It creates
+  empty encrypted RDS with an RDS-managed master password, then runs
+  `scripts/bootstrap-staging-db.sh` before scaling any application service.
+- Bootstrap applies `Auth/init-db/*` and `Items/init-db/*`, creates restricted
+  application roles using password values injected from Secrets Manager, and
+  verifies schemas, grants, seed counts, and application-user connectivity.
+- `scripts/pause-staging.sh` deletes RDS with `--skip-final-snapshot` by default.
+  A snapshot is allowed only through explicit `--retain-snapshot` with an
+  `onlineshop-staging-debug-*` or `onlineshop-staging-dr-*` name.
+- On CI failure, capture diagnostics before teardown. CloudWatch logs remain;
+  the workflow also uploads `staging-diagnostics.txt` for 14 days.
+- Production and staging entry points source different config files and assert
+  `LC_ENVIRONMENT` before mutations. Never source staging config from a
+  production wrapper.
+- `ci-deploy-staging.sh` must verify the requested immutable tag exists in Auth,
+  Items, and API Gateway ECR before registering any task definition. Without
+  this preflight, a missing late-service image creates a partial deployment.
+
+### Lifecycle progress logging
+
+- All four pause/resume entry points log numbered high-level steps with UTC
+  timestamps and experience-based typical durations. Shared helpers log each
+  resource mutation, no-op, waiter, readiness retry, and verification result.
+- Logs from value-returning helpers go to stderr so command substitution captures
+  only values such as ALB ARNs and database endpoints.
+- Typical totals: production resume 3–8 minutes; production pause 1–2 minutes;
+  clean staging resume 10–20 minutes; staging pause 5–12 minutes without a
+  snapshot or 10–20 minutes with one. These are operational guidance, not hard
+  timeouts—AWS capacity, image pulls, JVM health checks, and RDS control-plane
+  load can extend them.

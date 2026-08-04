@@ -101,3 +101,7 @@ This allows direct navigation to routes like `/login` and `/items` without serve
 ## AWS CLI Conventions
 
 For AWS CLI commands (infrastructure queries, deployments, etc.), see the root [AGENTS.md](../AGENTS.md) — all AWS commands MUST include `--profile dpm-profile --region eu-north-1`.
+
+Repository pause/resume scripts log UTC timestamped steps, typical durations,
+resource-level AWS progress, and actual total runtime. Treat duration values as
+operational estimates, not timeout guarantees.

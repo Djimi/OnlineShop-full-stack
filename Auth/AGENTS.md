@@ -53,7 +53,10 @@ The CI pipeline runs `./mvnw verify` before publishing Auth images. Pull-request
 
 After a successful `main` build, the immutable Auth image is deployed to the
 independent staging ECS cluster. Staging uses its own VPC and RDS database; it
-does not use the production cluster or production database.
+does not use the production cluster or production database. Each staging run
+creates an empty RDS instance, applies `init-db/01-schema.sql` and
+`init-db/02-seed-data.sql`, verifies the restricted Auth user, runs E2E, and
+deletes the instance without retaining state.
 
 ## Database
 
@@ -94,3 +97,7 @@ source <(scripts/dev-env.sh --exports)
 ## AWS CLI Conventions
 
 For AWS CLI commands (infrastructure queries, deployments, etc.), see the root [AGENTS.md](../AGENTS.md) — all AWS commands MUST include `--profile dpm-profile --region eu-north-1`.
+
+Repository pause/resume scripts log UTC timestamped steps, typical durations,
+resource-level AWS progress, and actual total runtime. Treat duration values as
+operational estimates, not timeout guarantees.

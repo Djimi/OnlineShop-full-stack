@@ -85,35 +85,50 @@
 - Staging start: `bash scripts/resume-staging.sh`
 - Staging stop: `bash scripts/pause-staging.sh`
 
-Staging stop scales ECS to zero, deletes its ALB, and replaces its RDS instance
-with an encrypted final snapshot. This avoids RDS's automatic restart after a
-seven-day stop and preserves environment independence and test data.
+Staging stop scales ECS to zero, deletes its ALB, and deletes its RDS instance
+without a snapshot by default. Explicitly named diagnostic/DR snapshots are the
+only retention exception. This avoids RDS's automatic restart after a seven-day
+stop and ensures every normal staging run starts from deterministic source data.
 
 ### 2.9 Staging Redeployment & Lifecycle Script Refactoring
 
-- [ ] Replace snapshot-based staging restoration with deterministic,
+- [x] Replace snapshot-based staging restoration with deterministic,
   from-scratch deployment:
-  - [ ] Create a new empty staging RDS instance on every staging start
-  - [ ] Create the staging databases, restricted application users, and grants
-  - [ ] Apply version-controlled schemas or migrations
-  - [ ] Load deterministic test seed data
-  - [ ] Verify schema, permissions, and seed data before deploying services
-  - [ ] Run E2E against the clean environment
-  - [ ] Delete staging RDS without retaining a data snapshot after validation
-- [ ] Make clean bootstrap failure-safe: if initialization, deployment, or E2E
+  - [x] Create a new empty staging RDS instance on every staging start
+  - [x] Create the staging databases, restricted application users, and grants
+  - [x] Apply version-controlled schemas or migrations
+  - [x] Load deterministic test seed data
+  - [x] Verify schema, permissions, and seed data before deploying services
+  - [x] Run E2E against the clean environment
+  - [x] Delete staging RDS without retaining a data snapshot after validation
+- [x] Make clean bootstrap failure-safe: if initialization, deployment, or E2E
   fails, run staging teardown while preserving logs and failure diagnostics.
-- [ ] Remove the staging runtime dependency on
+- [x] Remove the staging runtime dependency on
   `onlineshop-staging-latest`; keep snapshots only for explicitly requested
   debugging or disaster-recovery workflows.
-- [ ] Refactor duplicated production/staging lifecycle logic into shared,
+- [x] Refactor duplicated production/staging lifecycle logic into shared,
   testable helpers for ALB management, ECS scaling, AWS waiters, readiness
   checks, and post-mutation verification.
-- [ ] Keep thin environment-specific start/stop entry points so staging-only
+- [x] Keep thin environment-specific start/stop entry points so staging-only
   destructive database initialization cannot be invoked against production.
-- [ ] Store environment configuration explicitly and validate the account,
+- [x] Store environment configuration explicitly and validate the account,
   region, cluster, VPC, database, and service identifiers before mutations.
-- [ ] Exercise and verify all four resulting paths: production start,
+- [x] Exercise and verify all four resulting paths: production start,
   production stop, clean staging deploy, and staging teardown.
+- [x] Add UTC timestamped, numbered lifecycle logs with typical duration ranges,
+  detailed resource-level progress, no-op visibility, and actual total runtime.
+
+### 2.9 Issues & Resolutions
+
+| Status | Issue | Resolution |
+|---|---|---|
+| ✅ | ECS capacity-provider updates failed without a forced deployment | Shared scaling helper skips no-op updates and adds `--force-new-deployment` whenever it sends a capacity strategy |
+| ✅ | Bash failure trap did not run for an error inside a sourced helper | Staging start enables ERR inheritance with `set -E`; a live induced failure captured diagnostics and removed ALB/RDS automatically |
+| ✅ | Default ALB target drain caused the ECS waiter to time out | Both retained target groups now enforce and verify a 30-second deregistration delay |
+| ✅ | Missing gateway SHA allowed a partial Auth/Items deployment | Staging deploy now verifies the immutable tag in all three ECR repositories before registering any task definition |
+| ✅ | Long AWS waiters looked indistinguishable from hung scripts | Pause/resume wrappers now identify every step and typical duration; shared helpers report mutations, waits, retries, no-ops, verification, and actual completion time |
+| ✅ | Legacy `onlineshop-staging-latest` snapshot remained after migration | Snapshot was deleted and verified absent; default teardown uses no final snapshot |
+| ✅ | AWS credentials expired during the final waiter | User re-authenticated `dpm-profile`; identity was re-verified before continuing |
 
 ---
 

@@ -87,8 +87,9 @@ Every step executed in this plan **MUST** update [`executed/INFO.md`](./executed
 | File | When to Update |
 |------|---------------|
 | [`WHAT-WAS-DONE.md`](./WHAT-WAS-DONE.md) | Any infrastructure change, deployment fix, configuration update, or code change that affects runtime |
-| [`scripts/resume-playground.sh`](../../scripts/resume-playground.sh) | If services, ports, security groups, or task definitions change |
-| [`scripts/pause-playground.sh`](../../scripts/pause-playground.sh) | If services, ports, or ALB configuration changes |
+| [`scripts/config/production.env`](../../scripts/config/production.env) | If production identifiers, services, ports, or security groups change |
+| [`scripts/config/staging.env`](../../scripts/config/staging.env) | If staging identifiers, services, database, ports, or security groups change |
+| [`scripts/lib/lifecycle.sh`](../../scripts/lib/lifecycle.sh) | If shared ALB, ECS, RDS, waiter, readiness, or verification behavior changes |
 
 **Why:** These files are the source of truth for automation. Drift = broken automation = manual work.
 
@@ -124,4 +125,5 @@ Every step executed in this plan **MUST** update [`executed/INFO.md`](./executed
 | Issue | Notes |
 |-------|-------|
 | ✅ Duplicate `build-and-push.yml` workflow | Removed; `build-and-deploy.yml` is the single active CI/CD workflow after merge |
-| ✅ Staging remained billable after E2E | Main CI now pauses staging in an `always()` step: ECS→0, ALB deletion, encrypted RDS snapshot + DB deletion |
+| ✅ Staging remained billable after E2E | Main CI tears staging down in an `always()` step: ECS→0, ALB deletion, and RDS deletion without snapshot retention |
+| ✅ Snapshot restoration preserved drift and stale test data | Every staging start now creates empty RDS, applies repository schemas/seeds, verifies grants and data as restricted users, then deploys services |

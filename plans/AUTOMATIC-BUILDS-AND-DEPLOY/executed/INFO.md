@@ -1966,3 +1966,80 @@ to come from the staging-only Secrets Manager entries.
   as compromised: RDS master password rotated, `onlineshop/rds/master`
   `AWSCURRENT` updated, and the plaintext `.env` line removed. No replacement
   value was printed or written to the repository.
+
+---
+
+## Pass 2.9 Deterministic Staging Replacement (2026-08-04)
+
+This section supersedes the snapshot-backed runtime inventory above. Historical
+snapshot restore results are retained only as an audit trail.
+
+### Implemented
+
+- Added explicit non-secret environment configs:
+  `scripts/config/production.env` and `scripts/config/staging.env`.
+- Added shared `scripts/lib/lifecycle.sh` helpers for identity/resource guards,
+  ALB/listener management, verified 30-second target draining, ECS scaling and
+  waiters, readiness, diagnostics, clean RDS creation, and snapshot-free RDS
+  deletion.
+- Added `scripts/bootstrap-staging-db.sh` plus version-controlled role/grant SQL.
+  RDS generates the master password in its managed secret; application
+  passwords are injected into one-off Fargate SQL tasks from staging secrets.
+- Hardened `scripts/ecs-run-sql.sh`: input validation, post-mutation read-back,
+  log-group verification, and task-definition deregister+delete on success and
+  failure.
+- CI now uploads staging failure diagnostics before `if: always()` teardown.
+- `scripts/ci-deploy-staging.sh` now verifies the requested immutable tag exists
+  in all three ECR repositories before any service is mutated.
+- Updated and applied `github-actions-onlineshop/ecs-deploy-staging`; AWS Access
+  Analyzer returned zero errors or security warnings and policy read-back
+  confirmed the update.
+
+### Live verification
+
+| Path/check | Result |
+|---|---|
+| Production start | ✅ ALB/listener recreated, services reached readiness, invalid-token probe returned 401 |
+| Production stop | ✅ services `desired/running/pending=0`, ALB absent |
+| Clean staging bootstrap | ✅ new private PostgreSQL 18.1 RDS; roles/databases/schemas/grants applied; Auth seed=1, Items seed=5; both restricted-user connections passed |
+| Failure cleanup | ✅ induced capacity-strategy failure captured ECS/RDS/target diagnostics and removed ALB/RDS without snapshot |
+| Immutable staging deploy | ✅ Auth, Items, and Gateway healthy on `sha-06658a68e7ce6583e59069bc004065cc0b541e39` |
+| Cloud E2E | ✅ 3 tests, 0 failures |
+| Staging teardown | ✅ services `0/0/0`, ALB absent, RDS absent, no final snapshot |
+| SQL-runner residue | ✅ ACTIVE=0, INACTIVE=0 |
+| Legacy snapshot | ✅ `onlineshop-staging-latest` deleted and list verification returned empty |
+
+### Issues found during exercise
+
+- ECS requires `--force-new-deployment` when a capacity-provider strategy is
+  sent and differs in provider/base; the helper now sends it only for
+  non-no-op updates.
+- Bash ERR traps require `set -E` to propagate into helper functions.
+- The gateway's historical main SHA tag was missing from ECR. The exact
+  `06658a6` source was rebuilt from the existing clean worktree, pushed under
+  its immutable tag, and verified by digest before ECS converged.
+- One E2E attempt during Service Connect replacement returned 502; after all
+  three ECS deployments reached `COMPLETED`, the same suite passed 3/3.
+
+### Lifecycle progress logging follow-up (2026-08-04)
+
+- Added UTC timestamped `STEP`, resource-progress, retry/no-op, verification,
+  failure-cleanup, and `COMPLETE` logs to all production/staging pause and
+  resume paths. Each numbered step states an experience-based typical duration;
+  completion includes measured total runtime.
+- Added detailed comments at lifecycle boundaries, including ALB wiring, ECS
+  stabilization, clean RDS bootstrap, restricted-user verification, and
+  failure-first diagnostics/teardown. Value-returning shared helpers log to
+  stderr so captured ARNs/endpoints remain unpolluted.
+- Enhanced clean-RDS read-back to verify `StorageEncrypted` as well as status,
+  endpoint, public accessibility, and VPC placement.
+- Executed `tests/scripts/lifecycle_test.sh`, Bash syntax checks, stale-runtime-
+  reference checks, and `git diff --check`; all passed. `shellcheck` was not
+  installed, so that optional lint was unavailable.
+- Executed `bash scripts/pause-playground.sh` and
+  `bash scripts/pause-staging.sh` against already-paused environments. Both
+  identity/resource guards passed, every ECS service was reported and verified
+  at `0/0/0`, both absent ALBs were identified as intentional no-ops, staging
+  RDS absence was reported, and both scripts completed successfully in about
+  20 seconds. No AWS resource was created, changed, or deleted by these no-op
+  verification runs.

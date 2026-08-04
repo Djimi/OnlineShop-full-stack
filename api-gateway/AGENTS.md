@@ -27,7 +27,8 @@ The CI pipeline runs `./mvnw verify` before publishing the API Gateway image. Pu
 
 Pull requests also run blocking E2E tests against an isolated Docker Compose
 candidate. Successful `main` builds deploy to the independent staging VPC and
-run the same E2E suite through the staging ALB before staging is paused.
+run the same E2E suite through the staging ALB and a freshly bootstrapped
+database. Failure diagnostics are uploaded before staging is always torn down.
 
 ## Responsibilities
 
@@ -126,6 +127,10 @@ For tighter security in production, replace `"*"` with the explicit CloudFront d
 ## AWS CLI Conventions
 
 For AWS CLI commands (infrastructure queries, deployments, etc.), see the root [AGENTS.md](../AGENTS.md) — all AWS commands MUST include `--profile dpm-profile --region eu-north-1`.
+
+Repository pause/resume scripts log UTC timestamped steps, typical durations,
+resource-level AWS progress, and actual total runtime. Treat duration values as
+operational estimates, not timeout guarantees.
 
 ## Host-Run Dev Mode (Multi-Worktree)
 

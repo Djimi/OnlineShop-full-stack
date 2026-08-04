@@ -355,7 +355,7 @@ jobs:
     needs: [auth, items, api-gateway, frontend]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
 
@@ -403,6 +403,19 @@ jobs:
           echo "Testing against staging: $STAGING_URL"
           E2E_BASE_URL="http://$STAGING_URL" ./mvnw clean test
 
-      - name: Pause isolated staging environment
+      - name: Capture staging failure diagnostics
+        if: failure()
+        run: bash scripts/capture-staging-diagnostics.sh > staging-diagnostics.txt 2>&1 || true
+
+      - name: Preserve staging failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: staging-failure-${{ github.sha }}
+          path: staging-diagnostics.txt
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Tear down isolated staging environment
         if: always()
         run: bash scripts/pause-staging.sh

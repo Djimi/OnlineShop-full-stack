@@ -704,14 +704,23 @@ What the script encapsulates (each bullet was a multi-turn debugging episode):
 3. **`psql -v ON_ERROR_STOP=1`** — psql exits non-zero on the first error
    instead of merrily continuing.
 4. **`PGPASSWORD` injected from Secrets Manager** (`secrets[].valueFrom`),
-   never a plaintext env var. Master creds live in `onlineshop/rds/master`;
-   the execution role's `secretsmanager-read-onlineshop` policy covers
-   `onlineshop/rds/*`.
+   never a plaintext env var. Production master creds live in
+   `onlineshop/rds/master`; clean staging uses the per-instance RDS-managed
+   secret (`rds!db-*`). The execution-role policy covers both patterns.
 5. **Log stream resolved correctly**: `<prefix>/<container>/<task-id>`,
    with retries for CloudWatch ingestion lag.
-6. **Self-cleanup**: the TD revision is deregistered AND deleted
-   (`delete-task-definitions`) after a successful run — deregister alone
-   leaves it queryable as INACTIVE.
+6. **Self-cleanup**: unless `--keep-td` is explicitly selected for debugging,
+   the TD revision is deregistered AND deleted (`delete-task-definitions`) on
+   success or failure. Deregister alone leaves it queryable as INACTIVE.
+
+## D1a. Clean Staging Bootstrap
+
+`scripts/resume-staging.sh` no longer restores a snapshot. It creates an empty
+encrypted PostgreSQL 18.1 `db.t4g.micro` using RDS-managed master credentials,
+then `scripts/bootstrap-staging-db.sh` creates the two databases and restricted
+roles, applies the service-owned SQL, loads deterministic seeds, and reconnects
+as each application user for final read-back. No ECS application service starts
+until those checks pass. Default teardown retains no database snapshot.
 
 ## D2. The "exit 0 but nothing happened" Trap
 

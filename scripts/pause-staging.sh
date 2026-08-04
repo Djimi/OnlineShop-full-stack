@@ -1,91 +1,54 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-PROFILE="dpm-profile"
-REGION="eu-north-1"
-CLUSTER="onlineshop-staging-cluster"
-DB_INSTANCE="onlineshop-staging-postgres"
-DB_SNAPSHOT="onlineshop-staging-latest"
-ALB_NAME="onlineshop-staging-v2-alb"
-SERVICES=(onlineshop-auth-staging onlineshop-items-staging onlineshop-api-gateway-staging)
-AWS=(aws --profile "$PROFILE" --region "$REGION")
+SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+# shellcheck source=config/staging.env
+source "$SCRIPT_DIR/config/staging.env"
+# shellcheck source=lib/lifecycle.sh
+source "$SCRIPT_DIR/lib/lifecycle.sh"
 
-"${AWS[@]}" sts get-caller-identity >/dev/null
+SNAPSHOT_NAME=""
+case "${1:-}" in
+  "") ;;
+  --retain-snapshot)
+    SNAPSHOT_NAME="${2:-}"
+    [ -n "$SNAPSHOT_NAME" ] || { echo "--retain-snapshot requires a name" >&2; exit 1; }
+    [ "$#" = "2" ] || { echo "Usage: $0 [--retain-snapshot <name>]" >&2; exit 1; }
+    ;;
+  --help) echo "Usage: $0 [--retain-snapshot onlineshop-staging-debug-<reason>]"; exit 0 ;;
+  *) echo "Usage: $0 [--retain-snapshot onlineshop-staging-debug-<reason>]" >&2; exit 1 ;;
+esac
 
-echo "Scaling isolated staging services to zero..."
-for service in "${SERVICES[@]}"; do
-  "${AWS[@]}" ecs update-service --cluster "$CLUSTER" --service "$service" \
-    --desired-count 0 >/dev/null
-  desired=$("${AWS[@]}" ecs describe-services --cluster "$CLUSTER" \
-    --services "$service" --query 'services[0].desiredCount' --output text)
-  [ "$desired" = "0" ] || { echo "ERROR: $service did not scale to zero" >&2; exit 1; }
-done
-for attempt in {1..20}; do
-  active=$("${AWS[@]}" ecs describe-services --cluster "$CLUSTER" \
-    --services "${SERVICES[@]}" \
-    --query 'services[].[runningCount,pendingCount]' --output text | \
-    awk '{ total += $1 + $2 } END { print total + 0 }')
-  [ "$active" = "0" ] && break
-  [ "$attempt" = "20" ] && { echo "ERROR: staging tasks did not stop" >&2; exit 1; }
-  sleep 5
-done
-for service in "${SERVICES[@]}"; do
-  counts=$("${AWS[@]}" ecs describe-services --cluster "$CLUSTER" --services "$service" \
-    --query 'services[0].[desiredCount,runningCount,pendingCount]' --output text)
-  [ "$counts" = $'0\t0\t0' ] || { echo "ERROR: $service still has tasks: $counts" >&2; exit 1; }
-done
+# Staging teardown is destructive by design: services, the ALB, and the clean
+# ephemeral RDS instance are removed. A snapshot exists only when the caller
+# explicitly supplies a diagnostic/DR name through --retain-snapshot.
+RUN_STARTED_AT=$SECONDS
+lc_log_step "1/5" "10–20 seconds" "Validate AWS identity and isolated staging resource boundaries."
+lc_init
+lc_require_environment staging
+lc_verify_identity
+lc_validate_static_resources
 
-alb_arn=$("${AWS[@]}" elbv2 describe-load-balancers --names "$ALB_NAME" \
-  --query 'LoadBalancers[0].LoadBalancerArn' --output text 2>/dev/null || true)
-if [ -n "$alb_arn" ] && [ "$alb_arn" != "None" ]; then
-  listeners=$("${AWS[@]}" elbv2 describe-listeners --load-balancer-arn "$alb_arn" \
-    --query 'Listeners[].ListenerArn' --output text)
-  for listener in $listeners; do
-    "${AWS[@]}" elbv2 delete-listener --listener-arn "$listener"
-    if "${AWS[@]}" elbv2 describe-listeners --listener-arns "$listener" >/dev/null 2>&1; then
-      echo "ERROR: listener still exists: $listener" >&2; exit 1
-    fi
-  done
-  "${AWS[@]}" elbv2 delete-load-balancer --load-balancer-arn "$alb_arn"
-  if "${AWS[@]}" elbv2 describe-load-balancers --load-balancer-arns "$alb_arn" >/dev/null 2>&1; then
-    echo "ERROR: staging ALB still exists" >&2; exit 1
-  fi
+lc_log_step "2/5" "10–20 seconds" "Set all staging ECS services to desired=0."
+lc_scale_services 0
+lc_log_step "3/5" "15–60 seconds" "Wait for all staging tasks and target registrations to drain."
+lc_wait_services_stopped
+lc_log_step "4/5" "10–30 seconds" "Delete the staging ALB/listener and verify absence."
+lc_delete_alb
+
+if [ -n "$SNAPSHOT_NAME" ]; then
+  DB_ESTIMATE="10–20 minutes"
+  DB_DESCRIPTION="Delete staging RDS and verify retained diagnostic/DR snapshot $SNAPSHOT_NAME."
+else
+  DB_ESTIMATE="5–10 minutes"
+  DB_DESCRIPTION="Delete staging RDS without a final snapshot and verify absence."
 fi
+lc_log_step "5/5" "$DB_ESTIMATE" "$DB_DESCRIPTION"
+lc_delete_staging_db "$SNAPSHOT_NAME"
 
-db_status=$("${AWS[@]}" rds describe-db-instances --db-instance-identifier "$DB_INSTANCE" \
-  --query 'DBInstances[0].DBInstanceStatus' --output text 2>/dev/null || true)
-if [ -n "$db_status" ] && [ "$db_status" != "None" ]; then
-  if [ "$db_status" != "deleting" ]; then
-    old_snapshot_status=$("${AWS[@]}" rds describe-db-snapshots --db-snapshot-identifier "$DB_SNAPSHOT" \
-      --query 'DBSnapshots[0].Status' --output text 2>/dev/null || true)
-    if [ -n "$old_snapshot_status" ] && [ "$old_snapshot_status" != "None" ]; then
-      [ "$old_snapshot_status" = "available" ] || [ "$old_snapshot_status" = "failed" ] || {
-        echo "ERROR: previous snapshot is busy: $old_snapshot_status" >&2; exit 1;
-      }
-      "${AWS[@]}" rds delete-db-snapshot --db-snapshot-identifier "$DB_SNAPSHOT" >/dev/null
-      if "${AWS[@]}" rds describe-db-snapshots --db-snapshot-identifier "$DB_SNAPSHOT" >/dev/null 2>&1; then
-        echo "ERROR: previous staging snapshot still exists" >&2; exit 1
-      fi
-    fi
-
-    "${AWS[@]}" rds modify-db-instance --db-instance-identifier "$DB_INSTANCE" \
-      --no-deletion-protection --apply-immediately >/dev/null
-    protection=$("${AWS[@]}" rds describe-db-instances --db-instance-identifier "$DB_INSTANCE" \
-      --query 'DBInstances[0].DeletionProtection' --output text)
-    [ "$protection" = "False" ] || [ "$protection" = "false" ] || {
-      echo "ERROR: deletion protection is still enabled" >&2; exit 1;
-    }
-
-    "${AWS[@]}" rds delete-db-instance --db-instance-identifier "$DB_INSTANCE" \
-      --final-db-snapshot-identifier "$DB_SNAPSHOT" >/dev/null
-    status=$("${AWS[@]}" rds describe-db-instances --db-instance-identifier "$DB_INSTANCE" \
-      --query 'DBInstances[0].DBInstanceStatus' --output text)
-    [ "$status" = "deleting" ] || { echo "ERROR: staging DB deletion did not start" >&2; exit 1; }
-  fi
-  "${AWS[@]}" rds wait db-instance-deleted --db-instance-identifier "$DB_INSTANCE"
-  "${AWS[@]}" rds wait db-snapshot-completed --db-snapshot-identifier "$DB_SNAPSHOT"
-  "${AWS[@]}" rds describe-db-snapshots --db-snapshot-identifier "$DB_SNAPSHOT" \
-    --query 'DBSnapshots[0].{Status:Status,Encrypted:Encrypted,Size:AllocatedStorage}'
+lc_log_complete "Staging pause" "$RUN_STARTED_AT"
+if [ -n "$SNAPSHOT_NAME" ]; then
+  lc_log "Staging pause state: ECS=0, ALB/RDS deleted; snapshot retained: $SNAPSHOT_NAME"
+else
+  lc_log "Staging pause state: ECS=0, ALB deleted, RDS deleted without a snapshot."
 fi
-
-echo "Staging is paused: ECS=0, ALB deleted, RDS retained only as an encrypted snapshot."

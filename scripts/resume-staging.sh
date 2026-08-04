@@ -1,84 +1,74 @@
 #!/usr/bin/env bash
-# Restores the fully isolated, snapshot-backed staging environment.
-set -euo pipefail
+set -Eeuo pipefail
 
-PROFILE="dpm-profile"
-REGION="eu-north-1"
-CLUSTER="onlineshop-staging-cluster"
-DB_INSTANCE="onlineshop-staging-postgres"
-DB_SNAPSHOT="onlineshop-staging-latest"
-DB_SUBNET_GROUP="onlineshop-staging-db-subnets"
-DB_SG="sg-08c5d1008d1ce54ae"
-ALB_NAME="onlineshop-staging-v2-alb"
-TG_ARN="arn:aws:elasticloadbalancing:eu-north-1:799111666795:targetgroup/onlineshop-staging-tg-v2/8a9b0471c381e60b"
-ALB_SG="sg-0e4c072113dd8d1e9"
-SUBNETS=(subnet-04f5da5a8cf1b1350 subnet-06b823d8d6b24333b)
-SERVICES=(onlineshop-auth-staging onlineshop-items-staging onlineshop-api-gateway-staging)
-AWS=(aws --profile "$PROFILE" --region "$REGION")
+SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+# shellcheck source=config/staging.env
+source "$SCRIPT_DIR/config/staging.env"
+# shellcheck source=lib/lifecycle.sh
+source "$SCRIPT_DIR/lib/lifecycle.sh"
 
 CAPACITY_PROVIDER="FARGATE_SPOT"
-if [ "${1:-}" = "--on-demand" ]; then
-  CAPACITY_PROVIDER="FARGATE"
-elif [ -n "${1:-}" ]; then
-  echo "Usage: $0 [--on-demand]" >&2
-  exit 1
-fi
+case "${1:-}" in
+  "") ;;
+  --on-demand) CAPACITY_PROVIDER="FARGATE" ;;
+  --help) echo "Usage: $0 [--on-demand]"; exit 0 ;;
+  *) echo "Usage: $0 [--on-demand]" >&2; exit 1 ;;
+esac
 
-"${AWS[@]}" sts get-caller-identity >/dev/null
+# Staging is intentionally rebuilt from an empty database on every resume. The
+# error trap below captures evidence first, then returns the environment to its
+# cost-saving paused state if any provisioning, bootstrap, or startup step fails.
+RUN_STARTED_AT=$SECONDS
+lc_log_step "1/8" "10–20 seconds" "Validate AWS identity and isolated staging resource boundaries."
+lc_init
+lc_require_environment staging
+lc_verify_identity
+lc_validate_static_resources
 
-db_status=$("${AWS[@]}" rds describe-db-instances --db-instance-identifier "$DB_INSTANCE" \
-  --query 'DBInstances[0].DBInstanceStatus' --output text 2>/dev/null || true)
-if [ -z "$db_status" ] || [ "$db_status" = "None" ]; then
-  "${AWS[@]}" rds restore-db-instance-from-db-snapshot \
-    --db-instance-identifier "$DB_INSTANCE" \
-    --db-snapshot-identifier "$DB_SNAPSHOT" \
-    --db-instance-class db.t4g.micro \
-    --db-subnet-group-name "$DB_SUBNET_GROUP" \
-    --vpc-security-group-ids "$DB_SG" \
-    --no-publicly-accessible --no-multi-az \
-    --no-auto-minor-version-upgrade \
-    --deletion-protection \
-    --tags Key=Environment,Value=staging Key=Name,Value=onlineshop-staging-postgres >/dev/null
-  "${AWS[@]}" rds describe-db-instances --db-instance-identifier "$DB_INSTANCE" \
-    --query 'DBInstances[0].{Status:DBInstanceStatus,Vpc:DBSubnetGroup.VpcId,Public:PubliclyAccessible}'
-fi
-"${AWS[@]}" rds wait db-instance-available --db-instance-identifier "$DB_INSTANCE"
+START_COMPLETE=false
+failure_cleanup() {
+  local exit_code=$?
+  trap - ERR
+  [ "$START_COMPLETE" = true ] && return "$exit_code"
+  lc_log "FAILED — staging resume stopped after $((SECONDS - RUN_STARTED_AT))s; starting diagnostic teardown."
+  lc_log_step "cleanup 1/4" "10–30 seconds" "Capture ECS, stopped-task, target-health, and RDS diagnostics."
+  lc_capture_diagnostics >&2 || true
+  lc_log_step "cleanup 2/4" "15–60 seconds" "Scale services to zero and wait for tasks to stop."
+  lc_scale_services 0 || true
+  lc_wait_services_stopped || true
+  lc_log_step "cleanup 3/4" "10–30 seconds" "Delete any staging ALB/listener resources."
+  lc_delete_alb || true
+  lc_log_step "cleanup 4/4" "5–10 minutes" "Delete the ephemeral staging database without retaining failed state."
+  lc_delete_staging_db || true
+  lc_log "Failure cleanup finished; original exit code=$exit_code."
+  return "$exit_code"
+}
+trap failure_cleanup ERR
 
-alb_arn=$("${AWS[@]}" elbv2 describe-load-balancers --names "$ALB_NAME" \
-  --query 'LoadBalancers[0].LoadBalancerArn' --output text 2>/dev/null || true)
-if [ -z "$alb_arn" ] || [ "$alb_arn" = "None" ]; then
-  alb_arn=$("${AWS[@]}" elbv2 create-load-balancer --name "$ALB_NAME" \
-    --subnets "${SUBNETS[@]}" --security-groups "$ALB_SG" --scheme internet-facing \
-    --type application --ip-address-type ipv4 --tags Key=Environment,Value=staging \
-    --query 'LoadBalancers[0].LoadBalancerArn' --output text)
-  "${AWS[@]}" elbv2 describe-load-balancers --load-balancer-arns "$alb_arn" \
-    --query 'LoadBalancers[0].{Arn:LoadBalancerArn,Vpc:VpcId,State:State.Code}'
-  listener=$("${AWS[@]}" elbv2 create-listener --load-balancer-arn "$alb_arn" \
-    --protocol HTTP --port 80 --default-actions Type=forward,TargetGroupArn="$TG_ARN" \
-    --query 'Listeners[0].ListenerArn' --output text)
-  "${AWS[@]}" elbv2 describe-listeners --listener-arns "$listener" \
-    --query 'Listeners[0].{Arn:ListenerArn,Port:Port,Actions:DefaultActions}'
-fi
+# RDS creation is the longest infrastructure operation and uses an AWS-managed
+# master secret. Application services remain stopped until bootstrap succeeds.
+lc_log_step "2/8" "5–10 minutes" "Create a new encrypted private PostgreSQL instance and wait for availability."
+lc_create_clean_staging_db >/dev/null
 
-for service in "${SERVICES[@]}"; do
-  "${AWS[@]}" ecs update-service --cluster "$CLUSTER" --service "$service" \
-    --desired-count 1 --capacity-provider-strategy "capacityProvider=$CAPACITY_PROVIDER,weight=1" \
-    --force-new-deployment >/dev/null
-  desired=$("${AWS[@]}" ecs describe-services --cluster "$CLUSTER" --services "$service" \
-    --query 'services[0].desiredCount' --output text)
-  [ "$desired" = "1" ] || { echo "ERROR: $service did not scale to one" >&2; exit 1; }
-done
-"${AWS[@]}" ecs wait services-stable --cluster "$CLUSTER" --services "${SERVICES[@]}"
+# Bootstrap runs SQL from one-off private Fargate tasks. Every mutation has a
+# read-back, restricted application users are tested, and helper task revisions
+# are deleted after use. No database password is printed or stored in a task TD.
+lc_log_step "3/8" "2–5 minutes" "Create application databases/roles, apply schemas and seeds, and verify access."
+"$SCRIPT_DIR/bootstrap-staging-db.sh"
 
-dns=$("${AWS[@]}" elbv2 describe-load-balancers --load-balancer-arns "$alb_arn" \
-  --query 'LoadBalancers[0].DNSName' --output text)
-ready=false
-for attempt in $(seq 1 12); do
-  status=$(curl --silent --output /dev/null --write-out '%{http_code}' \
-    --header 'Authorization: Bearer staging-readiness-invalid-token' \
-    "http://$dns/items" || true)
-  if [ "$status" = "401" ]; then ready=true; break; fi
-  sleep 5
-done
-[ "$ready" = true ] || { echo "ERROR: staging API did not become ready within 60 seconds" >&2; exit 1; }
-echo "Staging is running on $CAPACITY_PROVIDER: http://$dns"
+lc_log_step "4/8" "20–60 seconds" "Create the staging ALB/listener and enforce the 30s drain delay."
+ALB_ARN=$(lc_ensure_alb)
+lc_log_step "5/8" "under 15 seconds" "Verify the staging API gateway target-group attachment."
+lc_wire_gateway
+lc_log_step "6/8" "10–20 seconds" "Set all staging ECS services to desired=1 on $CAPACITY_PROVIDER."
+lc_scale_services 1 "$CAPACITY_PROVIDER"
+lc_log_step "7/8" "3–8 minutes" "Wait for all JVM services and Service Connect deployments to stabilize."
+lc_wait_services_stable
+ALB_DNS=$(lc_alb_dns "$ALB_ARN")
+lc_log_step "8/8" "5–60 seconds" "Probe the public route for the expected authentication response."
+lc_wait_http_unauthorized "$ALB_DNS" staging
+
+START_COMPLETE=true
+trap - ERR
+lc_log_complete "Clean staging resume" "$RUN_STARTED_AT"
+lc_log "Staging is running against a clean database: http://$ALB_DNS"

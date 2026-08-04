@@ -154,7 +154,7 @@ When not actively developing, pause the AWS playground to save ~$38/month:
 # Stop the playground (scale ECS to 0 + delete ALB) — reduces to ~$1.25/month
 bash scripts/pause-playground.sh
 
-# Start the playground (recreate ALB + scale ECS to 1) — wait ~3-5 min for startup
+# Start the playground (recreate ALB + scale ECS to 1) — typically ~3-8 min
 bash scripts/resume-playground.sh
 ```
 
@@ -167,8 +167,20 @@ bash scripts/resume-staging.sh
 bash scripts/pause-staging.sh
 ```
 
-`pause-staging.sh` snapshots and deletes staging RDS; merely stopping RDS is
-not sufficient because AWS automatically restarts it after seven days.
+`resume-staging.sh` creates a new empty RDS instance, applies the
+version-controlled Auth/Items schemas and deterministic seeds through the ECS
+SQL runner, verifies restricted application access, and only then starts ECS.
+`pause-staging.sh` deletes staging RDS without a snapshot by default. Retention
+is an explicit debugging/DR exception via `--retain-snapshot
+onlineshop-staging-debug-<reason>`.
+
+Lifecycle scripts emit UTC timestamped, numbered progress logs. Each step shows
+an experience-based typical duration and completion reports actual total time.
+Typical end-to-end ranges are: production resume 3–8 minutes, production pause
+1–2 minutes, clean staging resume 10–20 minutes, and staging pause 5–12 minutes
+without a snapshot (10–20 minutes when retaining one). AWS capacity and image
+pulls can make individual runs slower; the estimates are guidance, not timeout
+contracts.
 
 **Cost summary:**
 
@@ -178,7 +190,10 @@ not sufficient because AWS automatically restarts it after seven days.
 | Running (Spot 8hr/day + ALB paused) | ~$17-18 |
 | Paused | ~$1.25 |
 
-Both scripts are self-contained with hardcoded infrastructure IDs — no `jq` required. See `plans/AUTOMATIC-BUILDS-AND-DEPLOY/explanations/COST-EXPLANATION.md` for breakdown.
+The four entry points are thin wrappers over `scripts/lib/lifecycle.sh`; explicit
+non-secret identifiers live in `scripts/config/{production,staging}.env`. See
+`plans/AUTOMATIC-BUILDS-AND-DEPLOY/explanations/COST-EXPLANATION.md` for the
+cost breakdown.
 
 ## Maven Build Dependencies & Parallel Builds
 

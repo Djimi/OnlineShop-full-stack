@@ -261,6 +261,11 @@ Create two scripts in the `plans/AUTOMATIC-BUILDS-AND-DEPLOY/scripts/` directory
 
 Run `pause-playground.sh` before going to sleep / weekend. Run `resume-playground.sh` when starting development.
 
+Staging follows the same on-demand cost discipline but does not retain database
+state: `resume-staging.sh` creates and bootstraps empty RDS, while
+`pause-staging.sh` deletes it without a final snapshot. Snapshot storage is
+incurred only when a debugging/DR snapshot is explicitly requested.
+
 ### Later (Pass 4)
 
 Add EventBridge scheduled scaling and a cost anomaly alarm (as planned in `04_OPERATIONAL_MATURITY.md`).

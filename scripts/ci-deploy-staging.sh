@@ -13,6 +13,8 @@ CLUSTER="onlineshop-staging-cluster"
 ECR_BASE="799111666795.dkr.ecr.eu-north-1.amazonaws.com"
 AWS_ARGS="--profile dpm-profile --region eu-north-1"
 
+aws sts get-caller-identity $AWS_ARGS >/dev/null
+
 echo "=== Deploying tag '$IMAGE_TAG' to staging ==="
 
 SERVICES=(
@@ -20,6 +22,23 @@ SERVICES=(
   "onlineshop-items-staging:onlineshop-items:items"
   "onlineshop-api-gateway-staging:onlineshop-api-gateway:api-gateway"
 )
+
+echo "Preflight: verifying '$IMAGE_TAG' exists in every ECR repository..."
+MISSING_IMAGE=0
+for svc_entry in "${SERVICES[@]}"; do
+  IFS=':' read -r _ ECR_REPO _ <<< "$svc_entry"
+  if ! aws ecr describe-images $AWS_ARGS --repository-name "$ECR_REPO" \
+    --image-ids "imageTag=$IMAGE_TAG" --query 'imageDetails[0].imageDigest' \
+    --output text >/dev/null 2>&1; then
+    echo "ERROR: $ECR_REPO:$IMAGE_TAG does not exist" >&2
+    MISSING_IMAGE=1
+  fi
+done
+[ "$MISSING_IMAGE" = "0" ] || {
+  echo "ERROR: refusing partial staging deployment; publish the same immutable tag to all repositories first." >&2
+  exit 1
+}
+echo "Preflight passed."
 
 for svc_entry in "${SERVICES[@]}"; do
   IFS=':' read -r SERVICE_NAME ECR_REPO CONTAINER_NAME <<< "$svc_entry"
@@ -72,6 +91,14 @@ for svc_entry in "${SERVICES[@]}"; do
     --query 'taskDefinition.taskDefinitionArn' \
     --output text)
 
+  REGISTERED_TD_ARN=$(aws ecs describe-task-definition $AWS_ARGS \
+    --task-definition "$NEW_TD_ARN" \
+    --query 'taskDefinition.taskDefinitionArn' --output text)
+  [ "$REGISTERED_TD_ARN" = "$NEW_TD_ARN" ] || {
+    echo "ERROR: task definition registration was not verified" >&2
+    exit 1
+  }
+
   echo "New task definition: $NEW_TD_ARN"
 
   echo "Updating service '$SERVICE_NAME' to use new task definition..."
@@ -81,6 +108,13 @@ for svc_entry in "${SERVICES[@]}"; do
     --task-definition "$NEW_TD_ARN" \
     --desired-count 1 \
     --no-cli-pager > /dev/null
+
+  ACTIVE_TD_ARN=$(aws ecs describe-services $AWS_ARGS --cluster "$CLUSTER" \
+    --services "$SERVICE_NAME" --query 'services[0].taskDefinition' --output text)
+  [ "$ACTIVE_TD_ARN" = "$NEW_TD_ARN" ] || {
+    echo "ERROR: service task definition update was not verified" >&2
+    exit 1
+  }
 
   echo "Waiting for deployment to stabilize..."
   if ! aws ecs wait services-stable $AWS_ARGS \
