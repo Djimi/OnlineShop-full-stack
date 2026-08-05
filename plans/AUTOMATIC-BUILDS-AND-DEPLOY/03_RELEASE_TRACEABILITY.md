@@ -845,6 +845,136 @@ consolidated verification pass and is not claimed here.)
 
 **Commit:** `feat(release): add release traceability queries`
 
+### 3.8 Retention and rollback-window enforcement
+
+- [x] Design lifecycle rules against real multi-tag fixtures before applying
+  them. An official digest has both `sha-*` and `release-*`; a broad 30-day SHA
+  rule must not delete one of the newest 10 official release images.
+  *(offline: the desired policy `release/ecr/lifecycle-policy.json` is designed
+  and proven against `fixtures/retention/images-multitag.json`, where every one
+  of the 12 release-tagged images per repository is pushed BEFORE the 30-day
+  cutoff — the newest 10 by push order are kept by rule 1, and the multi-tag
+  fixture proves a 30-day-old release image inside the window is never
+  selected by a candidate rule.)*
+- [x] Give the `release-*` keep-10 rule highest priority and prove with AWS ECR
+  evaluator fixtures that retained multi-tag release images cannot be selected
+  by lower-priority candidate rules. Do not treat a lifecycle rule as a generic
+  negative/exclusion filter.
+  *(offline: `release_contract.retention` models ECR's real first-match-wins
+  semantics — an image is expired by exactly one or zero rules and an image
+  matching a higher-priority rule's tagging requirements can never be expired
+  by a lower-priority rule (verified against the AWS ECR user guide); the
+  keep-10 rule has priority 1 and the candidate families (`sha-`,
+  `main-latest`, `branch-`) are enumerated by lower-priority age rules, never
+  by an exclusion filter — ECR's schema actually rejects a bare
+  `tagStatus: tagged` rule, so the generic rule is not even expressible. The
+  evaluator fixtures (`evaluator-ok/-protected-expiring/-disagreement.json`)
+  prove retained multi-tag digests cannot be selected and that any preview
+  disagreement or protected image expiring fails closed.)*
+- [x] Keep the most recent 10 `release-*` images per backend repository, expire
+  non-official SHA/branch/main candidates after approximately 30 days, and
+  expire untagged images after a short documented grace period.
+  *(offline: the desired policy keeps the newest 10 `release-*` images (rule 1,
+  `imageCountMoreThan 10`), expires `sha-*` candidates (rule 2), the mutable
+  `main-latest` (rule 3) and `branch-*` (rule 4) convenience tags after 30 days,
+  and expires untagged images after a 14-day documented grace period (rule 5,
+  rationale in `explanations/RETENTION-DECISIONS.md`); every tagged rule
+  selects exactly ONE tag prefix because AWS documents that a multi-entry
+  `tagPrefixList` selects only images carrying ALL the listed tags ("only the
+  images with all specified tags are selected") — a merged `main-latest,
+  branch-` rule would silently select nothing, so each family gets its own
+  single-prefix rule and the validator rejects merged lists
+  (`POLICY_TAGPREFIX_MULTI`); the gate statically asserts the rule order, the
+  single-prefix property, the 30-day counts, and the 14-day untagged grace.)*
+- [x] Preview each ECR lifecycle policy and review the exact candidate image IDs
+  before `put-lifecycle-policy`; then read back the policy. Account for ECR's
+  delayed evaluation and manifest-list/referrer behavior.
+  *(offline: `preview-retention-policy.sh` previews the exact expiration
+  candidates — offline via the modeled evaluation, live (deferred) via ECR's
+  own `start/get-lifecycle-policy-preview` dry-run, which deletes nothing and
+  is proven read-only with the stateful AWS stub; `apply-retention-policy.sh`
+  runs `--dry-run` by default and the `--apply` path is REFUSED offline
+  (requires the consolidated-pass gate env `ONLINESHOP_RETENTION_LIVE_APPLY=1`)
+  with an immediate `get-lifecycle-policy` read-back compared byte-for-byte
+  (fail-closed drift); ECR's delayed evaluation (a lifecycle evaluation can
+  take up to 24 hours) and the manifest-list/referrer behavior are documented
+  in `explanations/RETENTION-DECISIONS.md`.)*
+- [x] Retain GitHub Releases, final manifests, SBOMs, checksums, and sanitized
+  audit/test evidence indefinitely. Configure candidate-only artifacts for 30
+  days and staging-failure diagnostics according to their existing shorter
+  operational retention.
+  *(offline: `release_contract.retention retention-classes` models the classes
+  (releases/manifests/SBOMs/checksums/audit evidence = indefinite,
+  candidate artifacts = 30 days, staging-failure diagnostics and release
+  result records = 14 days) with ok/invalid fixtures, and the gate statically
+  asserts the already-configured `retention-days` in `build-and-deploy.yml`
+  (candidate evidence 30, staging-failure diagnostics 14) and
+  `promote-release.yml`/`rollback-release.yml` (snapshot/result records 14).
+  No live GitHub setting was changed.)*
+- [x] Keep frontend archives/prefixes for the same latest-10 immediate rollback
+  window. Never delete the currently deployed or previous known-good frontend
+  artifact. GitHub Release assets remain the long-term source even after the
+  immediate S3/ECR window expires.
+  *(offline: `release_contract.retention frontend-retention` models the S3
+  `_releases/v<version>/` prefix plan: protected versions (window + currently
+  deployed + previous known-good) are never expirable, unknown or protected
+  deletions fail closed, and GitHub Release assets are documented as the
+  long-term store after the window expires; S3 has no "exclude currently
+  deployed" primitive, so prefix deletion is a review-gated audit decision,
+  never an unattended lifecycle rule — see
+  `explanations/RETENTION-DECISIONS.md`.)*
+- [x] Add a read-only retention audit that lists the exact 10 immediately
+  rollback-capable releases and fails if any required backend/frontend artifact
+  is missing. Never claim an older metadata-only release is immediately
+  rollback-capable.
+  *(offline: `audit-retention-window.sh` + `release_contract.retention audit`
+  reuse the 3.6 complete-set model (`latest_complete_officials`/
+  `release_artifacts_issues`) to list the exact 10 (or all when fewer exist)
+  immediately rollback-capable releases, failing closed with
+  `RETENTION_ARTIFACT_MISSING`/`RETENTION_ARTIFACT_MISMATCH`/`OBSERVED_READ_ERROR`;
+  older releases are reported in `outsideWindow` and never claimed
+  rollback-capable; the keep-10 coverage check (`POLICY_WINDOW_GAP`) fails
+  closed when a push-order/version-order gap (e.g. a backport) would let the
+  policy expire a window release.)*
+
+**Verification gate:** (offline part implemented and green — see
+`tests/scripts/retention_test.sh`: 432 Python unit tests (incl. the multi-tag
+keep-10 protection, ECR-preview validation, 12-release window audit, frontend
+prefix and retention-class suites); the `release_contract.retention` CLI
+against the retention fixtures (validate-policy ok/order/generic/counts/
+multi-prefix, evaluate first-match-wins with the exact expire set,
+validate-preview ok/protected-expiring/disagreement, audit 2-release "all" and
+12-release "10" cases + missing/mismatch fail-closed, coverage in-order ok +
+backport gap, frontend-retention ok/protected-delete, retention-classes
+ok/invalid); the
+desired-state policy static checks (keep-10 rule first with highest priority,
+enumerated candidate families, 30-day candidate expiry, 14-day untagged grace,
+no `any` selection, no exclusion filter, every tagged rule carries an explicit
+single-entry tagPrefixList); a stateful AWS-stub run of the read-only audit
+live gather
+(identity preflight, exactly the intended ECR describe-images + S3 marker
+reads, fail-closed on missing artifacts and on a wrong account identity); the
+offline preview making no AWS call at all and the live ECR
+`start/get-lifecycle-policy-preview` dry-run proven read-only with the stub
+(agree → pass; a preview expiring a protected release fails closed with
+`PROTECTED_IMAGE_EXPIRING`); `apply-retention-policy.sh` `--dry-run` mutating
+nothing and `--apply` refused offline (the gate never runs with
+`ONLINESHOP_RETENTION_LIVE_APPLY=1`), with the static put→get read-back
+pairing (checked on the comment-stripped script, so comments can never
+satisfy the pairing) and byte-comparison drift check; the GitHub retention-days
+static
+checks (candidate 30, staging-failure 14, snapshot/result records 14); the
+mandatory profile/region + identity preflight + no-secrets scans; and
+ruff/shellcheck/`bash -n`/`git diff --check`.
+The live half of the gate — the real ECR lifecycle policy preview/apply/
+read-back against real AWS (only from the consolidated live pass, which sets
+`ONLINESHOP_RETENTION_LIVE_APPLY=1`), the read-only live retention audit
+against real production state, and the real S3/frontend retention — is
+**deferred** to the consolidated verification pass and is not claimed here. No
+real AWS, GitHub, workflow, deployment, production, or staging action was
+executed while implementing or verifying this subphase.)
+
+**Commit:** `feat(release): enforce artifact retention policy`
 
 ---
 

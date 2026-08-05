@@ -1,6 +1,6 @@
 # OnlineShop Release Contract — Local Validation Foundation
 
-Subphases **3.1 + 3.2 + 3.3 + 3.5 + 3.7** of [03_RELEASE_TRACEABILITY.md](../03_RELEASE_TRACEABILITY.md).
+Subphases **3.1 + 3.2 + 3.3 + 3.5 + 3.7 + 3.8** of [03_RELEASE_TRACEABILITY.md](../03_RELEASE_TRACEABILITY.md).
 This directory is the source-controlled release contract consumed by every
 later phase (candidate evidence, promotion, rollback, traceability, retention).
 It contains the versioned manifest JSON Schema, a deterministic local
@@ -80,6 +80,14 @@ audit, automated tests, and this documentation.
 | `fixtures/traceability/*.json` | Manifest index + consistent / paused / drift observed-state fixtures (3.7) | ✅ yes |
 | `tests/test_traceability.py` | Python unit tests for the lookups + audit (3.7) | ✅ yes |
 | `../../tests/scripts/release_traceability_test.sh` | Repo-level verification gate for the 3.7 traceability queries | ✅ yes |
+| `ecr/lifecycle-policy.json` | Desired ECR lifecycle policy: keep-10 `release-*` first, enumerated candidate families at 30 days, 14-day untagged grace (3.8) | ✅ yes |
+| `src/release_contract/retention.py` | ECR first-match-wins evaluation model, lifecycle-policy validation, ECR-preview validation, rollback-window audit, keep-10 coverage, frontend prefix retention, GitHub retention classes + CLI (3.8) | ✅ yes |
+| `bin/audit-retention-window.sh` | Read-only retention audit of the immediate rollback window (10 or all releases; fails closed on missing artifacts) (3.8) | ✅ yes |
+| `bin/preview-retention-policy.sh` | Preview the exact expiration candidates: offline modeled evaluation or live `start/get-lifecycle-policy-preview` dry-run, review required (3.8) | ✅ yes |
+| `bin/apply-retention-policy.sh` | `--dry-run` preview by default; `--apply` refused offline (`ONLINESHOP_RETENTION_LIVE_APPLY=1`), with immediate `get-lifecycle-policy` read-back (3.8) | ✅ yes |
+| `fixtures/retention/*.json` | Policy, multi-tag image, evaluator, protected-digest, audit ok/fail, window, frontend-prefix, and retention-class fixtures (3.8) | ✅ yes |
+| `tests/test_retention.py` | Python unit tests for the retention decision layer (3.8) | ✅ yes |
+| `../../tests/scripts/retention_test.sh` | Repo-level verification gate for the 3.8 retention + rollback-window enforcement | ✅ yes |
 
 **Ephemeral workflow output — never source-controlled:** candidate evidence
 bundles, generated manifests, SBOMs, frontend archives, checksum files, and
@@ -712,6 +720,74 @@ mutations) with a stateful AWS stub plus a `gh` stub.
 
 ---
 
+## Retention and rollback-window enforcement (subphase 3.8)
+
+Keeps the immediate 10-release rollback window in ECR and S3 and expires
+everything else on a documented schedule. The offline 3.8 gate:
+
+```bash
+bash tests/scripts/retention_test.sh
+```
+
+### The desired lifecycle policy
+
+`ecr/lifecycle-policy.json` is the desired ECR lifecycle policy, identical for
+every backend repository: rule 1 keeps the newest 10 `release-*` images
+(highest priority), rules 2–4 expire the enumerated candidate families
+(`sha-`; `main-latest`; `branch-`) 30 days after push — each family as its own
+single-prefix rule, because AWS documents that a multi-entry `tagPrefixList`
+selects only images carrying ALL the listed tags (a merged rule would silently
+select nothing) — and rule 5 expires untagged
+images after a 14-day grace period. The repositories stay
+`IMMUTABLE_WITH_EXCLUSION` (3.3), so `sha-*`/`release-*` tags can never be
+overwritten.
+
+### The decision layer
+
+`release_contract.retention` is a pure, fixture-tested module modeling ECR's
+real evaluator semantics (an image is expired by exactly one or zero rules; an
+image matching a higher-priority rule's tagging requirements can never be
+expired by a lower-priority rule) — never a generic negative/exclusion filter
+(ECR's schema actually requires an explicit `tagPrefixList` on every `tagged`
+rule, so "expire everything except releases" is not expressible; the candidate
+families must be enumerated and the keep-10 rule's priority does the
+protection):
+
+| Subcommand | Answers |
+|---|---|
+| `validate-policy` | validate the desired lifecycle policy document: keep-10 first, enumerated candidate families at 30 days, untagged grace 14 days last, no `any` selection, no `excludeTaggedImages`, unique prefixes, one untagged selector |
+| `evaluate` | the modeled first-match-wins evaluation for a repository state (the offline preview): per-image action + applied rule priority + the exact expiring candidate list, deterministic for a given reference date |
+| `validate-preview` | validate ECR's own `get-lifecycle-policy-preview` results against the model; fail closed on `PREVIEW_DISAGREEMENT`, on a protected rollback-window digest expiring (`PROTECTED_IMAGE_EXPIRING`), and on a release-tagged image selected by a non-official rule (`RELEASE_RULE_NOT_APPLIED`) |
+| `audit` | read-only rollback-window audit: the exact 10 (or all when fewer exist) immediately rollback-capable releases, reusing the 3.6 complete-set model; missing/mismatched artifacts fail closed (`RETENTION_ARTIFACT_MISSING`/`RETENTION_ARTIFACT_MISMATCH`); older releases are reported in `outsideWindow` and never claimed rollback-capable |
+| `coverage` | cross-check the push-order keep-10 against the version-order window; an out-of-order push/backport that would let the policy expire a window release fails closed (`POLICY_WINDOW_GAP`) |
+| `frontend-retention` | the S3 `_releases/v<version>/` prefix plan: protected versions (window + currently deployed + previous known-good) are never expirable; protected/unknown deletions fail closed |
+| `retention-classes` | the GitHub retention classes: releases/manifests/SBOMs/checksums/audit evidence indefinite, candidate artifacts 30 days, staging-failure diagnostics and result records 14 days |
+
+### The shell wrappers
+
+- `bin/audit-retention-window.sh` — read-only: `--index`/`--observed` offline,
+  or identity preflight + ECR `describe-images` + S3 marker reads live
+  (deferred); prints the audit and the coverage decisions, exits non-zero on
+  any fail-closed code.
+- `bin/preview-retention-policy.sh` — previews the exact expiration candidates:
+  offline modeled evaluation (`--images`, no AWS call at all), or the live ECR
+  `start/get-lifecycle-policy-preview` dry-run (deletes nothing; requires
+  `--observed` for the protected-digest check). Review is required before any
+  apply.
+- `bin/apply-retention-policy.sh` — `--dry-run` (default) previews; `--apply`
+  is **refused offline** (requires `ONLINESHOP_RETENTION_LIVE_APPLY=1`, set
+  only by the consolidated Pass 3 live pass) and every `put-lifecycle-policy`
+  is immediately followed by a `get-lifecycle-policy` read-back compared
+  byte-for-byte against the desired document (fail-closed drift).
+
+### Deferred live checks
+
+The live half of the gate — the real lifecycle policy preview/apply/read-back
+against real ECR, the read-only live retention audit, and real S3/frontend
+retention — is **not** claimed by the offline gate and is executed in the
+consolidated verification pass. The gate proves the live gather/preview paths
+(identity preflight, exact read-only calls, no mutations) with a stateful AWS
+stub, and never exercises the `--apply` path.
 
 ---
 

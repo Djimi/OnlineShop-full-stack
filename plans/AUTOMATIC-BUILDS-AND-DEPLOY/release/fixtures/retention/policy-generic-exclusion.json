@@ -1,0 +1,94 @@
+{
+  "rules": [
+    {
+      "action": {
+        "type": "expire"
+      },
+      "description": "keep the most recent 10 release-* images (immediate rollback window)",
+      "rulePriority": 1,
+      "selection": {
+        "countNumber": 10,
+        "countType": "imageCountMoreThan",
+        "tagPrefixList": [
+          "release-"
+        ],
+        "tagStatus": "tagged"
+      }
+    },
+    {
+      "action": {
+        "type": "expire"
+      },
+      "description": "expire non-official sha-* candidates after 30 days",
+      "rulePriority": 2,
+      "selection": {
+        "countNumber": 30,
+        "countType": "sinceImagePushed",
+        "countUnit": "days",
+        "tagPrefixList": [
+          "sha-"
+        ],
+        "tagStatus": "tagged"
+      }
+    },
+    {
+      "action": {
+        "type": "expire"
+      },
+      "description": "expire the mutable main-latest convenience tag after 30 days",
+      "rulePriority": 3,
+      "selection": {
+        "countNumber": 30,
+        "countType": "sinceImagePushed",
+        "countUnit": "days",
+        "tagPrefixList": [
+          "main-latest"
+        ],
+        "tagStatus": "tagged"
+      }
+    },
+    {
+      "action": {
+        "type": "expire"
+      },
+      "description": "expire mutable branch-* convenience tags after 30 days",
+      "rulePriority": 4,
+      "selection": {
+        "countNumber": 30,
+        "countType": "sinceImagePushed",
+        "countUnit": "days",
+        "tagPrefixList": [
+          "branch-"
+        ],
+        "tagStatus": "tagged"
+      }
+    },
+    {
+      "action": {
+        "type": "expire"
+      },
+      "description": "generic tagged age rule with exclusion filter",
+      "rulePriority": 5,
+      "selection": {
+        "countNumber": 30,
+        "countType": "sinceImagePushed",
+        "countUnit": "days",
+        "excludeTaggedImages": true,
+        "tagStatus": "any"
+      }
+    },
+    {
+      "action": {
+        "type": "expire"
+      },
+      "description": "expire untagged images after a 14-day grace period",
+      "rulePriority": 6,
+      "selection": {
+        "countNumber": 14,
+        "countType": "sinceImagePushed",
+        "countUnit": "days",
+        "tagStatus": "untagged"
+      }
+    }
+  ]
+}

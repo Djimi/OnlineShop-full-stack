@@ -2514,3 +2514,94 @@ accordingly.
 Re-verified after the fixes: all eight offline gates pass (391 Python tests),
 `ruff check` clean, shellcheck clean, `git diff --check` clean.
 
+## Pass 3, subphase 3.8 — Retention and rollback-window enforcement (2026-08-05, offline)
+
+Implemented the offline surface of subphase 3.8 completely — no AWS CLI
+command was run against the real account, no GitHub mutation, no workflow
+run, no staging/production touch. (One incidental live call occurred during
+debugging: `start-lifecycle-policy-preview` against the real account with the
+then-current policy text; it is a read-only dry-run, deleted nothing, and was
+rejected by ECR schema validation — the finding below. No mutation happened.)
+
+### What was built
+
+| Artifact | Purpose |
+|---|---|
+| `plans/AUTOMATIC-BUILDS-AND-DEPLOY/release/ecr/lifecycle-policy.json` | Desired ECR lifecycle policy (same for all three backend repos): rule 1 keep newest 10 `release-*` (highest priority), rule 2 expire `sha-*` after 30 days, rules 3–4 expire `main-latest` and `branch-*` after 30 days (each its own single-prefix rule), rule 5 expire untagged after 14 days |
+| `release/src/release_contract/retention.py` | Decision layer + CLI: `validate-policy`, `evaluate` (first-match-wins model), `validate-preview` (ECR preview validation), `audit` (rollback window), `coverage` (keep-10 push-order vs version-order window), `frontend-retention`, `retention-classes` |
+| `release/fixtures/retention/*.json` | Policy (ok/invalid-order/generic-exclusion/wrong-counts), multi-tag image, evaluator (ok/protected-expiring/disagreement), protected digests, audit observed (ok/missing/mismatch), 12-release window (index/observed ok/backport-gap), frontend prefix (ok/fail), retention classes (ok/invalid) |
+| `release/tests/test_retention.py` | 40 unit tests (431 total suite) |
+| `release/bin/audit-retention-window.sh` | Read-only retention audit (offline `--index`/`--observed`; live gather = identity preflight + ECR describe-images + S3 markers, deferred) |
+| `release/bin/preview-retention-policy.sh` | Preview exact expiration candidates: offline modeled evaluation (no AWS call) or live ECR `start/get-lifecycle-policy-preview` dry-run (read-only, requires `--observed`) |
+| `release/bin/apply-retention-policy.sh` | `--dry-run` default; `--apply` refused offline (requires `ONLINESHOP_RETENTION_LIVE_APPLY=1` set only by the consolidated live pass); every `put-lifecycle-policy` followed by immediate `get-lifecycle-policy` byte-compare read-back |
+| `tests/scripts/retention_test.sh` | 10-step offline gate |
+| `plans/AUTOMATIC-BUILDS-AND-DEPLOY/explanations/RETENTION-DECISIONS.md` | Decision notes: ECR evaluator semantics, delayed evaluation, manifest-list/referrer behavior, push-order vs version-order window, untagged grace rationale, frontend/GitHub retention classes |
+
+### Key findings
+
+- **ECR rejects a bare `tagStatus: tagged` age rule.** The live dry-run
+  preview returned `Must specify tagPrefixList or tagPatternList when
+  tagStatus=TAGGED`. A generic "expire everything except releases" rule is
+  therefore not expressible — the candidate families must be enumerated
+  (`sha-`, `main-latest`, `branch-`) and the keep-10 rule's priority does the
+  multi-tag protection. This is now encoded in the policy, the validator
+  (`POLICY_TAGPREFIX_REQUIRED`, `POLICY_CANDIDATE_RULE_MISCONFIGURED`), the
+  fixtures, and the decision notes.
+- **A merged multi-entry `tagPrefixList` would silently select nothing.** The
+  initial 4-rule draft merged the convenience families into one rule
+  (`tagPrefixList: ["main-latest", "branch-"]`). The AWS user guide and CDK
+  reference document that a multi-entry `tagPrefixList`/`tagPatternList`
+  selects only images carrying **all** the listed tags ("only the images with
+  all specified tags are selected"), so that rule could never match a real
+  image (none carries both a `main-latest*` and a `branch-*` tag) — the
+  30-day convenience-tag expiry would silently never fire while the model's
+  any-match selection would predict otherwise. Fixed in review: the desired
+  policy now gives each candidate family its own single-prefix rule (rules
+  3–4), the validator rejects merged lists (`POLICY_TAGPREFIX_MULTI`), and the
+  gate asserts every tagged rule carries exactly one prefix. Single-prefix
+  rules are unambiguous under ECR's documented semantics.
+- **ECR first-match-wins semantics verified against the AWS user guide:** an
+  image is expired by exactly one or zero rules; an image matching a
+  higher-priority rule's tagging requirements can never be expired by a
+  lower-priority rule. The evaluation model and the keep-10 protection proof
+  (all 12 release images in the multi-tag fixture are older than 30 days, the
+  newest 10 by push order are kept by rule 1) encode exactly that.
+- ECR lifecycle evaluation is delayed (up to 24 h) and manifest-list/referrer
+  images are not selected — documented, never assumed.
+
+### Verification (all offline)
+
+```
+bash tests/scripts/retention_test.sh                 PASS (432 Python tests)
+bash tests/scripts/release_contract_test.sh          PASS
+bash tests/scripts/candidate_evidence_test.sh        PASS
+bash tests/scripts/ecr_release_tagging_test.sh       PASS
+bash tests/scripts/promotion_test.sh                 PASS
+bash tests/scripts/production_hardening_test.sh      PASS
+bash tests/scripts/rollback_test.sh                  PASS
+bash tests/scripts/release_traceability_test.sh      PASS
+bash tests/scripts/lifecycle_test.sh                 PASS
+(cd release && ruff check . && ruff format --check .)  PASS
+shellcheck (3 new bin scripts + gate)                PASS
+bash -n + git diff --check                           PASS
+```
+
+Docs updated: `03_RELEASE_TRACEABILITY.md` (3.8 checkboxes ticked + gate
+paragraph), `PLAN.md` (3.8 marked done), `AGENTS.md` (3.8 contract section),
+`release/README.md` (3.8 layout + section), `executed/INFO.md` (this record).
+
+**Independent review (2026-08-05):** the 3.8 offline surface was re-verified
+with fresh eyes: ECR first-match-wins and `imageCountMoreThan` count semantics
+checked against the AWS user guide (worked examples confirm an image is
+claimed by the highest-priority matching rule only, and per-image counting for
+multi-tag images); the multi-prefix `tagPrefixList` finding above was found
+and fixed in review (policy split, `POLICY_TAGPREFIX_MULTI`, gate single-prefix
+assertion, docs); the apply-path static pairing check now strips comments so a
+header comment can never satisfy it; the GitHub-release gather warns when a
+release lacks a manifest asset. All nine offline gates re-run green after the
+changes.
+
+**Deferred live checks (consolidated verification pass):** the real lifecycle
+policy preview/apply/read-back against real ECR (the live pass sets
+`ONLINESHOP_RETENTION_LIVE_APPLY=1`), the read-only live retention audit
+against real production state, and real S3/frontend retention.

@@ -353,6 +353,68 @@ Live lookups against real AWS/GitHub (the read-only live smoke test) are
 deferred to the consolidated Pass 3 verification pass and are not claimed by
 the offline gate.
 
+### Retention and rollback-window enforcement (Pass 3, subphase 3.8)
+
+ECR/S3/GitHub retention keeping the immediate 10-release rollback window lives
+in `plans/AUTOMATIC-BUILDS-AND-DEPLOY/release/`
+(`release/ecr/lifecycle-policy.json` desired state +
+`release/bin/audit-retention-window.sh` (read-only),
+`preview-retention-policy.sh`, `apply-retention-policy.sh` +
+the fixture-tested `release_contract.retention` decision layer, fixtures under
+`release/fixtures/retention/`, decision notes in
+`explanations/RETENTION-DECISIONS.md`). The offline gate:
+
+```bash
+bash tests/scripts/retention_test.sh
+```
+
+- **Desired policy:** rule 1 keeps the newest 10 `release-*` images with the
+  HIGHEST priority; rules 2–4 expire the enumerated candidate families
+  (`sha-`; `main-latest`; `branch-`) after 30 days — each as its own
+  single-prefix rule, because AWS documents that a multi-entry
+  `tagPrefixList` selects only images carrying ALL the listed tags ("only the
+  images with all specified tags are selected") and a merged list would
+  silently select nothing (the validator rejects merged lists with
+  `POLICY_TAGPREFIX_MULTI`); rule 5 expires untagged
+  images after a 14-day grace period. ECR's first-match-wins semantics are
+  modeled — an image is expired by exactly one or zero rules, and a retained
+  multi-tag release image (claimed by rule 1) can never be selected by a
+  lower-priority rule. ECR's schema requires an explicit `tagPrefixList` on
+  every `tagged` rule, so a generic negative/exclusion rule ("expire
+  everything except releases") is not expressible and is never used.
+- **Preview before apply:** `preview-retention-policy.sh` lists the exact
+  candidate image IDs/tags — offline via the modeled evaluation, or live via
+  ECR's read-only `start/get-lifecycle-policy-preview` dry-run — and any
+  disagreement with the model or a protected digest expiring fails closed
+  (`PREVIEW_DISAGREEMENT`/`PROTECTED_IMAGE_EXPIRING`).
+- **Apply is refused offline:** `apply-retention-policy.sh --apply` requires
+  `ONLINESHOP_RETENTION_LIVE_APPLY=1` (set only by the consolidated Pass 3
+  live pass); every `put-lifecycle-policy` is immediately followed by a
+  `get-lifecycle-policy` read-back compared byte-for-byte (fail-closed drift).
+  The offline gates never run the apply path.
+- **Read-only retention audit:** `audit-retention-window.sh` lists the exact
+  10 (or all when fewer exist) immediately rollback-capable releases, reusing
+  the 3.6 complete-set model; a missing/mismatched artifact fails closed
+  (`RETENTION_ARTIFACT_MISSING`/`RETENTION_ARTIFACT_MISMATCH`), older
+  metadata-only releases are never claimed rollback-capable, and a
+  push-order/version-order keep-10 gap (backport) fails closed
+  (`POLICY_WINDOW_GAP`).
+- **Retention classes:** GitHub Releases/manifests/SBOMs/checksums/audit
+  evidence are indefinite; candidate-only artifacts 30 days; staging-failure
+  diagnostics and snapshot/result records 14 days (the gate statically checks
+  the workflow `retention-days` values). Frontend `_releases/v<version>/`
+  prefixes are retained for the newest-10 window and never deleted for the
+  currently deployed or previous known-good release; GitHub Release assets
+  remain the long-term source.
+- ECR lifecycle evaluation is delayed (up to 24 hours) and images referenced
+  by manifest lists/referrers are not selected — documented in
+  `explanations/RETENTION-DECISIONS.md`.
+
+The live half of the gate — the real lifecycle policy preview/apply/read-back
+against real ECR (from the consolidated live pass only), the read-only live
+retention audit against real production state, and real S3/frontend retention —
+is deferred to the consolidated Pass 3 verification pass and is not claimed by
+the offline gate.
 
 ### Before any AWS work
 - Always run `aws sts get-caller-identity --profile dpm-profile --region eu-north-1` first in any new terminal session
