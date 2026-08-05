@@ -14,7 +14,7 @@ set -euo pipefail
 # validated by release_contract.rollback plan.
 #
 # No ECR tag is minted or moved and no image is written (the rollback IAM policy
-# has no ecr:PutImage); only existing official digests are deployed. No new
+# has no ECR image-write permission); only existing official digests are deployed. No new
 # official release is created.
 #
 # This is a mutation script: every registration/update is immediately read

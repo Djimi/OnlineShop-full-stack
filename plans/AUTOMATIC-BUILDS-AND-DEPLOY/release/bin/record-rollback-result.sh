@@ -12,13 +12,16 @@ set -euo pipefail
 # Usage:
 #   record-rollback-result.sh --manifest <deployment-manifest.json>
 #     --snapshot <snapshot.json> --run-id <int> --workflow-url <url>
-#     [--requester <login>] [--approver <login>]
+#     --requester <login> --approver <login>
 #     [--outcome success|compensated|mixed-state-incident]
 #     [--audit-path <path>] [--existing-result <file>]
 #     [--profile dpm-profile] [--region eu-north-1]
+# `--requester`/`--approver` are mandatory: the approver is derived by the
+# caller from the GitHub environment-approval evidence (actions/runs/{run}/
+# approvals) and must never default to the run actor.
 #
 # Exit 0 when the record is written and valid; 1 on any fail-closed check;
-# 2 on usage/IO error.
+# 2 on usage/IO error. JSON on stdout (the result record); diagnostics on stderr.
 
 RELEASE="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 REPO_ROOT="$(cd -- "$RELEASE/../../.." && pwd)"
@@ -117,9 +120,9 @@ jq -n \
   --arg gitTag "$(jq -r '.officialRelease.gitTag // ""' "$SNAPSHOT")" \
   --arg sourceSha "$FROM_SHA" \
   --arg frontendSha256 "$FROM_FE" \
-  --argjson auth "$(jq -r '.services["onlineshop-auth"].runningDigest // ""' "$SNAPSHOT")" \
-  --argjson items "$(jq -r '.services["onlineshop-items"].runningDigest // ""' "$SNAPSHOT")" \
-  --argjson gateway "$(jq -r '.services["onlineshop-api-gateway"].runningDigest // ""' "$SNAPSHOT")" \
+  --arg auth "$(jq -r '.services["onlineshop-auth"].runningDigest // ""' "$SNAPSHOT")" \
+  --arg items "$(jq -r '.services["onlineshop-items"].runningDigest // ""' "$SNAPSHOT")" \
+  --arg gateway "$(jq -r '.services["onlineshop-api-gateway"].runningDigest // ""' "$SNAPSHOT")" \
   '{version: $version, gitTag: $gitTag, sourceSha: $sourceSha,
     digests: {auth: $auth, items: $items, apiGateway: $gateway},
     frontendSha256: $frontendSha256}' > "$TMP/from.json"
@@ -128,21 +131,25 @@ jq -n \
   --arg gitTag "$(jq -r '.release.gitTag' "$MANIFEST")" \
   --arg sourceSha "$(jq -r '.release.sourceSha' "$MANIFEST")" \
   --arg frontendSha256 "$(jq -r '.components.frontend.sha256' "$MANIFEST")" \
-  --argjson auth "$(jq -r '.components.auth.imageDigest' "$MANIFEST")" \
-  --argjson items "$(jq -r '.components.items.imageDigest' "$MANIFEST")" \
-  --argjson gateway "$(jq -r '.components.apiGateway.imageDigest' "$MANIFEST")" \
+  --arg auth "$(jq -r '.components.auth.imageDigest' "$MANIFEST")" \
+  --arg items "$(jq -r '.components.items.imageDigest' "$MANIFEST")" \
+  --arg gateway "$(jq -r '.components.apiGateway.imageDigest' "$MANIFEST")" \
   '{version: $version, gitTag: $gitTag, sourceSha: $sourceSha,
     digests: {auth: $auth, items: $items, apiGateway: $gateway},
     frontendSha256: $frontendSha256}' > "$TMP/to.json"
 
-REQUESTER="${REQUESTER:-$GITHUB_ACTOR}"
-APPROVER="${APPROVER:-$GITHUB_ACTOR}"
-if [ -n "$REQUESTER" ]; then
-  rl_assert_github_login "$REQUESTER" || exit 2
-fi
-if [ -n "$APPROVER" ]; then
-  rl_assert_github_login "$APPROVER" || exit 2
-fi
+[ -n "$REQUESTER" ] || {
+  echo "ERROR: --requester is required (the operator who requested the rollback)" >&2
+  usage
+  exit 2
+}
+[ -n "$APPROVER" ] || {
+  echo "ERROR: --approver is required (derived from the GitHub environment-approval evidence, never the run actor)" >&2
+  usage
+  exit 2
+}
+rl_assert_github_login "$REQUESTER" || exit 2
+rl_assert_github_login "$APPROVER" || exit 2
 AUDIT_PATH="${AUDIT_PATH:-rollback-audit-${RUN_ID}.json}"
 
 jq -n \
@@ -182,4 +189,4 @@ ACTION=$(printf '%s' "$RESULT" | jq -r '.action')
 
 # Emit the result record (the workflow uploads it as the audit annotation).
 jq -c '{result: .result}' "$TMP/state.json"
-echo "record-rollback-result: OK (action=$ACTION)"
+echo "record-rollback-result: OK (action=$ACTION)" >&2

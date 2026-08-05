@@ -5,7 +5,9 @@ set -euo pipefail
 # target release from the latest complete official release sets, confirms the
 # exact ECR digests and frontend prefix marker still exist, enforces the
 # database-compatibility guard (Decision 8), and prints a current-versus-target
-# summary. It never mutates anything.
+# summary (component identities, digests, task definitions, frontend checksum,
+# source SHAs, and the database-compatibility warning). It never mutates
+# anything.
 #
 # The index (the set of official release manifests) comes from `--index` or is
 # fetched from GitHub Releases (the `release-manifest.json` asset, selected by
@@ -237,9 +239,21 @@ echo "rollback-preflight: OK"
 echo "target version=$VERSION"
 printf '%s' "$TARGET" | jq -r '"  to:      version=\(.release.version) gitTag=\(.release.gitTag) sourceSha=\(.release.sourceSha)"'
 printf '%s' "$TARGET" | jq -r '"  to:      auth=\(.components.auth.imageDigest) items=\(.components.items.imageDigest) gateway=\(.components.apiGateway.imageDigest)"'
+printf '%s' "$TARGET" | jq -r '"  to:      taskDefs auth=\(.components.auth.taskDefinitionArn) items=\(.components.items.taskDefinitionArn) gateway=\(.components.apiGateway.taskDefinitionArn)"'
 printf '%s' "$TARGET" | jq -r '"  to:      frontendSha256=\(.components.frontend.sha256) prefix=\(.components.frontend.releasePrefix)"'
 if [ -n "$CURRENT" ] && [ "$CURRENT" != "{}" ]; then
   printf '%s' "$CURRENT" | jq -r '"  from:    version=\(.version) sourceSha=\(.sourceSha) frontendSha256=\(.frontendSha256)"'
+  CURRENT_VERSION=$(printf '%s' "$CURRENT" | jq -r '.version // ""')
+  if [ -n "$CURRENT_VERSION" ]; then
+    # Current per-component digests come from the observed ECR `release-*` tags
+    # of the current release (read-only; never from mutable tags).
+    jq -n \
+      --arg auth "$(jq -r ".ecr[\"onlineshop-auth\"].releaseTags[\"release-$CURRENT_VERSION\"] // \"\"" "$TMP/observed.json")" \
+      --arg items "$(jq -r ".ecr[\"onlineshop-items\"].releaseTags[\"release-$CURRENT_VERSION\"] // \"\"" "$TMP/observed.json")" \
+      --arg gateway "$(jq -r ".ecr[\"onlineshop-api-gateway\"].releaseTags[\"release-$CURRENT_VERSION\"] // \"\"" "$TMP/observed.json")" \
+      '{auth: $auth, items: $items, gateway: $gateway}' > "$TMP/current-digests.json"
+    printf '%s' "$(cat "$TMP/current-digests.json")" | jq -r '"  from:    digests auth=\(.auth) items=\(.items) gateway=\(.gateway)"'
+  fi
 else
   echo "  from:    <no current release marker observed>"
 fi

@@ -16,8 +16,10 @@ set -euo pipefail
 #
 # Usage:
 #   compensate-production.sh --snapshot <snapshot.json>
-#     --changed <changed-components.json>
+#     --changed <changed-components.json | literal-json-array>
 #     [--dry-run] [--profile dpm-profile] [--region eu-north-1]
+# `--changed` is a JSON array file or a literal JSON array (the workflows pass
+# the changed-component set inline, e.g. '["frontend","auth","items","apiGateway"]').
 #
 # Exit 0 when all changed components are restored and verified; 1 on
 # fail-closed; 2 on usage/IO error.
@@ -52,7 +54,14 @@ AWS_ARGS=(--profile "$PROFILE" --region "$REGION")
 
 [ -n "$SNAPSHOT" ] && [ -n "$CHANGED" ] || { usage; exit 2; }
 rl_assert_regular_file "$SNAPSHOT" || exit 2
-rl_assert_regular_file "$CHANGED" || exit 2
+if [ ! -f "$CHANGED" ]; then
+  # Accept a literal JSON array as the changed-component set (the workflows
+  # pass it inline); validate it before use.
+  printf '%s' "$CHANGED" | jq -e 'type == "array"' >/dev/null 2>&1 || {
+    echo "ERROR: --changed must be a JSON array file or a literal JSON array" >&2
+    exit 2
+  }
+fi
 [ -f "$REPO_ROOT/scripts/config/production.env" ] || {
   echo "ERROR: missing scripts/config/production.env" >&2
   exit 1
@@ -68,8 +77,37 @@ TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 CLUSTER="$LC_CLUSTER"
 
+# --- Mandatory identity preflight ------------------------------------------
+set +e
+IDENTITY_ACCOUNT=$(aws sts get-caller-identity "${AWS_ARGS[@]}" --query 'Account' --output text 2>"$TMP/identity.err")
+RC=$?
+set -e
+if [ "$RC" -ne 0 ] || [ -z "$IDENTITY_ACCOUNT" ]; then
+  echo "ERROR: identity preflight failed (aws sts get-caller-identity):" >&2
+  sed -n '1,3p' "$TMP/identity.err" >&2 || true
+  exit 1
+fi
+[ "$IDENTITY_ACCOUNT" = "$LC_ACCOUNT_ID" ] || {
+  echo "ERROR: identity preflight failed; account $IDENTITY_ACCOUNT != $LC_ACCOUNT_ID" >&2
+  exit 1
+}
+
+CHANGED_FILE="$CHANGED"
+if [ ! -f "$CHANGED_FILE" ]; then
+  printf '%s' "$CHANGED" > "$TMP/changed.json"
+  CHANGED_FILE="$TMP/changed.json"
+fi
+# A typo in the changed set would silently skip a component and leave a mixed
+# state; every entry must name a known component.
+printf '%s' "$(cat "$CHANGED_FILE")" | jq -e \
+  'all(.[]; . == "auth" or . == "items" or . == "apiGateway" or . == "frontend")' \
+  >/dev/null 2>&1 || {
+  echo "ERROR: --changed contains an unknown component (must be a subset of auth, items, apiGateway, frontend)" >&2
+  exit 2
+}
+
 PLAN=$(PYTHONPATH="$RELEASE/src" python3 -m release_contract.promotion compensate \
-  --snapshot "$SNAPSHOT" --changed "$CHANGED") || {
+  --snapshot "$SNAPSHOT" --changed "$CHANGED_FILE") || {
   echo "ERROR: cannot build a compensation plan (fail closed):" >&2
   printf '%s' "$PLAN" | jq -r '.issues[] | "  [\(.code)] \(.field): \(.message)"' >&2 || true
   exit 1

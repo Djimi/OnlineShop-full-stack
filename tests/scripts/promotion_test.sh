@@ -889,6 +889,18 @@ assert_failure bash "$RELEASE/bin/compensate-production.sh" \
   --changed "$FX/changed-partial.json" \
   --dry-run \
   --profile dpm-profile --region eu-north-1
+# The workflow passes the changed-component set inline as a literal JSON array;
+# the tool must accept it, and a typo'd component key must fail closed.
+assert_success bash "$RELEASE/bin/compensate-production.sh" \
+  --snapshot "$FX/snapshot-ok.json" \
+  --changed '["frontend","auth","items","apiGateway"]' \
+  --dry-run \
+  --profile dpm-profile --region eu-north-1
+assert_failure bash "$RELEASE/bin/compensate-production.sh" \
+  --snapshot "$FX/snapshot-ok.json" \
+  --changed '["frontend","auth","items","apiGatewayg"]' \
+  --dry-run \
+  --profile dpm-profile --region eu-north-1
 
 # Real frontend restore: the live root carries the new (v1.2.1) marker and the
 # previous immutable prefix holds the pre-promotion (v1.1.0) bytes.

@@ -616,79 +616,134 @@ consolidated verification pass and is not claimed here.)
 
 ### 3.6 Owner-approved rollback
 
-> **Continuation handoff — 2026-08-04 (offline work only):** An OpenCode
-> implementation run was intentionally stopped before its final summary and
-> before an independent review. It created an unverified 3.6 implementation
-> surface in the shared worktree: `release_contract.rollback`,
-> `rollback-preflight.sh`, `deploy-rollback.sh`, `verify-rollback.sh`,
-> `restore-frontend.sh`, `record-rollback-result.sh`,
-> `.github/workflows/rollback-release.yml`, rollback fixtures, unit tests, and
-> `tests/scripts/rollback_test.sh`. **Do not mark any 3.6 checkbox complete
-> yet.** The next agent must first review these files, run the rollback gate
-> and the earlier Pass 3 gates, fix failures, then perform a fresh independent
-> review. No real AWS, GitHub, workflow, deployment, production, or staging
-> action was executed while creating this partial work.
-
-**Next-agent completion order:**
-
-1. Run `bash tests/scripts/rollback_test.sh`; inspect and repair every failure
-   before changing scope. Then run the 3.1–3.5 and 3.7 gates,
-   `ruff check`/`ruff format --check`, `shellcheck`, `bash -n`, secret scan,
-   and `git diff --check`.
-2. Review the rollback workflow and scripts against every checkbox below:
-   only an existing schema/checksum-valid official release may be selected;
-   input must be pinned to exact run/attempt/artifact identity; all backend
-   digests and frontend archive/prefix must exist before approval; the target
-   must be part of a complete retained release set.
-3. Verify protected `production` Environment approval, the non-cancelling
-   production concurrency group, post-approval revalidation, approver evidence
-   from GitHub rather than the requester, pre-rollback snapshot, paused-state
-   behavior, digest-pinned ECS revisions, frontend restoration, waiters,
-   health/diagnostics, compensation, and immutable rollback-result evidence.
-4. Make every source/documentation claim honest: offline/stub verification may
-   be checked only after its gate passes; all real AWS/GitHub work remains
-   deferred to the consolidated live pass.
-5. Start a fresh reviewer after implementation verification. The reviewer must
-   apply improvements, not merely report them, and then re-run all gates.
-
-**Deferred live 3.6 work:** Execute one controlled owner-approved rollback
-only after 3.4 has a real official release and 3.7 can query it live. Use the
-same consolidated window as the remaining Pass 3 live checks; do not
-pause/resume staging or production merely to test rollback plumbing.
-
-- [ ] Add a separate manual rollback workflow that selects an existing official
+- [x] Add a separate manual rollback workflow that selects an existing official
   `v<version>`, never arbitrary tags/digests. Fetch and schema/checksum-validate
   its release assets and confirm all required ECR digests/frontend archive
   still exist before approval.
-- [ ] Resolve targets only from the intersection of the latest 10 complete
+  *(offline: `.github/workflows/rollback-release.yml` — `workflow_dispatch`
+  with a `version` input; `release_contract.rollback dispatch` rejects image
+  tags/digests/SHAs; the read-only `preflight` job runs `rollback-preflight.sh`
+  BEFORE the protected Environment and schema-validates the target manifest
+  (`validate_data` + `TARGET_MANIFEST_INVALID`) while `select` cross-checks the
+  exact ECR `release-*` digests and frontend prefix marker
+  (`TARGET_ARTIFACT_MISSING`/`TARGET_ARTIFACT_MISMATCH`); the workflow is
+  static-checked and never executed in this substep.)*
+- [x] Resolve targets only from the intersection of the latest 10 complete
   official sets across all backend repositories and frontend prefixes. Reject
   metadata-only, partially retained, draft, or tampered releases.
-- [ ] Show a pre-approval summary of current versus target component identities,
+  *(offline: `release_contract.rollback select` +
+  `latest_complete_officials` resolve the target from the newest 10 complete
+  official sets ordered by numeric version; drafts are excluded from the
+  GitHub index fetch, tampered manifests fail `validate_data`, and
+  `TARGET_NOT_FOUND`/`TARGET_NOT_OFFICIAL`/`TARGET_ARTIFACT_MISSING`/
+  `TARGET_ARTIFACT_MISMATCH`/`TARGET_OUTSIDE_ROLLBACK_WINDOW`/
+  `TARGET_IS_CURRENT` fail closed — covered by unit tests (incl. a generated
+  12-release window fixture) and the gate CLI checks.)*
+- [x] Show a pre-approval summary of current versus target component identities,
   digests, task definitions, frontend checksum, source SHAs, and database-
   compatibility warning.
-- [ ] Use the same protected `production` Environment and non-cancelling
+  *(offline: `rollback-preflight.sh` prints the current-versus-target summary —
+  version/gitTag/sourceSha, per-backend digests, task-definition ARNs, frontend
+  checksum + prefix, the observed current release marker + its ECR digests, and
+  the Decision 8 database-compatibility line; the gate asserts the exact
+  summary lines.)*
+- [x] Use the same protected `production` Environment and non-cancelling
   production concurrency group as forward promotion.
-- [ ] Repeat target/current-state validation after approval and lock acquisition,
+  *(offline: the `rollback` job uses `environment: production` and the workflow
+  uses the shared `production-mutation` group with `cancel-in-progress: false`;
+  the gate statically checks all three.)*
+- [x] Repeat target/current-state validation after approval and lock acquisition,
   derive the approver from GitHub evidence, snapshot pre-rollback state for
   compensation, and handle paused production exactly as forward promotion does.
-- [ ] Register new task-definition revisions pinned to the selected official
+  *(offline: the `rollback` job re-runs the full `rollback-preflight.sh` against
+  a fresh observed snapshot after approval/lock (time-of-check race closure),
+  derives `approvedBy` from `actions/runs/{run}/approvals` (state `approved` on
+  the `production` environment) failing closed when unresolvable — never
+  `github.actor` — and snapshots via the shared `snapshot-production.sh`
+  (records `paused` honestly); `verify-rollback.sh` fails closed on a paused
+  environment with `RUNNING_TASKS_MISSING`, never fabricating success; the gate
+  tests the paused fail-closed path.)*
+- [x] Register new task-definition revisions pinned to the selected official
   digests and restore frontend from the retained immutable archive/prefix. Do
   not move or depend on mutable tags and do not create a new official release.
-- [ ] Apply the same deployment ordering, waiters, circuit breaker, health,
+  *(offline: `deploy-rollback.sh` copies the current (pre-rollback) definitions
+  from the snapshot and replaces only the intended container image via
+  `sanitize-task-definition.sh` (image-only diff, full-ARN
+  `secrets[].valueFrom`, no plaintext) + `validate-task-definition.sh`
+  (digest-pinned, `versionConsistency=enabled`, distinct roles, circuit
+  breaker) before registering, with immediate read-back;
+  `restore-frontend.sh` re-points the live root from the retained immutable
+  `_releases/v<version>/` prefix (marker + index.html last, no `--delete`,
+  CloudFront invalidation, read-back); the rollback IAM policy has no ECR
+  image-write permission and no rollback tool ever mints a tag or creates an
+  official release — a static scan proves `promote-image-digest.sh`/
+  `gh release create`/image-write actions never appear.)*
+- [x] Apply the same deployment ordering, waiters, circuit breaker, health,
   E2E/smoke, diagnostics, and read-back rules as forward promotion.
-- [ ] Write a rollback result artifact recording requester, approver, from/to
+  *(offline: `deploy-rollback.sh` updates auth → items → api-gateway in
+  canonical order with circuit breaker + `minimumHealthyPercent=100`/
+  `maximumPercent=200` enforced by `release_contract.ecs_config`, waiters bound
+  to the deployment/task-definition started by this run
+  (`release_contract.rollback waiter` reuses the promotion contract —
+  `DEPLOYMENT_ID_MISMATCH`/`WAITER_TD_MISMATCH`/`DEPLOYMENT_NOT_COMPLETED`/
+  `WAITER_DIGEST_MISMATCH` fail closed) and running-digest read-back;
+  `verify-rollback.sh` verifies running `containers[].imageDigest`, service
+  task-definition ARNs, frontend marker, and ALB health against the deployment
+  manifest — the same verification decision as forward promotion.)*
+- [x] Write a rollback result artifact recording requester, approver, from/to
   releases, exact artifacts, timestamps, workflow URL, and outcome. Annotate
   the deployment/audit record without editing the immutable original release
   manifest.
-- [ ] If rollback fails, stop further automatic mutation, preserve diagnostics,
+  *(offline: `record-rollback-result.sh` + `release_contract.rollback result`
+  validate the record (requester/approver logins — both mandatory tool inputs,
+  never defaulted to the run actor — run id, workflow URL, from/to
+  identities with exact digests + frontend checksum, startedAt/completedAt,
+  outcome, `productionVerified`, audit annotation) and decide
+  write/resume idempotency with `RESULT_CONFLICT` fail-closed; the workflow
+  uploads the record as a separate artifact — the immutable original release
+  manifest is never edited.)*
+- [x] If rollback fails, stop further automatic mutation, preserve diagnostics,
   compensate changed components to the pre-rollback snapshot, and report actual,
   pre-operation, and last-known-good states. If compensation also fails, leave a
   clear mixed-state incident. Never reverse the database automatically.
+  *(offline: the workflow has an automatic (non-approval-gated) `compensate`
+  job (`if: failure() && needs.rollback.result == 'failure'`) that consumes the
+  snapshot from this run's artifact and calls the shared
+  `compensate-production.sh` with all changed components including frontend;
+  `release_contract.rollback compensate` reuses the promotion reverse-order
+  plan and fails closed when the snapshot cannot restore a changed component;
+  no rollback tool touches the database.)*
 
-**Verification gate:** validate rejection of unknown/expired/tampered releases;
-perform release N → N-1 → N in a controlled test; confirm exact backend digests
-and frontend checksum after each transition; confirm approval/audit records and
-production health.
+**Verification gate:** (offline part implemented and green — see
+`tests/scripts/rollback_test.sh`: 391 Python unit tests; the
+`release_contract.rollback` decision-layer CLI exercised against valid/invalid
+fixtures for dispatch/select/schema/frontend-restore/result plus the reused
+snapshot/plan/verify/compensate decisions; rollback-release.yml static checks
+(dispatch inputs, `production` Environment, shared non-cancelling
+`production-mutation` concurrency group, no rebuild and no tag minting or
+release publication, full preflight repeated post-approval, read-only
+pre-approval preflight job with job-scoped `id-token: write` for its read-only
+ECR/S3 scope — any configure-aws-credentials job must declare it, `approvedBy`
+from `actions/runs/{run}/approvals` never `github.actor`, target manifest
+consumed from the exact producing run via download-artifact pinned to this
+run's `run-id`, post-approval revalidation fail-closed byte comparison,
+snapshot/restore/verify wiring, automatic compensate incl. the inline
+`--changed` JSON array the workflow passes, SHA-pinned Actions); shell-script
+runs against a stateful AWS + `gh` stub (preflight summary + fail-closed
+schema/artifact/identity checks, deploy dry-run with sanitize + no mutation +
+identity preflight, verify ok/drift/paused fail-closed + read-only proof,
+frontend restore with no-`--delete` + invalidation + read-back + dry-run,
+rollback-result write/resume/conflict with mandatory requester/approver); the
+mandatory profile/region + mutation read-back + no-secrets + no-tag-minting
+static scan; and ruff/shellcheck/git diff --check.
+The live half of the gate — the actual owner-approved rollback against real
+AWS/GitHub (release N → N-1 → N with exact digests and frontend checksum after
+each transition, real `production` Environment approval, real ECR/ECS/S3/
+CloudFront mutations and read-backs, real frontend restoration, and the real
+rollback-result artifact) — is **deferred** to the consolidated verification
+pass and is not claimed here. No real AWS, GitHub, workflow, deployment,
+production, or staging action was executed while implementing or verifying this
+subphase.)
 
 **Commit:** `feat(release): add approved immutable rollback`
 
@@ -790,49 +845,6 @@ consolidated verification pass and is not claimed here.)
 
 **Commit:** `feat(release): add release traceability queries`
 
-### 3.8 Retention and rollback-window enforcement
-
-> **Continuation handoff — 2026-08-04:** 3.8 has not started. Do not apply an
-> ECR lifecycle policy until 3.6 is independently verified offline and the
-> complete final tag/rollback contract is understood. The required starting
-> point is the retained release-set model from 3.3, 3.4, 3.6, and 3.7; create
-> evaluator fixtures and a read-only rollback-window audit before any AWS
-> mutation. Live policy preview/apply/read-back belongs to the consolidated
-> Pass 3 live pass and must use the mandatory AWS profile/region and immediate
-> read-back.
-
-- [ ] Design lifecycle rules against real multi-tag fixtures before applying
-  them. An official digest has both `sha-*` and `release-*`; a broad 30-day SHA
-  rule must not delete one of the newest 10 official release images.
-- [ ] Give the `release-*` keep-10 rule highest priority and prove with AWS ECR
-  evaluator fixtures that retained multi-tag release images cannot be selected
-  by lower-priority candidate rules. Do not treat a lifecycle rule as a generic
-  negative/exclusion filter.
-- [ ] Keep the most recent 10 `release-*` images per backend repository, expire
-  non-official SHA/branch/main candidates after approximately 30 days, and
-  expire untagged images after a short documented grace period.
-- [ ] Preview each ECR lifecycle policy and review the exact candidate image IDs
-  before `put-lifecycle-policy`; then read back the policy. Account for ECR's
-  delayed evaluation and manifest-list/referrer behavior.
-- [ ] Retain GitHub Releases, final manifests, SBOMs, checksums, and sanitized
-  audit/test evidence indefinitely. Configure candidate-only artifacts for 30
-  days and staging-failure diagnostics according to their existing shorter
-  operational retention.
-- [ ] Keep frontend archives/prefixes for the same latest-10 immediate rollback
-  window. Never delete the currently deployed or previous known-good frontend
-  artifact. GitHub Release assets remain the long-term source even after the
-  immediate S3/ECR window expires.
-- [ ] Add a read-only retention audit that lists the exact 10 immediately
-  rollback-capable releases and fails if any required backend/frontend artifact
-  is missing. Never claim an older metadata-only release is immediately
-  rollback-capable.
-
-**Verification gate:** policy fixtures prove official multi-tag protection;
-live lifecycle previews match the intended set; applied policies read back;
-the rollback-window audit reports 10 or all existing releases when fewer than
-10 exist; a protected release is never selected by a non-official expiry rule.
-
-**Commit:** `feat(release): enforce artifact retention policy`
 
 ---
 

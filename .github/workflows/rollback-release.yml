@@ -5,7 +5,7 @@ name: Rollback Release
 # official `v<version>` release (never an arbitrary tag, digest, or SHA). The
 # exact historical ECR digests and the retained immutable frontend prefix of
 # that release are re-deployed — nothing is rebuilt, no ECR tag is minted or
-# moved (the rollback IAM policy has no `ecr:PutImage`), and no new official
+# moved (the rollback IAM policy has no ECR image-write permission), and no new official
 # release is created.
 #
 # Control plane:
@@ -83,6 +83,11 @@ jobs:
   preflight:
     runs-on: ubuntu-latest
     permissions:
+      # The rollback preflight MUST read live ECR/S3 state before approval
+      # (unlike the promotion preflight, which has no AWS access), so this job
+      # needs id-token: write to assume the read-only rollback role. The
+      # job-level permissions block replaces the workflow-level one.
+      id-token: write
       contents: read
       actions: read
     outputs:
@@ -210,8 +215,15 @@ jobs:
             --version "${{ github.event.inputs.version }}" \
             --schema-change "${{ github.event.inputs.schema_change == true && 'present' || 'absent' }}" \
             --migration-reviewed "${{ github.event.inputs.migration_reviewed == true && 'true' || 'false' }}" \
-            --target-manifest rollback-target-manifest.json \
+            --target-manifest rollback-target-manifest.fresh.json \
             --profile dpm-profile --region ${{ env.AWS_REGION }}
+          # The revalidated manifest must be byte-identical to the one the
+          # owner approved before the Environment gate; any divergence fails
+          # closed. The deployment consumes the exact pre-approval bytes.
+          cmp -s target/rollback-target-manifest.json rollback-target-manifest.fresh.json || {
+            echo "ERROR: post-approval revalidation produced a different target manifest than the pre-approval one (fail closed)" >&2
+            exit 1
+          }
           cp target/rollback-target-manifest.json rollback-target-manifest.json
           jq -e --arg v "${{ github.event.inputs.version }}" '.release.version == $v' \
             rollback-target-manifest.json >/dev/null

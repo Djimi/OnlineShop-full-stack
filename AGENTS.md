@@ -258,6 +258,60 @@ real service/TD verification, security-group/IAM tightening) is deferred to
 the consolidated Pass 3 verification pass and is not claimed by the offline
 gate.
 
+### Owner-approved rollback (Pass 3, subphase 3.6)
+
+Approval-gated application rollback of production to an existing immutable
+official release lives in `plans/AUTOMATIC-BUILDS-AND-DEPLOY/release/`
+(`.github/workflows/rollback-release.yml` +
+`release/bin/rollback-preflight.sh`, `deploy-rollback.sh`,
+`restore-frontend.sh`, `verify-rollback.sh`, `record-rollback-result.sh` +
+the fixture-tested `release_contract.rollback` decision layer, fixtures under
+`release/fixtures/rollback/`). The offline gate:
+
+```bash
+bash tests/scripts/rollback_test.sh
+```
+
+- **Target selection:** `workflow_dispatch` takes only the `version` of an
+  existing official release (never tags/digests/SHAs). The target must be one
+  of the latest 10 **complete** official sets — every backend ECR
+  `release-<version>` tag resolves to the exact manifest digest AND the
+  immutable frontend prefix marker exists and matches — and must not be the
+  currently running release; draft/tampered/partial/metadata-only releases and
+  any missing or mismatched artifact fail closed.
+- **Control plane:** the `rollback` job is behind the same protected
+  `production` Environment and shared non-cancelling `production-mutation`
+  concurrency group as promotion. A read-only `preflight` job (with job-scoped
+  `id-token: write` for its read-only ECR/S3 scope) runs BEFORE approval; the
+  `rollback` job re-runs the full preflight after approval/lock against a
+  fresh snapshot and fails closed when the revalidated target manifest differs
+  byte-for-byte from the approved one. `approvedBy` is derived from
+  `actions/runs/{run}/approvals`, never `github.actor`.
+- **Mutation:** digest-pinned task-definition revisions are registered via
+  `sanitize-task-definition.sh` + `validate-task-definition.sh` (image-only
+  diff, secrets stay in `secrets[].valueFrom`), services deploy in canonical
+  order with circuit breaker and per-deployment waiters, and the frontend is
+  restored from the retained immutable `_releases/v<version>/` prefix (no
+  `--delete`, marker/index last, invalidation). No ECR tag is minted or moved
+  and no official release is created.
+- **Failure path:** the automatic (non-approval-gated) `compensate` job
+  restores the changed components (including frontend) from this run's
+  pre-rollback snapshot via the shared `compensate-production.sh` (which
+  accepts the literal JSON `--changed` array the workflows pass); a typo'd
+  component key fails closed. The database is never reversed.
+- **Audit record:** `record-rollback-result.sh` writes the rollback result
+  (requester, approver — both mandatory, never defaulted to the run actor —
+  from/to releases with exact digests/checksum, run id, workflow URL,
+  timestamps, outcome) as a separate artifact; the immutable original release
+  manifest is never edited. Write/resume idempotency with `RESULT_CONFLICT`
+  fail-closed.
+
+The live half of the gate — the real owner-approved rollback (release N →
+N-1 → N), the real `production` Environment approval, real ECR/ECS/S3/
+CloudFront mutations and read-backs, real frontend restoration, and the real
+rollback-result artifact — is deferred to the consolidated Pass 3
+verification pass and is not claimed by the offline gate.
+
 ### Release traceability queries (Pass 3, subphase 3.7)
 
 Read-only operator queries answered in both directions live in
@@ -298,6 +352,7 @@ bash tests/scripts/release_traceability_test.sh
 Live lookups against real AWS/GitHub (the read-only live smoke test) are
 deferred to the consolidated Pass 3 verification pass and are not claimed by
 the offline gate.
+
 
 ### Before any AWS work
 - Always run `aws sts get-caller-identity --profile dpm-profile --region eu-north-1` first in any new terminal session

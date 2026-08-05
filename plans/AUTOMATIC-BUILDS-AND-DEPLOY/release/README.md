@@ -534,6 +534,99 @@ record live in
 
 ---
 
+## Owner-approved rollback (subphase 3.6)
+
+Approval-gated rollback of production to an existing immutable official
+release. The offline 3.6 gate:
+
+```bash
+bash tests/scripts/rollback_test.sh
+```
+
+### The decision layer
+
+`release_contract.rollback` (`.github`-adjacent CLI
+`python3 -m release_contract.rollback <command>`) adds the rollback-specific
+decisions and reuses the promotion contract for the shared ones:
+
+- `dispatch` — the dispatch input is the target `version` of an existing
+  official release; image tags, digests, SHAs, and arbitrary versions are never
+  accepted.
+- `select` — resolve the target only from the latest 10 **complete** official
+  release sets: every backend ECR `release-<version>` tag must resolve to the
+  exact manifest digest and the immutable frontend prefix marker must exist and
+  match the manifest. Rejects unknown/non-official/outside-window/corrupt
+  releases and the release currently running (`TARGET_NOT_FOUND`,
+  `TARGET_NOT_OFFICIAL`, `TARGET_ARTIFACT_MISSING`, `TARGET_ARTIFACT_MISMATCH`,
+  `TARGET_OUTSIDE_ROLLBACK_WINDOW`, `TARGET_IS_CURRENT`, `TARGET_MANIFEST_INVALID`).
+- `schema` — the Decision 8 database-compatibility guard: a schema-changing
+  rollback is blocked until the migration review is recorded
+  (`SCHEMA_COMPATIBILITY_UNREVIEWED`). The database is never reversed.
+- `frontend-restore` — restore-only plan: no `--delete`, `fromPrefix` required,
+  live-root marker/index last, CloudFront invalidation required
+  (`FRONTEND_DELETE_FORBIDDEN`, `FRONTEND_PREFIX_MISSING`,
+  `FRONTEND_INVALIDATION_MISSING`, `FRONTEND_ORDER_INVALID`).
+- `result` — the rollback result/audit record (requester, approver, from/to
+  releases with exact digests/checksums, run id, workflow URL, timestamps,
+  outcome, production-verified, audit annotation). Idempotently resumable
+  (`action=write`/`action=resume`); any conflict or missing field fails closed
+  (`RESULT_CONFLICT`, `RESULT_NOT_VERIFIED`, `RESULT_SAME_RELEASE`,
+  `RESULT_AUDIT_NOT_ANNOTATED`, ...). The immutable original release manifest is
+  never edited.
+- `snapshot`/`plan`/`waiter`/`verify`/`compensate` — identical contracts to
+  forward promotion (shared code).
+
+### The shell wrappers and workflow
+
+- `bin/rollback-preflight.sh` — read-only; fetches the official index from
+  GitHub Releases (exact `release-manifest.json` assets), gathers the observed
+  ECR `release-*` digests + frontend prefix markers (+ live `release.json`
+  marker for the current release), runs `select` + `schema`, and prints the
+  current-versus-target summary (identities, digests, task definitions,
+  frontend checksum, source SHAs, database-compatibility warning). Emits the
+  validated target manifest.
+- `bin/deploy-rollback.sh` — registers one digest-pinned task-definition
+  revision per backend (copy + `sanitize-task-definition.sh` image-only
+  replace, `validate-task-definition.sh` hardening) and updates the services in
+  canonical order with circuit breaker and per-deployment waiters bound to this
+  run. Never mints or moves ECR tags and never creates an official release.
+- `bin/restore-frontend.sh` — restores the live root from the retained
+  immutable `_releases/v<version>/` prefix (marker + index.html, no `--delete`)
+  and invalidates the SPA entry paths, with read-back.
+- `bin/verify-rollback.sh` — read-only post-rollback verification (running
+  `containers[].imageDigest`, service task-definition ARNs, frontend marker,
+  ALB health) against the deployment manifest; a paused environment fails
+  closed (`RUNNING_TASKS_MISSING`), never fabricated success.
+- `bin/record-rollback-result.sh` — builds and validates the rollback result /
+  audit annotation (JSON on stdout, diagnostics on stderr). `--requester` and
+  `--approver` are mandatory (the approver is derived by the workflow from the
+  GitHub environment-approval evidence, never the run actor).
+- `.github/workflows/rollback-release.yml` — manual dispatch (`version` +
+  requester + schema-change inputs); read-only `preflight` job before the
+  protected `production` Environment (job-scoped `id-token: write` for its
+  read-only ECR/S3 scope); the `rollback` job re-runs the full
+  preflight post-approval under the shared non-cancelling `production-mutation`
+  concurrency group — and fails closed if the revalidated manifest differs
+  byte-for-byte from the approved one — then snapshots, deploys, restores the
+  frontend, verifies, and derives `approvedBy` from
+  `actions/runs/{run}/approvals` (never `github.actor`); automatic `compensate`
+  job restores the pre-rollback snapshot on failure via the shared
+  `compensate-production.sh` (which accepts the literal JSON `--changed` array
+  the workflow passes; a typo'd component key fails closed). The validated
+  target manifest is consumed from the exact producing run via download-artifact
+  pinned to `run-id: ${{ github.run_id }}`.
+
+### Deferred live checks
+
+These are **not** claimed by the offline gate and are verified in the
+consolidated pass against real AWS/GitHub state: the real owner-approved
+rollback (release N → N-1 → N), the real `production` Environment approval,
+real ECR/ECS/S3/CloudFront mutations and read-backs, real frontend restoration,
+and the real rollback-result artifact. The offline gate exercises every script
+against fixtures and a stateful AWS + `gh` stub only.
+
+---
+
 ## Traceability queries and operator evidence (subphase 3.7)
 
 Read-only operator queries answered in both directions. The offline 3.7 gate:
@@ -616,6 +709,9 @@ production AWS state and real GitHub Releases) is **not** claimed by the
 offline gate and is executed in the consolidated verification pass. The gate
 proves the live gather path (identity preflight, exact read-only calls, no
 mutations) with a stateful AWS stub plus a `gh` stub.
+
+---
+
 
 ---
 

@@ -14,7 +14,6 @@ set -euo pipefail
 REPO_ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)
 RELEASE="$REPO_ROOT/plans/AUTOMATIC-BUILDS-AND-DEPLOY/release"
 FX="$RELEASE/fixtures/rollback"
-VALID="$RELEASE/fixtures/valid"
 ROLLBACK_WF="$REPO_ROOT/.github/workflows/rollback-release.yml"
 
 fail() {
@@ -175,6 +174,34 @@ if concurrency.get("group") != "production-mutation":
 if concurrency.get("cancel-in-progress") is not False:
     problems.append("production concurrency must set cancel-in-progress: false")
 
+# Every job that assumes the AWS role must be able to mint an OIDC token: a
+# job-level `permissions:` block REPLACES the workflow-level permissions, so a
+# configure-aws-credentials job needs `id-token: write` declared explicitly.
+workflow_permissions = wf.get("permissions") or {}
+for job_name, job in jobs.items():
+    if not isinstance(job, dict):
+        continue
+    steps = job.get("steps") or []
+    assumes_aws = any(
+        isinstance(step, dict)
+        and str(step.get("uses", "")).startswith("aws-actions/configure-aws-credentials@")
+        for step in steps
+    )
+    if not assumes_aws:
+        continue
+    job_permissions = job.get("permissions")
+    if isinstance(job_permissions, dict):
+        if job_permissions.get("id-token") != "write":
+            problems.append(
+                job_name + " job assumes the AWS role but its permissions block "
+                "lacks id-token: write"
+            )
+    elif workflow_permissions.get("id-token") != "write":
+        problems.append(
+            job_name + " job assumes the AWS role but the workflow permissions "
+            "lack id-token: write"
+        )
+
 # No rebuild and no tag minting: rollback consumes existing official bytes.
 text = str(wf)
 for forbidden in ("build-push-action", "publish-candidate-image.sh", "promote-image-digest.sh",
@@ -208,9 +235,27 @@ if re.search(r"approvedBy:\s*\$\{\{\s*github\.actor", text):
     problems.append("approvedBy must never be set from the run actor (github.actor)")
 
 # The validated target manifest is consumed from the exact producing run (the
-# pre-approval preflight) via download-artifact pinned to this run.
-if "download-artifact" not in text or "run-id: ${{ github.run_id }}" not in text:
+# pre-approval preflight) via download-artifact pinned to this run. `str(wf)`
+# is a Python repr where string values are quoted, so a literal
+# "run-id: ${{ github.run_id }}" search can never match; read the parsed
+# structure instead.
+download_steps = [
+    (job_name, step)
+    for job_name, job in jobs.items()
+    if isinstance(job, dict)
+    for step in (job.get("steps") or [])
+    if isinstance(step, dict)
+    and str(step.get("uses", "")).startswith("actions/download-artifact@")
+]
+if "download-artifact" not in text or not download_steps:
     problems.append("the rollback target manifest must be consumed from the exact producing run")
+for job_name, step in download_steps:
+    download_with = step.get("with") or {}
+    if download_with.get("run-id") != "${{ github.run_id }}":
+        problems.append(
+            "the " + job_name + " download-artifact step must be pinned to run-id: "
+            "${{ github.run_id }} of this exact run"
+        )
 
 # Snapshot/compensation compatibility: the workflow reuses the shared
 # snapshot-production.sh and compensate-production.sh tooling.
@@ -449,15 +494,16 @@ PY
 
 # A task-definition entry that passes the hardening validator once the image is
 # replaced with a digest pin (sanitize-task-definition.sh handles the image).
+# Usage: td_entry <state.json> <task-definition-arn> <image>
 td_entry() {
-  python3 - "$TMP/state.json" "$1" "$2" <<'PY'
+  python3 - "$1" "$2" "$3" <<'PY'
 import json
 import sys
 
 state = json.load(open(sys.argv[1], encoding="utf-8"))
 arn, image = sys.argv[2], sys.argv[3]
 name = arn.split("/")[-1].split(":")[0]
-container = {"auth": "auth", "onlineshop-items": "items", "onlineshop-api-gateway": "api-gateway"}.get(name, name)
+container = {"onlineshop-auth": "auth", "onlineshop-items": "items", "onlineshop-api-gateway": "api-gateway"}.get(name, name)
 port = {"onlineshop-auth": 9001, "onlineshop-items": 9000, "onlineshop-api-gateway": 10000}.get(name, 10000)
 entry = {
     "family": name,
@@ -620,15 +666,23 @@ export GITHUB_TOKEN=t
 # ---------------------------------------------------------------------------
 echo "[ 4/9] rollback-preflight.sh (offline index/observed inputs)"
 stub_state_rollback
-assert_success bash "$RELEASE/bin/rollback-preflight.sh" \
+OUT=$(bash "$RELEASE/bin/rollback-preflight.sh" \
   --version 1.1.0 \
   --index "$FX/index.json" \
   --observed "$FX/observed-ok.json" \
   --schema-change absent --migration-reviewed false \
   --target-manifest "$TMP/target.json" \
-  --profile dpm-profile --region eu-north-1
+  --profile dpm-profile --region eu-north-1)
 jq -e '.release.version == "1.1.0"' "$TMP/target.json" >/dev/null \
   || fail "rollback-preflight must emit the validated target manifest"
+# The pre-approval summary shows current versus target identities, digests,
+# task definitions, frontend checksum, source SHAs, and the db warning.
+assert_contains "$OUT" "to:      version=1.1.0 gitTag=v1.1.0 sourceSha=deadbeefcafebabe1234567890abcdef12345678"
+assert_contains "$OUT" "to:      auth=sha256:1111111111111111111111111111111111111111111111111111111111111111 items=sha256:2222222222222222222222222222222222222222222222222222222222222222 gateway=sha256:3333333333333333333333333333333333333333333333333333333333333333"
+assert_contains "$OUT" "to:      taskDefs auth=arn:aws:ecs:eu-north-1:799111666795:task-definition/onlineshop-auth:3 items=arn:aws:ecs:eu-north-1:799111666795:task-definition/onlineshop-items:3 gateway=arn:aws:ecs:eu-north-1:799111666795:task-definition/onlineshop-api-gateway:11"
+assert_contains "$OUT" "from:    version=1.2.1 sourceSha=a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4"
+assert_contains "$OUT" "from:    digests auth=sha256:50310c92745326299ce463ebd8ad2279a4ff0386a3701246e48165c65d5682b0"
+assert_contains "$OUT" "db:      no schema change declared"
 # Unreviewed schema change fails closed.
 OUT=$(bash "$RELEASE/bin/rollback-preflight.sh" \
   --version 1.1.0 \
@@ -702,6 +756,23 @@ assert_contains "$OUT" "RUNNING_DIGEST_MISMATCH"
 if grep -Eq ' (put|create|update|delete|register|run)-' "$TMP/calls.txt"; then
   fail "verify-rollback.sh must be read-only"
 fi
+# A paused production environment (no running tasks) cannot be verified as a
+# successful rollback — the same fail-closed rule as forward promotion
+# (RUNNING_TASKS_MISSING), never fabricated success.
+stub_state_rollback
+python3 - "$TMP/state.json" <<PY
+import json, sys
+with open(sys.argv[1], encoding="utf-8") as h:
+    state = json.load(h)
+state["ecs"]["taskArns"] = {}
+state["ecs"]["tasks"] = []
+with open(sys.argv[1], "w", encoding="utf-8") as h:
+    json.dump(state, h, indent=2, sort_keys=True)
+PY
+OUT=$(bash "$RELEASE/bin/verify-rollback.sh" \
+  --manifest "$FX/deployment-manifest.json" \
+  --profile dpm-profile --region eu-north-1 2>&1) && fail "verify-rollback on a paused environment must fail closed"
+assert_contains "$OUT" "RUNNING_TASKS_MISSING"
 
 # ---------------------------------------------------------------------------
 echo "[ 7/9] restore-frontend.sh (restore live root from the immutable prefix)"
@@ -734,6 +805,8 @@ fi
 # ---------------------------------------------------------------------------
 echo "[ 8/9] record-rollback-result.sh (audit record + idempotent resume)"
 stub_state_rollback
+# The result record is JSON on stdout; diagnostics (including the decision
+# action) go to stderr. Capture the streams separately.
 OUT=$(bash "$RELEASE/bin/record-rollback-result.sh" \
   --manifest "$FX/deployment-manifest.json" \
   --snapshot "$FX/snapshot.json" \
@@ -741,10 +814,14 @@ OUT=$(bash "$RELEASE/bin/record-rollback-result.sh" \
   --workflow-url "https://github.com/Djimi/OnlineShop-full-stack/actions/runs/123456791" \
   --requester djimi --approver djimi \
   --outcome success \
-  --profile dpm-profile --region eu-north-1 2>&1)
-assert_contains "$OUT" "action=write"
+  --profile dpm-profile --region eu-north-1 2>"$TMP/result.err")
+assert_contains "$(cat "$TMP/result.err")" "action=write"
 printf '%s' "$OUT" | jq -e '.result.from.version == "1.2.1" and .result.to.version == "1.1.0"' >/dev/null \
   || fail "record-rollback-result must record from/to releases"
+printf '%s' "$OUT" | jq -e '.result.requester == "djimi" and .result.approver == "djimi" and .result.outcome == "success"' >/dev/null \
+  || fail "record-rollback-result must record requester/approver/outcome"
+printf '%s' "$OUT" | jq -e '.result.runId == 123456791 and (.result.workflowUrl | contains("123456791"))' >/dev/null \
+  || fail "record-rollback-result must record the run id and workflow URL"
 # Idempotent resume: the same record resumes instead of writing a conflict.
 OUT=$(bash "$RELEASE/bin/record-rollback-result.sh" \
   --manifest "$FX/deployment-manifest.json" \
@@ -754,8 +831,8 @@ OUT=$(bash "$RELEASE/bin/record-rollback-result.sh" \
   --requester djimi --approver djimi \
   --outcome success \
   --existing-result "$FX/result-ok.json" \
-  --profile dpm-profile --region eu-north-1 2>&1)
-assert_contains "$OUT" "action=resume"
+  --profile dpm-profile --region eu-north-1 2>"$TMP/result.err")
+assert_contains "$(cat "$TMP/result.err")" "action=resume"
 # A conflicting existing record fails closed.
 OUT=$(bash "$RELEASE/bin/record-rollback-result.sh" \
   --manifest "$FX/deployment-manifest.json" \
@@ -765,8 +842,8 @@ OUT=$(bash "$RELEASE/bin/record-rollback-result.sh" \
   --requester djimi --approver djimi \
   --outcome success \
   --existing-result "$FX/result-conflict.json" \
-  --profile dpm-profile --region eu-north-1 2>&1) && fail "conflicting existing result must fail"
-assert_contains "$OUT" "RESULT_CONFLICT"
+  --profile dpm-profile --region eu-north-1 2>"$TMP/result.err") && fail "conflicting existing result must fail"
+assert_contains "$(cat "$TMP/result.err")" "RESULT_CONFLICT"
 
 # ---------------------------------------------------------------------------
 echo "[ 9/9] Static scan: mandatory profile/region, no secrets, no tag minting"
@@ -782,7 +859,9 @@ for script in \
   # shellcheck disable=SC2094  # read-only scan; $script is only read, never written
   while IFS= read -r line; do
     [[ "$line" =~ ^[[:space:]]*# ]] && continue
-    if [[ "$line" =~ (^|[^a-zA-Z_])(aws|"aws")[[:space:]] ]]; then
+    # Match only real invocations (line-start or $() command substitution),
+    # never `aws` mentioned inside an echo/diagnostic string.
+    if [[ "$line" =~ ^[[:space:]]*aws[[:space:]] ]] || [[ "$line" =~ \$\(aws[[:space:]] ]]; then
       # shellcheck disable=SC2016
       [[ "$line" == *'${AWS_ARGS[@]}'* ]] || fail "$(basename "$script") aws call missing AWS_ARGS: $line"
     fi
@@ -805,8 +884,10 @@ if rg -n 'PGPASSWORD|password.*[=:]|s3cr3t|plaintext-secret|ghp_[A-Za-z0-9]' \
   "$RELEASE"/bin/record-rollback-result.sh "$ROLLBACK_WF"; then
   fail "a secret-looking value appears in the rollback tooling"
 fi
-# The restore plan must be restore-only (never --delete).
-if grep -q -- "--delete" "$RELEASE/bin/restore-frontend.sh"; then
+# The restore plan must be restore-only: no actual command may use --delete
+# (the word may legitimately appear in comments that document the constraint).
+# shellcheck disable=SC2094  # read-only scan; $script is only read, never written
+if grep -- "--delete" <(grep -v '^[[:space:]]*#' "$RELEASE/bin/restore-frontend.sh"); then
   fail "restore-frontend.sh must never use --delete"
 fi
 # The rollback scripts must consume the shared snapshot/compensation tooling
@@ -814,6 +895,23 @@ fi
 if ! grep -q "snapshot-production.sh" "$ROLLBACK_WF" || ! grep -q "compensate-production.sh" "$ROLLBACK_WF"; then
   fail "the rollback workflow must reuse the shared snapshot/compensation tooling"
 fi
+# The compensate wiring must work end-to-end with the same literal JSON array
+# the rollback workflow passes as --changed (compensate-production.sh accepts
+# an inline array as well as a file; a typo'd component key fails closed).
+stub_state_rollback
+OUT=$(bash "$RELEASE/bin/compensate-production.sh" \
+  --snapshot "$FX/snapshot.json" \
+  --changed '["frontend","auth","items","apiGateway"]' \
+  --dry-run \
+  --profile dpm-profile --region eu-north-1 2>&1)
+assert_contains "$OUT" "dry-run"
+assert_contains "$OUT" "apiGateway"
+OUT=$(bash "$RELEASE/bin/compensate-production.sh" \
+  --snapshot "$FX/snapshot.json" \
+  --changed '["frontend","auth","items","apiGatewayg"]' \
+  --dry-run \
+  --profile dpm-profile --region eu-north-1 2>&1) && fail "unknown changed component must fail closed"
+assert_contains "$OUT" "unknown component"
 
 # Lint (ruff + shellcheck + git diff --check).
 if command -v ruff >/dev/null 2>&1; then

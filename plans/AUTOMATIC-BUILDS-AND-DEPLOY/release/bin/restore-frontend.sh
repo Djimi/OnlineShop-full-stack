@@ -26,6 +26,7 @@ set -euo pipefail
 # Exit 0 on success; 1 on any fail-closed check; 2 on usage/IO error.
 
 RELEASE="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
+REPO_ROOT="$(cd -- "$RELEASE/../../.." && pwd)"
 # shellcheck source=release-input.sh
 # shellcheck disable=SC1091  # path is computed at runtime; file is linted explicitly
 source "$RELEASE/bin/release-input.sh"
@@ -56,6 +57,16 @@ AWS_ARGS=(--profile "$PROFILE" --region "$REGION")
 
 [ -n "$MANIFEST" ] && [ -n "$BUCKET" ] && [ -n "$DISTRIBUTION" ] || { usage; exit 2; }
 rl_assert_regular_file "$MANIFEST" || exit 2
+[ -f "$REPO_ROOT/scripts/config/production.env" ] || {
+  echo "ERROR: missing scripts/config/production.env" >&2
+  exit 1
+}
+# shellcheck source=/dev/null
+source "$REPO_ROOT/scripts/config/production.env"
+[ "$LC_PROFILE" = "dpm-profile" ] && [ "$LC_REGION" = "eu-north-1" ] || {
+  echo "ERROR: scripts/config/production.env profile/region drift" >&2
+  exit 1
+}
 
 VERSION=$(jq -r '.release.version' "$MANIFEST")
 PREFIX=$(jq -r '.components.frontend.releasePrefix' "$MANIFEST")
@@ -75,6 +86,10 @@ if [ "$RC" -ne 0 ] || [ -z "$IDENTITY_ACCOUNT" ]; then
   sed -n '1,3p' "$TMP/identity.err" >&2 || true
   exit 1
 fi
+[ "$IDENTITY_ACCOUNT" = "$LC_ACCOUNT_ID" ] || {
+  echo "ERROR: identity preflight failed; account $IDENTITY_ACCOUNT != $LC_ACCOUNT_ID" >&2
+  exit 1
+}
 
 # The restore plan must be valid before any mutation (restore-only: no --delete,
 # prefix present, marker + index last, invalidation required).

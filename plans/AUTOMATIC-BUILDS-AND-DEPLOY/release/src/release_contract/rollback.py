@@ -652,8 +652,10 @@ def result_issues(state: Any) -> Decision:
             _issue("RESULT_WORKFLOW_MISSING", "result.workflowUrl", "the workflow URL is required")
         )
     timestamps = result.get("timestamps")
-    if not isinstance(timestamps, dict) or not timestamps.get("startedAt") or not timestamps.get(
-        "completedAt"
+    if (
+        not isinstance(timestamps, dict)
+        or not timestamps.get("startedAt")
+        or not timestamps.get("completedAt")
     ):
         issues.append(
             _issue(

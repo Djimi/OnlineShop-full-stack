@@ -2410,3 +2410,107 @@ CLI rejects invalid JSON with exit 2.
 **Deferred live checks (consolidated verification pass):** the read-only smoke
 test of `trace.sh commit/release/running/digest/audit` against real production
 AWS state and real GitHub Releases.
+
+## Pass 3, subphase 3.6 — Owner-approved rollback (completed offline, 2026-08-04)
+
+The 3.6 implementation surface left by an intentionally stopped OpenCode run
+was independently reviewed, repaired, and verified. Offline only — no AWS CLI
+call, no GitHub mutation, no workflow run, no production/staging action.
+
+Repairs applied during this session:
+
+| Repair | What was wrong | Fix |
+|---|---|---|
+| `tests/scripts/rollback_test.sh` step 3 static check | The literal `run-id: ${{ github.run_id }}` search can never match `str(wf)` (Python repr quotes values) | Structural check reads the parsed `download-artifact@` steps and requires each to pin `run-id` to this run |
+| `tests/scripts/rollback_test.sh` stub `td_entry` | Python invocation passed the state path twice (`"$TMP/state.json" "$1" "$2"` while call sites pass state/ARN/image), so the ARN never reached `sys.argv[2]` and `describe-task-definition` returned NotFound | Pass `"$1" "$2" "$3"` through in order |
+| `tests/scripts/rollback_test.sh` stub container map | Key `"auth"` instead of `"onlineshop-auth"` left the stub TD container named `onlineshop-auth`, so `sanitize-task-definition.sh --set-image auth=...` failed with `MISSING_CONTAINER` | Correct key map (auth/items/api-gateway container names) |
+| `release/bin/record-rollback-result.sh` | `--argjson auth sha256:...` — `jq -r` strips quotes, so `--argjson` received invalid JSON | Use `--arg` for the six digest values |
+| `release/bin/record-rollback-result.sh` | The OK echo polluted stdout so the gate's `jq` parse failed | JSON on stdout, diagnostics on stderr (documented in the header) |
+| `tests/scripts/rollback_test.sh` step 9 scan | Loose `(aws|"aws")[[:space:]]` regex matched `aws sts` inside an echo message | Aligned with the promotion gate: only real invocations (`^aws ` / `$(aws `) are scanned |
+| Comment wording | The phrase `ecr:PutImage` in two header comments tripped the no-tag-minting scan | Rephrased to "no ECR image-write permission" |
+| `tests/scripts/rollback_test.sh` `--delete` scan | Whole-file grep hit comments documenting the no-`--delete` rule | Skip comment lines |
+| `tests/scripts/rollback_test.sh` | Unused `VALID` variable | Removed |
+| `release/src/release_contract/rollback.py` | `ruff format --check` flagged the timestamps condition | Formatted |
+
+Coverage added during review: pre-approval summary assertions (target
+task-definition ARNs, current per-component digests — checkbox 3) and a
+paused-environment fail-closed test (`RUNNING_TASKS_MISSING` — checkbox 5).
+
+| Path | Purpose |
+|---|---|
+| `.github/workflows/rollback-release.yml` | Manual `workflow_dispatch` rollback (input `version` + requester + schema-change booleans); read-only `preflight` job before the protected `production` Environment → `rollback` job re-runs the full preflight after approval/lock, snapshots, deploys digest-pinned revisions, restores the frontend, verifies, and records the result; `approvedBy` from `actions/runs/{run}/approvals`, never `github.actor`; target manifest consumed from the exact producing run (download-artifact pinned to `run-id`); automatic `compensate` job (`if: failure()` on `rollback`); shared non-cancelling `production-mutation` concurrency; never rebuilds, never mints tags, never creates a release |
+| `release/src/release_contract/rollback.py` | Fixture-tested decision layer: dispatch / select (latest 10 complete official sets) / schema (Decision 8) / frontend-restore (no `--delete`) / result (write/resume/conflict) plus reused snapshot/plan/waiter/verify/compensate promotion contract |
+| `release/bin/rollback-preflight.sh` | Read-only: GitHub index fetch, observed ECR/prefix-marker gather, selection + schema guard, current-versus-target summary (identities, digests, task definitions, frontend checksum, source SHAs, db warning), emits the validated target manifest |
+| `release/bin/deploy-rollback.sh` | Copy current TDs from the snapshot → `sanitize-task-definition.sh` (image-only) → `validate-task-definition.sh` → register with read-back → canonical-order service updates with circuit breaker and per-deployment waiters |
+| `release/bin/verify-rollback.sh` | Read-only post-rollback verification (running digests, service TD ARNs, frontend marker, ALB health); paused environment fails closed (`RUNNING_TASKS_MISSING`) |
+| `release/bin/restore-frontend.sh` | Restore the live root from the retained immutable `_releases/v<version>/` prefix, no `--delete`, marker/index last, CloudFront invalidation, read-back |
+| `release/bin/record-rollback-result.sh` | Rollback result/audit record (requester, approver, from/to with exact artifacts, timestamps, workflow URL, outcome); idempotent write/resume, conflict fail-closed; JSON on stdout |
+| `release/fixtures/rollback/*` | 22 fixtures (index/observed current-missing-tampered, schema, frontend-restore, result, snapshot, verify, deployment manifest) |
+| `release/tests/test_rollback.py` | 276 lines of unit tests (dispatch, selection incl. 12-release window, schema guard, frontend restore, result, reused promotion decisions) |
+| `tests/scripts/rollback_test.sh` | 3.6 offline verification gate (9 sections, stateful AWS + `gh` stubs) |
+
+Commands run (local only, no AWS profile/region involved):
+
+```bash
+bash tests/scripts/rollback_test.sh
+bash tests/scripts/release_contract_test.sh
+bash tests/scripts/candidate_evidence_test.sh
+bash tests/scripts/ecr_release_tagging_test.sh
+bash tests/scripts/promotion_test.sh
+bash tests/scripts/production_hardening_test.sh
+bash tests/scripts/release_traceability_test.sh
+bash tests/scripts/lifecycle_test.sh
+(cd plans/AUTOMATIC-BUILDS-AND-DEPLOY/release && ruff check . && ruff format --check .)
+shellcheck tests/scripts/rollback_test.sh \
+  plans/AUTOMATIC-BUILDS-AND-DEPLOY/release/bin/rollback-preflight.sh \
+  plans/AUTOMATIC-BUILDS-AND-DEPLOY/release/bin/deploy-rollback.sh \
+  plans/AUTOMATIC-BUILDS-AND-DEPLOY/release/bin/verify-rollback.sh \
+  plans/AUTOMATIC-BUILDS-AND-DEPLOY/release/bin/restore-frontend.sh \
+  plans/AUTOMATIC-BUILDS-AND-DEPLOY/release/bin/record-rollback-result.sh
+```
+
+Verification result: all eight offline gates pass (391 Python tests),
+`ruff check`/`ruff format --check` clean, shellcheck clean, `git diff --check`
+clean, no secrets in the rollback tooling (secrets remain in
+`secrets[].valueFrom`). All shell runs used the stateful AWS + `gh` stubs only.
+No AWS CLI command was run against the real account and no production or
+staging environment was touched.
+
+**Deferred live checks (consolidated verification pass):** the real
+owner-approved rollback (release N → N-1 → N with exact backend digests and
+frontend checksum after each transition), the real `production` Environment
+approval, real ECR/ECS/S3/CloudFront mutations and read-backs, real frontend
+restoration, and the real rollback-result artifact.
+
+## Pass 3, subphase 3.6 — independent review fixes (2026-08-04, offline)
+
+An independent review re-verified the 3.6 implementation with fresh eyes
+(after the completing run) and applied four further fixes plus gate and
+documentation updates. All checks remain offline — no AWS CLI call, no GitHub
+mutation, no workflow run.
+
+| Fix | What was wrong | Fix |
+|---|---|---|
+| `rollback-release.yml` preflight job permissions | The job-level `permissions:` block (`contents: read` + `actions: read`) REPLACES the workflow-level permissions, so the preflight job had no `id-token: write` — `configure-aws-credentials` could never mint the OIDC token and the pre-approval AWS reads (ECR/S3) would fail the workflow before approval | Added `id-token: write` to the preflight job (it needs read-only AWS scope, unlike the promotion preflight which has no AWS access) |
+| `rollback_test.sh` step 3 static checks | No check proved a job that assumes the AWS role can actually mint an OIDC token | Added a static check: every `configure-aws-credentials` job must have `id-token: write` (job-level or workflow-level) |
+| `compensate-production.sh` `--changed` | The tool required `--changed` to be a FILE (`rl_assert_regular_file`), but BOTH `promote-release.yml` and `rollback-release.yml` pass a literal inline JSON array — the automatic compensate job would fail at runtime (`not a regular file`) even when the snapshot was perfectly restorable, leaving a mixed-state incident instead of restoring | The tool now accepts a literal JSON array as well as a file, validates it, and rejects unknown component keys (a typo must never silently skip a component) |
+| `record-rollback-result.sh` requester/approver | `REQUESTER="${REQUESTER:-$GITHUB_ACTOR}"` / `APPROVER="${APPROVER:-$GITHUB_ACTOR}"` — a missing `--approver` silently recorded the run actor, violating "approver never from `github.actor`" | Both are now mandatory tool inputs; missing ones fail closed with a usage error |
+| `rollback-release.yml` post-approval revalidation | The fresh preflight output was silently overwritten by the downloaded pre-approval manifest (`cp`); a divergent revalidated manifest would not be detected | The fresh preflight writes to a separate file and `cmp` fails closed when the post-approval bytes differ from the approved ones; the deployment consumes the exact pre-approval bytes |
+| `restore-frontend.sh` identity preflight | It verified the STS call succeeded but never compared the account to the configured production account (all other rollback scripts do) | Now sources `scripts/config/production.env` and fails closed on account mismatch |
+
+Gate updates: `rollback_test.sh` step 3 gained the `id-token` static check;
+step 9 gained an end-to-end `compensate-production.sh` run with the literal
+JSON `--changed` array the workflow passes (plus a typo'd-key fail-closed
+case); `promotion_test.sh` step 7 gained the same inline-array checks because
+the promote workflow shares the same wiring.
+
+Documentation updates: `AGENTS.md` gained the missing subphase 3.6 section;
+`03_RELEASE_TRACEABILITY.md` 3.6 checkbox 8 and the verification-gate
+paragraph now state the mandatory requester/approver inputs, the preflight
+job's `id-token: write`, the byte-comparison fail-closed guard, and the
+inline `--changed` array; `release/README.md` rollback section updated
+accordingly.
+
+Re-verified after the fixes: all eight offline gates pass (391 Python tests),
+`ruff check` clean, shellcheck clean, `git diff --check` clean.
+
