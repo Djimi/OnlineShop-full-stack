@@ -2658,3 +2658,6 @@ did not install the release contract's pinned Python requirements, leaving
 `referencing` unavailable to the validator. The workflow now sets up Python
 and installs `release/requirements.txt` before producer-set validation; the
 local candidate-evidence gate passes, with merged-main verification pending.
+The first merged-main rerun then stopped during candidate-evidence setup
+because the copied `actions/setup-python` SHA was not resolvable; the workflow
+now uses the verified v5 commit SHA.
