@@ -191,13 +191,19 @@ This required updating the staging task definitions' container `portMappings[].n
 
 ### 4.3 On-Demand Model
 
-All 3 staging ECS services have `desiredCount: 0` by default. When a deployment is triggered (push to `main`), the `ci-deploy-staging.sh` script:
+All 3 staging ECS services have `desiredCount: 0` by default. When a
+deployment is triggered (push to `main`), the `e2e-staging` job first calls
+`resume-staging.sh --on-demand --defer-services` so clean RDS bootstrap and ALB
+setup complete while ECS remains stopped. Then `ci-deploy-staging.sh`:
 1. Registers new task definitions with the new image tag
 2. Updates each service to `desiredCount: 1`
-3. Waits up to 60s for services to stabilize
+3. Waits for services to stabilize
 4. The `e2e-staging` job runs E2E tests against the staging ALB
 
-After verification, the services can be manually scaled back to 0. An automated teardown step can be added in Pass 3.
+After verification, the always-run teardown scales services back to 0 and
+removes the temporary ALB and RDS instance. The operator-facing
+`resume-staging.sh` default still starts services; `--defer-services` is the
+CI-only ordering guard.
 
 ### 4.4 Provisioning Issues & Fixes
 

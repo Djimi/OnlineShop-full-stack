@@ -662,9 +662,22 @@ the subnet-group resource that RDS evaluates for this create operation. The
 policy now includes only the isolated staging subnet group ARN, and
 `release/tests/test_iam.py` verifies both the DB and subnet-group scopes.
 
-Live inline-policy application/read-back and a fresh main-run verification are
-not claimed yet: the local `dpm-profile` AWS session expired before the live
-change could be applied.
+After AWS re-authentication, the live inline policy was applied and read back
+after each mutation. The first corrected run reached clean RDS bootstrap,
+candidate deployment, healthy ALB targets, and teardown. It exposed two more
+issues, both fixed in source: the missing read-only network/ELB actions were
+added with the least scope supported by the APIs (target-group attributes
+require `Resource: "*"`), and CI was starting stale ECS images before
+candidate deployment. `resume-staging.sh --defer-services` now keeps ECS at
+zero until `ci-deploy-staging.sh` installs the candidate (PR #39).
+
+The corrected run was [31265257478](https://github.com/Djimi/OnlineShop-full-stack/actions/runs/31265257478), job
+`93122636659`. Infrastructure and deployment passed; E2E then identified a
+cold Auth lookup that exceeded the gateway's effective timeout and was
+misreported as 502. The gateway now uses an explicit annotation-backed
+5-second `TimeLimiterRegistry` and unwraps `CompletionException` so genuine
+timeouts retain 504 classification. Source tests pass; the next merged-main
+run is the live confirmation of this final application fix.
 
 ### 3.5 Existing production environment hardening ✅ (offline; live checks deferred)
 

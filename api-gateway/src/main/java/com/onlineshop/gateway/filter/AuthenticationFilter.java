@@ -26,6 +26,8 @@ import java.util.Enumeration;
 import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.CompletionException;
+import java.util.concurrent.ExecutionException;
 
 @Component
 @Slf4j
@@ -114,9 +116,31 @@ public class AuthenticationFilter extends OncePerRequestFilter {
             log.error("Auth service timeout: {}", e.getMessage());
             sendGatewayTimeoutResponse(request, response, "Authentication service request timed out", path);
         } catch (Exception e) {
-            log.error("Unexpected error during authentication: {}", e.getMessage(), e);
-            sendBadGatewayResponse(request, response, "An unexpected error occurred during authentication", path);
+            Throwable cause = unwrapCompletionException(e);
+
+            if (cause instanceof ServiceUnavailableException serviceUnavailableException) {
+                log.error("Auth service unavailable: {}", serviceUnavailableException.getMessage());
+                sendServiceUnavailableResponse(request, response,
+                        "Authentication service is temporarily unavailable", path);
+            } else if (cause instanceof GatewayTimeoutException gatewayTimeoutException) {
+                log.error("Auth service timeout: {}", gatewayTimeoutException.getMessage());
+                sendGatewayTimeoutResponse(request, response,
+                        "Authentication service request timed out", path);
+            } else {
+                log.error("Unexpected error during authentication: {}", e.getMessage(), e);
+                sendBadGatewayResponse(request, response,
+                        "An unexpected error occurred during authentication", path);
+            }
         }
+    }
+
+    private Throwable unwrapCompletionException(Throwable throwable) {
+        Throwable cause = throwable;
+        while ((cause instanceof CompletionException || cause instanceof ExecutionException)
+                && cause.getCause() != null) {
+            cause = cause.getCause();
+        }
+        return cause;
     }
 
     private void sendBadRequestResponse(HttpServletRequest request, HttpServletResponse response,

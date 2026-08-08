@@ -17,6 +17,10 @@
 - **Rate limiting**: Distributed limits via Bucket4j + Redis.
 - **Resilience & observability**: Retries/timeouts/circuit breakers (Resilience4j) + Micrometer metrics.
 
+The Docker Compose/E2E stack sets `GATEWAY_RATELIMIT_ENABLED=false` because
+rate limiting is optional for local validation. The staging/production task
+definitions make the same choice explicitly; token caching still uses Redis.
+
 ## Contracts (Examples)
 
 - **Public routes** (no auth): `/auth/**`
@@ -36,7 +40,8 @@ curl -H "Authorization: Bearer <token>" \
 3. /items/** → require Authorization: Bearer <token>
 4. Validate token: L1 cache → L2 cache → Auth service
 5. On success → add X-User-Id, X-Username headers → forward
-6. On failure → 401 Unauthorized
+6. On invalid/expired token → 401 Unauthorized; downstream Auth unavailable →
+   503; Auth validation timeout → 504
 ```
 
 ## Token Validation Caching

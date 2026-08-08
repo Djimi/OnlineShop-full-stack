@@ -83,6 +83,7 @@
 - Production start: `bash scripts/resume-playground.sh`
 - Production stop: `bash scripts/pause-playground.sh`
 - Staging start: `bash scripts/resume-staging.sh`
+- CI staging provisioning: `bash scripts/resume-staging.sh --on-demand --defer-services`, followed by `bash scripts/ci-deploy-staging.sh sha-<full-sha>`
 - Staging stop: `bash scripts/pause-staging.sh`
 
 Staging stop scales ECS to zero, deletes its ALB, and deletes its RDS instance
@@ -101,6 +102,9 @@ stop and ensures every normal staging run starts from deterministic source data.
   - [x] Verify schema, permissions, and seed data before deploying services
   - [x] Run E2E against the clean environment
   - [x] Delete staging RDS without retaining a data snapshot after validation
+- [x] Keep ECS services stopped during CI infrastructure/bootstrap, then deploy
+  the candidate task definitions before starting them (prevents stale image
+  startup)
 - [x] Make clean bootstrap failure-safe: if initialization, deployment, or E2E
   fails, run staging teardown while preserving logs and failure diagnostics.
 - [x] Remove the staging runtime dependency on
