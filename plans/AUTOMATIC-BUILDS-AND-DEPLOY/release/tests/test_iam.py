@@ -160,6 +160,7 @@ class IamPolicyValidationTests(unittest.TestCase):
         statements = {statement["Sid"]: statement for statement in policy["Statement"]}
         network_actions = set(statements["ValidateIsolatedStagingNetwork"]["Action"])
         self.assertIn("ec2:DescribeInternetGateways", network_actions)
+        self.assertIn("ec2:DescribeAvailabilityZones", network_actions)
         self.assertEqual(
             statements["ReadStagingTargetGroupAttributes"]["Action"],
             "elasticloadbalancing:DescribeTargetGroupAttributes",
