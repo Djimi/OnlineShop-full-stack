@@ -94,6 +94,23 @@ class IamPolicyValidationTests(unittest.TestCase):
                 msg=f"candidate-build must not hold {action}",
             )
 
+    def test_staging_rds_create_scopes_the_subnet_group(self):
+        policy = load_policy("github-actions-staging-deploy-policy.json")
+        rds_statement = next(
+            statement
+            for statement in policy["Statement"]
+            if statement.get("Sid") == "ManageEphemeralStagingDatabase"
+        )
+        resources = set(rds_statement["Resource"])
+        self.assertIn(
+            "arn:aws:rds:eu-north-1:799111666795:db:onlineshop-staging-postgres",
+            resources,
+        )
+        self.assertIn(
+            "arn:aws:rds:eu-north-1:799111666795:subgrp:onlineshop-staging-db-subnets",
+            resources,
+        )
+
 
 class TrustPolicyValidationTests(unittest.TestCase):
     def test_source_controlled_trust_policy_is_valid(self):
