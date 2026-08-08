@@ -41,6 +41,7 @@ lc_init() {
   local required=(
     LC_ENVIRONMENT LC_ACCOUNT_ID LC_PROFILE LC_REGION LC_VPC_ID LC_CLUSTER
     LC_DB_INSTANCE LC_DB_SUBNET_GROUP LC_DB_SECURITY_GROUP LC_ALB_NAME
+    LC_RDS_KMS_KEY_ARN LC_RDS_SECRET_KMS_KEY_ARN
     LC_ALB_SECURITY_GROUP LC_ECS_SECURITY_GROUP LC_TARGET_GROUP_ARN LC_GATEWAY_SERVICE
     LC_GATEWAY_CONTAINER LC_GATEWAY_PORT
   )
@@ -330,7 +331,7 @@ lc_create_clean_staging_db() {
     --engine "$LC_DB_ENGINE" --engine-version "$LC_DB_ENGINE_VERSION" \
     --allocated-storage "$LC_DB_ALLOCATED_STORAGE" --storage-type "$LC_DB_STORAGE_TYPE" \
     --storage-encrypted --kms-key-id "$LC_RDS_KMS_KEY_ARN" \
-    --master-user-secret-kms-key-id "$LC_RDS_KMS_KEY_ARN" \
+    --master-user-secret-kms-key-id "$LC_RDS_SECRET_KMS_KEY_ARN" \
     --master-username dbadmin --manage-master-user-password \
     --db-subnet-group-name "$LC_DB_SUBNET_GROUP" \
     --vpc-security-group-ids "$LC_DB_SECURITY_GROUP" \

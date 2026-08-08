@@ -97,11 +97,19 @@
       ]
     },
     {
+      "Sid": "InspectStagingRdsEncryptionKeys",
+      "Effect": "Allow",
+      "Action": "kms:DescribeKey",
+      "Resource": [
+        "arn:aws:kms:eu-north-1:799111666795:key/c440b468-e2c0-4bc1-b50d-935c4c2ead51",
+        "arn:aws:kms:eu-north-1:799111666795:key/aaa5f59f-74da-4185-ba80-ff47dda45170"
+      ]
+    },
+    {
       "Sid": "UseStagingRdsEncryptionKey",
       "Effect": "Allow",
       "Action": [
         "kms:Decrypt",
-        "kms:DescribeKey",
         "kms:Encrypt",
         "kms:GenerateDataKey*",
         "kms:ListGrants",
@@ -111,6 +119,33 @@
       "Condition": {
         "StringEquals": {
           "kms:ViaService": "rds.eu-north-1.amazonaws.com"
+        }
+      }
+    },
+    {
+      "Sid": "UseStagingRdsSecretEncryptionKey",
+      "Effect": "Allow",
+      "Action": [
+        "kms:Decrypt",
+        "kms:Encrypt",
+        "kms:GenerateDataKey*",
+        "kms:ReEncrypt*"
+      ],
+      "Resource": "arn:aws:kms:eu-north-1:799111666795:key/aaa5f59f-74da-4185-ba80-ff47dda45170",
+      "Condition": {
+        "StringEquals": {
+          "kms:ViaService": "secretsmanager.eu-north-1.amazonaws.com"
+        }
+      }
+    },
+    {
+      "Sid": "CreateStagingRdsSecretEncryptionGrant",
+      "Effect": "Allow",
+      "Action": "kms:CreateGrant",
+      "Resource": "arn:aws:kms:eu-north-1:799111666795:key/aaa5f59f-74da-4185-ba80-ff47dda45170",
+      "Condition": {
+        "StringEquals": {
+          "kms:ViaService": "secretsmanager.eu-north-1.amazonaws.com"
         }
       }
     },

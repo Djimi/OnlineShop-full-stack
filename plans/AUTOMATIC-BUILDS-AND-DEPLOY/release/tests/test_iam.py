@@ -114,27 +114,41 @@ class IamPolicyValidationTests(unittest.TestCase):
     def test_staging_rds_encryption_permissions_are_key_scoped(self):
         policy = load_policy("github-actions-staging-deploy-policy.json")
         statements = {statement["Sid"]: statement for statement in policy["Statement"]}
-        key_arn = "arn:aws:kms:eu-north-1:799111666795:key/c440b468-e2c0-4bc1-b50d-935c4c2ead51"
+        rds_key_arn = "arn:aws:kms:eu-north-1:799111666795:key/c440b468-e2c0-4bc1-b50d-935c4c2ead51"
+        secret_key_arn = (
+            "arn:aws:kms:eu-north-1:799111666795:key/aaa5f59f-74da-4185-ba80-ff47dda45170"
+        )
+        self.assertEqual(
+            statements["InspectStagingRdsEncryptionKeys"]["Resource"],
+            [rds_key_arn, secret_key_arn],
+        )
         self.assertEqual(
             statements["UseStagingRdsEncryptionKey"]["Action"],
             [
                 "kms:Decrypt",
-                "kms:DescribeKey",
                 "kms:Encrypt",
                 "kms:GenerateDataKey*",
                 "kms:ListGrants",
                 "kms:ReEncrypt*",
             ],
         )
-        self.assertEqual(statements["UseStagingRdsEncryptionKey"]["Resource"], key_arn)
+        self.assertEqual(statements["UseStagingRdsEncryptionKey"]["Resource"], rds_key_arn)
         self.assertEqual(
             statements["UseStagingRdsEncryptionKey"]["Condition"],
             {"StringEquals": {"kms:ViaService": "rds.eu-north-1.amazonaws.com"}},
         )
-        self.assertEqual(statements["CreateStagingRdsEncryptionGrant"]["Resource"], key_arn)
+        self.assertEqual(statements["CreateStagingRdsEncryptionGrant"]["Resource"], rds_key_arn)
         self.assertEqual(
             statements["CreateStagingRdsEncryptionGrant"]["Condition"],
             {"StringEquals": {"kms:ViaService": "rds.eu-north-1.amazonaws.com"}},
+        )
+        self.assertEqual(statements["UseStagingRdsSecretEncryptionKey"]["Resource"], secret_key_arn)
+        self.assertEqual(
+            statements["UseStagingRdsSecretEncryptionKey"]["Condition"],
+            {"StringEquals": {"kms:ViaService": "secretsmanager.eu-north-1.amazonaws.com"}},
+        )
+        self.assertEqual(
+            statements["CreateStagingRdsSecretEncryptionGrant"]["Resource"], secret_key_arn
         )
         self.assertEqual(
             statements["CreateStagingRdsManagedSecret"]["Resource"],
