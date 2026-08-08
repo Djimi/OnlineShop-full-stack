@@ -329,7 +329,9 @@ lc_create_clean_staging_db() {
     --db-instance-class "$LC_DB_INSTANCE_CLASS" \
     --engine "$LC_DB_ENGINE" --engine-version "$LC_DB_ENGINE_VERSION" \
     --allocated-storage "$LC_DB_ALLOCATED_STORAGE" --storage-type "$LC_DB_STORAGE_TYPE" \
-    --storage-encrypted --master-username dbadmin --manage-master-user-password \
+    --storage-encrypted --kms-key-id "$LC_RDS_KMS_KEY_ARN" \
+    --master-user-secret-kms-key-id "$LC_RDS_KMS_KEY_ARN" \
+    --master-username dbadmin --manage-master-user-password \
     --db-subnet-group-name "$LC_DB_SUBNET_GROUP" \
     --vpc-security-group-ids "$LC_DB_SECURITY_GROUP" \
     --backup-retention-period 0 --no-publicly-accessible --no-multi-az \
