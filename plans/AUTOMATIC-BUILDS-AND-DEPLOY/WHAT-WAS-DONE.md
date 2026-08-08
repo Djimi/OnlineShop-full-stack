@@ -684,12 +684,13 @@ and completed staging teardown.
 The same run's candidate-evidence job then failed before emitting its bundle
 because the runner had not installed the release contract's pinned Python
 requirements (`referencing` was missing). The workflow now sets up Python and
-installs `release/requirements.txt` before producer-set validation; the local
-candidate-evidence gate passes, and the next merged-main run will verify the
-full candidate-evidence path. The first merged-main rerun reached the
-candidate-evidence job but stopped during setup because the copied
-`actions/setup-python` SHA was not resolvable; that pin is now replaced with
-the verified v5 commit SHA.
+installs `release/requirements.txt` before producer-set validation. The first
+merged-main rerun also exposed an unresolvable copied `actions/setup-python`
+SHA, which was replaced with the verified v5 commit SHA. Final merged-main
+verification [31271458491](https://github.com/Djimi/OnlineShop-full-stack/actions/runs/31271458491)
+passed staging resume, ordered deployment, all cloud E2E tests, teardown, and
+candidate evidence (job `93142263971`), including dependency installation and
+artifact emission.
 
 ### 3.5 Existing production environment hardening ✅ (offline; live checks deferred)
 
