@@ -2605,3 +2605,37 @@ changes.
 policy preview/apply/read-back against real ECR (the live pass sets
 `ONLINESHOP_RETENTION_LIVE_APPLY=1`), the read-only live retention audit
 against real production state, and real S3/frontend retention.
+
+## CI staging permission incident — 2026-08-08
+
+### Evidence
+
+- Workflow run: `https://github.com/Djimi/OnlineShop-full-stack/actions/runs/31259210183`
+- Failed job: `e2e-staging` / `93107532753`
+- Commit under test: `c8a715f5ed51e3bb3a9905738e275c57aaf003d9`
+- Failure: the assumed role `github-actions-onlineshop` was denied
+  `rds:CreateDBInstance` on
+  `arn:aws:rds:eu-north-1:799111666795:subgrp:onlineshop-staging-db-subnets`.
+  The staging resume stopped before deployment and E2E; its failure cleanup
+  completed and removed no partially-created RDS instance.
+
+### Repository correction
+
+- Updated `github-actions-staging-deploy-policy.json` so
+  `ManageEphemeralStagingDatabase` includes the exact staging subnet-group ARN
+  alongside the staging DB and snapshot ARNs.
+- Added `test_staging_rds_create_scopes_the_subnet_group` to
+  `release/tests/test_iam.py` and included the staging policy in the source
+  policy validation set.
+
+### Live verification status
+
+The first required AWS preflight command was run exactly as required:
+
+```bash
+aws sts get-caller-identity --profile dpm-profile --region eu-north-1
+```
+
+It returned `Your session has expired`; no AWS mutation was retried or made.
+The live `put-role-policy` + `get-role`/`get-role-policy` read-back and fresh
+main workflow verification remain pending re-authentication.

@@ -645,6 +645,27 @@ CloudFront mutations and read-backs, the real GitHub Release publication, and
 the switch of the workflow to the per-purpose roles. The live plan checkboxes in
 `03_RELEASE_TRACEABILITY.md` are annotated accordingly.
 
+## CI staging permission incident (2026-08-08)
+
+The failed [main CI run 31259210183, `e2e-staging` job
+93107532753](https://github.com/Djimi/OnlineShop-full-stack/actions/runs/31259210183/job/93107532753)
+was investigated from the Actions log. The failure occurred during clean
+staging RDS creation, before deployment or E2E execution:
+
+```text
+rds:CreateDBInstance ... not authorized ... resource ...:subgrp:onlineshop-staging-db-subnets
+```
+
+The source-controlled `ManageEphemeralStagingDatabase` statement already
+allowed `rds:CreateDBInstance` for the staging DB and snapshots, but omitted
+the subnet-group resource that RDS evaluates for this create operation. The
+policy now includes only the isolated staging subnet group ARN, and
+`release/tests/test_iam.py` verifies both the DB and subnet-group scopes.
+
+Live inline-policy application/read-back and a fresh main-run verification are
+not claimed yet: the local `dpm-profile` AWS session expired before the live
+change could be applied.
+
 ### 3.5 Existing production environment hardening ✅ (offline; live checks deferred)
 
 Implemented the offline half of subphase 3.5 — the hardened production target

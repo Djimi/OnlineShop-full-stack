@@ -98,7 +98,7 @@ Every step executed in this plan **MUST** update [`executed/INFO.md`](./executed
 ## Progress
 
 - [x] **Pass 1** — MVP: Running on AWS (DONE — ECS + RDS + CI/CD + S3 + CloudFront + frontend deployed; ALB active during verification, now paused)
-- [x] **Pass 2** — CI Pipeline Hardening & Staging (DONE — workflow with change detection + test gates + selective builds + Docker tagging; staging infra provisioned + smoke tested; branch protection applied via `gh api`)
+- [x] **Pass 2** — CI Pipeline Hardening & Staging (workflow with change detection + test gates + selective builds + Docker tagging; staging infra provisioned + smoke tested; branch protection applied via `gh api`; post-merge IAM scope correction is tracked below)
 - [ ] **Pass 3** — Release, Traceability & Promotion
   - [x] 3.1 Release contract and local validation foundation
   - [x] 3.2 Candidate build evidence and immutable artifacts (offline implementation + gate green in `tests/scripts/candidate_evidence_test.sh`; live ECR/GitHub/Syft verification deferred to the consolidated pass)
@@ -110,6 +110,12 @@ Every step executed in this plan **MUST** update [`executed/INFO.md`](./executed
   - [x] 3.8 Retention and rollback-window enforcement (offline implementation + gate green in `tests/scripts/retention_test.sh`: the desired ECR lifecycle policy `release/ecr/lifecycle-policy.json` (keep-10 `release-*` first, enumerated `sha-`/`main-latest`/`branch-` candidate families at 30 days, 14-day untagged grace) proven against multi-tag fixtures; the `release_contract.retention` decision layer — first-match-wins evaluation model, ECR lifecycle-policy-preview validation (disagreement/protected-expiring fail closed), read-only rollback-window audit (exact 10 or all, missing/mismatched artifacts fail closed, older metadata-only releases never claimed), keep-10 push-order coverage (`POLICY_WINDOW_GAP`), frontend prefix retention, GitHub retention classes; `audit-retention-window.sh` (read-only) + `preview-retention-policy.sh` (offline model + live `start/get-lifecycle-policy-preview` dry-run) proven with a stateful AWS stub; `apply-retention-policy.sh` `--dry-run` mutating nothing and `--apply` refused offline (`ONLINESHOP_RETENTION_LIVE_APPLY=1` gate for the consolidated live pass) with immediate `get-lifecycle-policy` read-back; GitHub retention-days static checks (candidate 30, staging-failure 14, snapshot/result records 14); mandatory profile/region + identity preflight + no-secrets scans; ruff/shellcheck/`bash -n`/`git diff --check`. The live policy preview/apply/read-back, the live read-only retention audit, and the real S3/frontend retention are deferred to the consolidated pass)
 - [ ] **Pass 4** — Operational Maturity
 - [ ] **Pass 5** — Future Improvements (non-mandatory)
+
+### CI staging permission incident — 2026-08-08
+
+- [x] Investigated [main run 31259210183, `e2e-staging` job 93107532753](https://github.com/Djimi/OnlineShop-full-stack/actions/runs/31259210183/job/93107532753): staging resume failed before deployment because `rds:CreateDBInstance` was denied on `subgrp:onlineshop-staging-db-subnets`.
+- [x] Corrected `github-actions-staging-deploy-policy.json` by adding only the isolated staging DB subnet-group ARN to `ManageEphemeralStagingDatabase`; added an IAM regression test so the required DB and subnet-group scopes cannot drift apart.
+- [ ] Apply the corrected inline policy to the live `github-actions-onlineshop` role, read it back, then trigger a fresh `main` run and verify staging resume → deploy → E2E → teardown. This is pending AWS re-authentication because the local `dpm-profile` session expired.
 
 ---
 
@@ -135,3 +141,4 @@ Every step executed in this plan **MUST** update [`executed/INFO.md`](./executed
 | ✅ Duplicate `build-and-push.yml` workflow | Removed; `build-and-deploy.yml` is the single active CI/CD workflow after merge |
 | ✅ Staging remained billable after E2E | Main CI tears staging down in an `always()` step: ECS→0, ALB deletion, and RDS deletion without snapshot retention |
 | ✅ Snapshot restoration preserved drift and stale test data | Every staging start now creates empty RDS, applies repository schemas/seeds, verifies grants and data as restricted users, then deploys services |
+| ⏳ Main CI staging resume lacked the RDS subnet-group resource scope | Source policy and regression test now include `arn:aws:rds:eu-north-1:799111666795:subgrp:onlineshop-staging-db-subnets`; live policy apply/read-back and a successful rerun remain pending AWS re-authentication |
