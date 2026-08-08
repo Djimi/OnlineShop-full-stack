@@ -161,13 +161,15 @@ class IamPolicyValidationTests(unittest.TestCase):
         network_actions = set(statements["ValidateIsolatedStagingNetwork"]["Action"])
         self.assertIn("ec2:DescribeInternetGateways", network_actions)
         self.assertIn("ec2:DescribeAvailabilityZones", network_actions)
+        self.assertIn("ec2:DescribeAccountAttributes", network_actions)
+        self.assertIn("ec2:GetSecurityGroupsForVpc", network_actions)
         self.assertEqual(
             statements["ReadStagingTargetGroupAttributes"]["Action"],
             "elasticloadbalancing:DescribeTargetGroupAttributes",
         )
         self.assertEqual(
             statements["ReadStagingTargetGroupAttributes"]["Resource"],
-            "arn:aws:elasticloadbalancing:eu-north-1:799111666795:targetgroup/onlineshop-staging-tg-v2/8a9b0471c381e60b",
+            "*",
         )
 
 

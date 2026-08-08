@@ -26,7 +26,9 @@
         "ec2:DescribeSubnets",
         "ec2:DescribeSecurityGroups",
         "ec2:DescribeInternetGateways",
-        "ec2:DescribeAvailabilityZones"
+        "ec2:DescribeAvailabilityZones",
+        "ec2:DescribeAccountAttributes",
+        "ec2:GetSecurityGroupsForVpc"
       ],
       "Resource": "*"
     },
@@ -51,7 +53,7 @@
       "Sid": "ReadStagingTargetGroupAttributes",
       "Effect": "Allow",
       "Action": "elasticloadbalancing:DescribeTargetGroupAttributes",
-      "Resource": "arn:aws:elasticloadbalancing:eu-north-1:799111666795:targetgroup/onlineshop-staging-tg-v2/8a9b0471c381e60b"
+      "Resource": "*"
     },
     {
       "Sid": "ManageEphemeralStagingEntryPoint",
