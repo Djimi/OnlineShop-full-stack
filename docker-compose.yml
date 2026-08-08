@@ -185,6 +185,9 @@ services:
     environment:
       GATEWAY_AUTH_SERVICE_URL: http://auth-service:9001
       GATEWAY_ITEMS_SERVICE_URL: http://items-service:9000
+      # Rate limiting is disabled in the local/E2E stack; ECS configures this
+      # explicitly as well because it is an optional Redis-backed feature.
+      GATEWAY_RATELIMIT_ENABLED: "false"
       SPRING_DATA_REDIS_HOST: redis
     depends_on:
       auth-service:

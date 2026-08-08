@@ -17,6 +17,10 @@
 - **Rate limiting**: Distributed limits via Bucket4j + Redis.
 - **Resilience & observability**: Retries/timeouts/circuit breakers (Resilience4j) + Micrometer metrics.
 
+The Docker Compose/E2E stack sets `GATEWAY_RATELIMIT_ENABLED=false` because
+rate limiting is optional for local validation. The staging/production task
+definitions make the same choice explicitly; token caching still uses Redis.
+
 ## Contracts (Examples)
 
 - **Public routes** (no auth): `/auth/**`
