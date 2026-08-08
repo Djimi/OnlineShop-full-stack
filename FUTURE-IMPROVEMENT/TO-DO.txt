@@ -1,0 +1,7 @@
+e2e-stg-fix session located in "~/.codex/sessions/2026/08/08/rollout-2026-08-08T16-35-56-019fe196-609e-7ce0-87ad-ca00feab7efe.jsonl"
+That session took too long - how I can create more commands, so I save tokens (for isntance to poll less frequently) or create skill or something like that.
+Also can I optimize tokens
+
+
+To be done after codex credits are restored
+----------
