@@ -92,7 +92,8 @@
       ],
       "Resource": [
         "arn:aws:rds:eu-north-1:799111666795:db:onlineshop-staging-postgres",
-        "arn:aws:rds:eu-north-1:799111666795:snapshot:onlineshop-staging-*"
+        "arn:aws:rds:eu-north-1:799111666795:snapshot:onlineshop-staging-*",
+        "arn:aws:rds:eu-north-1:799111666795:subgrp:onlineshop-staging-db-subnets"
       ]
     },
     {
