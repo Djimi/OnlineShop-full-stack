@@ -1,0 +1,6 @@
+# Python bytecode is a local artifact, never source-controlled.
+__pycache__/
+*.py[cod]
+
+# Test reports / ephemeral local output.
+.ruff_cache/

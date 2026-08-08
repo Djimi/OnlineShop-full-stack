@@ -1,0 +1,33 @@
+{
+  "vpcId": "vpc-06eeb0bc47ecdbd61",
+  "cluster": "onlineshop-cluster",
+  "dbInstance": "onlineshop-postgres-db",
+  "dbSubnetGroup": "default-vpc-06eeb0bc47ecdbd61",
+  "dbSecurityGroup": "sg-04ba95188d8374d96",
+  "ecsSecurityGroup": "sg-0b209104a6b15b157",
+  "albSecurityGroup": "sg-0b5427a6a3bf31c29",
+  "albName": "onlineshop-alb",
+  "targetGroupArn": "arn:aws:elasticloadbalancing:eu-north-1:799111666795:targetgroup/onlineshop-gateway-tg/29ba79a624079a04",
+  "gatewayService": "onlineshop-api-gateway",
+  "namespace": "onlineshop.local",
+  "services": [
+    "onlineshop-auth",
+    "onlineshop-items",
+    "onlineshop-api-gateway"
+  ],
+  "subnets": [
+    "subnet-03b318e59490a891a",
+    "subnet-041e4cf18bfce06f8",
+    "subnet-0a009040ef6bce7cc"
+  ],
+  "secrets": [
+    "onlineshop/auth/db",
+    "onlineshop/items/db",
+    "onlineshop/rds/master"
+  ],
+  "logGroups": [
+    "/ecs/onlineshop-auth",
+    "/ecs/onlineshop-items",
+    "/ecs/onlineshop-api-gateway"
+  ]
+}

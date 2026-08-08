@@ -1,0 +1,17 @@
+{
+  "auth": {
+    "repository": "onlineshop-auth",
+    "imageDigest": "sha256:50310c92745326299ce463ebd8ad2279a4ff0386a3701246e48165c65d5682b0"
+  },
+  "items": {
+    "repository": "onlineshop-items",
+    "imageDigest": "sha256:1a78d43d2aaaca3cafe41539f5fe211f4ef45152a1fa6af5b85006e93b019452"
+  },
+  "apiGateway": {
+    "repository": "onlineshop-api-gateway",
+    "imageDigest": "sha256:31f9bfdf4d15f460167ba2b7ce9ada23278be1a9f115f06c01e5242901e8948e"
+  },
+  "frontend": {
+    "sha256": "b9debb6b25ee6e6e534f7738d27f53f4153dbf361f097336741ae9fb54939ee4"
+  }
+}

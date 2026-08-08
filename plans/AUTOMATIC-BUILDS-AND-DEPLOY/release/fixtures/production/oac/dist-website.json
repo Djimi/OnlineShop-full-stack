@@ -1,0 +1,29 @@
+{
+  "Origins": {
+    "Quantity": 2,
+    "Items": [
+      {
+        "Id": "s3-frontend",
+        "DomainName": "onlineshop-frontend-799111666795.s3-website.eu-north-1.amazonaws.com",
+        "OriginAccessControlId": ""
+      },
+      {
+        "Id": "alb-api",
+        "DomainName": "onlineshop-alb-1163734147.eu-north-1.elb.amazonaws.com"
+      }
+    ]
+  },
+  "DefaultCacheBehavior": {
+    "TargetOriginId": "s3-frontend"
+  },
+  "CustomErrorResponses": {
+    "Quantity": 1,
+    "Items": [
+      {
+        "ErrorCode": 404,
+        "ResponsePagePath": "/index.html",
+        "ResponseCode": 200
+      }
+    ]
+  }
+}

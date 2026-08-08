@@ -1,0 +1,40 @@
+{
+  "family": "onlineshop-api-gateway",
+  "taskRoleArn": "arn:aws:iam::799111666795:role/onlineshop-gateway-task",
+  "executionRoleArn": "arn:aws:iam::799111666795:role/ecsTaskExecutionRole",
+  "networkMode": "awsvpc",
+  "requiresCompatibilities": ["FARGATE"],
+  "cpu": "256",
+  "memory": "512",
+  "containerDefinitions": [
+    {
+      "name": "api-gateway",
+      "image": "799111666795.dkr.ecr.eu-north-1.amazonaws.com/onlineshop-api-gateway@sha256:31f9bfdf4d15f460167ba2b7ce9ada23278be1a9f115f06c01e5242901e8948e",
+      "essential": true,
+      "versionConsistency": "enabled",
+      "stopTimeout": 30,
+      "portMappings": [
+        { "containerPort": 10000, "protocol": "tcp", "name": "gateway-port" }
+      ],
+      "environment": [
+        { "name": "AUTH_SERVICE_URL", "value": "http://auth-port:9001" },
+        { "name": "ITEMS_SERVICE_URL", "value": "http://items-port:9000" }
+      ],
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/onlineshop-api-gateway",
+          "awslogs-region": "eu-north-1",
+          "awslogs-stream-prefix": "api-gateway"
+        }
+      },
+      "healthCheck": {
+        "command": ["CMD-SHELL", "curl -f http://localhost:10000/actuator/health/liveness || exit 1"],
+        "interval": 30,
+        "timeout": 5,
+        "retries": 3,
+        "startPeriod": 180
+      }
+    }
+  ]
+}

@@ -1,0 +1,44 @@
+{
+  "family": "onlineshop-items",
+  "taskRoleArn": "arn:aws:iam::799111666795:role/onlineshop-items-task",
+  "executionRoleArn": "arn:aws:iam::799111666795:role/ecsTaskExecutionRole",
+  "networkMode": "awsvpc",
+  "requiresCompatibilities": ["FARGATE"],
+  "cpu": "512",
+  "memory": "1024",
+  "containerDefinitions": [
+    {
+      "name": "items",
+      "image": "799111666795.dkr.ecr.eu-north-1.amazonaws.com/onlineshop-items@sha256:1a78d43d2aaaca3cafe41539f5fe211f4ef45152a1fa6af5b85006e93b019452",
+      "essential": true,
+      "versionConsistency": "enabled",
+      "stopTimeout": 30,
+      "portMappings": [
+        { "containerPort": 9000, "protocol": "tcp", "name": "items-port" }
+      ],
+      "environment": [
+        { "name": "SPRING_DATASOURCE_URL", "value": "jdbc:postgresql://onlineshop-postgres-db.cf2gikqaqh9f.eu-north-1.rds.amazonaws.com:5432/items" },
+        { "name": "SPRING_DATASOURCE_HIKARI_MAXIMUMPOOLSIZE", "value": "10" }
+      ],
+      "secrets": [
+        { "name": "SPRING_DATASOURCE_USERNAME", "valueFrom": "arn:aws:secretsmanager:eu-north-1:799111666795:secret:onlineshop/items/db-9xzp3:username::" },
+        { "name": "SPRING_DATASOURCE_PASSWORD", "valueFrom": "arn:aws:secretsmanager:eu-north-1:799111666795:secret:onlineshop/items/db-9xzp3:password::" }
+      ],
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/onlineshop-items",
+          "awslogs-region": "eu-north-1",
+          "awslogs-stream-prefix": "items"
+        }
+      },
+      "healthCheck": {
+        "command": ["CMD-SHELL", "curl -f http://localhost:9000/actuator/health/liveness || exit 1"],
+        "interval": 30,
+        "timeout": 5,
+        "retries": 3,
+        "startPeriod": 180
+      }
+    }
+  ]
+}

@@ -1,0 +1,84 @@
+{
+  "currentRelease": "1.12.0",
+  "prefixes": [
+    {
+      "exists": true,
+      "prefix": "_releases/v1.12.0/",
+      "version": "1.12.0"
+    },
+    {
+      "exists": true,
+      "prefix": "_releases/v1.11.0/",
+      "version": "1.11.0"
+    },
+    {
+      "exists": true,
+      "prefix": "_releases/v1.10.0/",
+      "version": "1.10.0"
+    },
+    {
+      "exists": true,
+      "prefix": "_releases/v1.9.0/",
+      "version": "1.9.0"
+    },
+    {
+      "exists": true,
+      "prefix": "_releases/v1.8.0/",
+      "version": "1.8.0"
+    },
+    {
+      "exists": true,
+      "prefix": "_releases/v1.7.0/",
+      "version": "1.7.0"
+    },
+    {
+      "exists": true,
+      "prefix": "_releases/v1.6.0/",
+      "version": "1.6.0"
+    },
+    {
+      "exists": true,
+      "prefix": "_releases/v1.5.0/",
+      "version": "1.5.0"
+    },
+    {
+      "exists": true,
+      "prefix": "_releases/v1.4.0/",
+      "version": "1.4.0"
+    },
+    {
+      "exists": true,
+      "prefix": "_releases/v1.3.0/",
+      "version": "1.3.0"
+    },
+    {
+      "exists": true,
+      "prefix": "_releases/v1.2.0/",
+      "version": "1.2.0"
+    },
+    {
+      "exists": true,
+      "prefix": "_releases/v1.1.0/",
+      "version": "1.1.0"
+    }
+  ],
+  "previousKnownGood": "1.11.0",
+  "proposedDeletions": [
+    "_releases/v1.5.0/",
+    "_releases/v1.1.0/",
+    "_releases/v1.2.0/",
+    "_releases/v9.9.9/"
+  ],
+  "protectedVersions": [
+    "1.12.0",
+    "1.11.0",
+    "1.10.0",
+    "1.9.0",
+    "1.8.0",
+    "1.7.0",
+    "1.6.0",
+    "1.5.0",
+    "1.4.0",
+    "1.3.0"
+  ]
+}

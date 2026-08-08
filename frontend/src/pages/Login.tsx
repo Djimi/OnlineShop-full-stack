@@ -8,6 +8,7 @@ import { authService } from '../services/authService';
 import toast from 'react-hot-toast';
 import { useState } from 'react';
 import { useAuthStore } from '../store/authStore';
+import { getApiErrorMessage } from '../utils/apiError';
 
 const loginSchema = z.object({
   username: z.string().min(1, 'Username is required'),
@@ -40,11 +41,8 @@ export default function Login() {
       setAuth(response.token, response.userId, response.username);
       toast.success(`Welcome back, ${response.username}.`);
       setTimeout(() => navigate('/items', { replace: true }), 500);
-    } catch (error: any) {
-      const errorMessage =
-        error.response?.data?.detail ||
-        error.message ||
-        'Login failed. Please check your credentials.';
+    } catch (error: unknown) {
+      const errorMessage = getApiErrorMessage(error, 'Login failed. Please check your credentials.');
       toast.error(errorMessage);
       console.error('Login error:', error);
     } finally {

@@ -1,0 +1,146 @@
+{
+  "onlineshop-api-gateway": {
+    "previewResults": [
+      {
+        "action": {
+          "type": "EXPIRE"
+        },
+        "appliedRulePriority": 1,
+        "imageDigest": "sha256:3000000000000000000000000000000000000000000000000000000000000002",
+        "imagePushedAt": "2026-05-21T10:00:00Z",
+        "imageTags": [
+          "sha-0000000000000000000000000000000000000002",
+          "release-1.2.0"
+        ]
+      },
+      {
+        "action": {
+          "type": "EXPIRE"
+        },
+        "appliedRulePriority": 1,
+        "imageDigest": "sha256:3000000000000000000000000000000000000000000000000000000000000001",
+        "imagePushedAt": "2026-05-17T10:00:00Z",
+        "imageTags": [
+          "sha-0000000000000000000000000000000000000001",
+          "release-1.1.0"
+        ]
+      },
+      {
+        "action": {
+          "type": "EXPIRE"
+        },
+        "appliedRulePriority": 3,
+        "imageDigest": "sha256:3000000000000000000000000000000000000000000000000000000000000102",
+        "imagePushedAt": "2026-05-05T10:00:00Z",
+        "imageTags": [
+          "main-latest"
+        ]
+      },
+      {
+        "action": {
+          "type": "EXPIRE"
+        },
+        "appliedRulePriority": 5,
+        "imageDigest": "sha256:3000000000000000000000000000000000000000000000000000000000000103",
+        "imagePushedAt": "2026-07-01T10:00:00Z",
+        "imageTags": []
+      }
+    ]
+  },
+  "onlineshop-auth": {
+    "previewResults": [
+      {
+        "action": {
+          "type": "EXPIRE"
+        },
+        "appliedRulePriority": 1,
+        "imageDigest": "sha256:1000000000000000000000000000000000000000000000000000000000000002",
+        "imagePushedAt": "2026-05-21T10:00:00Z",
+        "imageTags": [
+          "sha-0000000000000000000000000000000000000002",
+          "release-1.2.0"
+        ]
+      },
+      {
+        "action": {
+          "type": "EXPIRE"
+        },
+        "appliedRulePriority": 1,
+        "imageDigest": "sha256:1000000000000000000000000000000000000000000000000000000000000001",
+        "imagePushedAt": "2026-05-17T10:00:00Z",
+        "imageTags": [
+          "sha-0000000000000000000000000000000000000001",
+          "release-1.1.0"
+        ]
+      },
+      {
+        "action": {
+          "type": "EXPIRE"
+        },
+        "appliedRulePriority": 3,
+        "imageDigest": "sha256:1000000000000000000000000000000000000000000000000000000000000102",
+        "imagePushedAt": "2026-05-05T10:00:00Z",
+        "imageTags": [
+          "main-latest"
+        ]
+      },
+      {
+        "action": {
+          "type": "EXPIRE"
+        },
+        "appliedRulePriority": 5,
+        "imageDigest": "sha256:1000000000000000000000000000000000000000000000000000000000000103",
+        "imagePushedAt": "2026-07-01T10:00:00Z",
+        "imageTags": []
+      }
+    ]
+  },
+  "onlineshop-items": {
+    "previewResults": [
+      {
+        "action": {
+          "type": "EXPIRE"
+        },
+        "appliedRulePriority": 1,
+        "imageDigest": "sha256:2000000000000000000000000000000000000000000000000000000000000002",
+        "imagePushedAt": "2026-05-21T10:00:00Z",
+        "imageTags": [
+          "sha-0000000000000000000000000000000000000002",
+          "release-1.2.0"
+        ]
+      },
+      {
+        "action": {
+          "type": "EXPIRE"
+        },
+        "appliedRulePriority": 1,
+        "imageDigest": "sha256:2000000000000000000000000000000000000000000000000000000000000001",
+        "imagePushedAt": "2026-05-17T10:00:00Z",
+        "imageTags": [
+          "sha-0000000000000000000000000000000000000001",
+          "release-1.1.0"
+        ]
+      },
+      {
+        "action": {
+          "type": "EXPIRE"
+        },
+        "appliedRulePriority": 3,
+        "imageDigest": "sha256:2000000000000000000000000000000000000000000000000000000000000102",
+        "imagePushedAt": "2026-05-05T10:00:00Z",
+        "imageTags": [
+          "main-latest"
+        ]
+      },
+      {
+        "action": {
+          "type": "EXPIRE"
+        },
+        "appliedRulePriority": 5,
+        "imageDigest": "sha256:2000000000000000000000000000000000000000000000000000000000000103",
+        "imagePushedAt": "2026-07-01T10:00:00Z",
+        "imageTags": []
+      }
+    ]
+  }
+}

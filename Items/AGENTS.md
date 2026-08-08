@@ -42,6 +42,29 @@ cd Items
 
 The CI pipeline builds `common`, runs `./mvnw verify`, and then publishes the Items image on branch pushes. Pull-request builds create Docker images without requesting AWS credentials or pushing to ECR.
 
+After a successful `main` build, the immutable Items image is deployed to the
+independent staging ECS cluster. Staging uses its own VPC and RDS database; it
+does not use the production cluster or production database. Each staging run
+creates an empty RDS instance, applies `init-db/01-schema.sql` and
+`init-db/02-data.sql`, verifies the restricted Items user, runs E2E, and deletes
+the instance without retaining state.
+
+Items images carry OCI/project labels (revision, source, created, title,
+`org.onlineshop.component`, `org.onlineshop.build-run`,
+`org.onlineshop.producer.*`) plus `org.onlineshop.common-revision` recording the
+same monorepo SHA as the included `common` library. The Pass 3
+candidate-evidence workflow uses these labels to make `sha-<full-sha>` publishing
+idempotent and to prove the three backend images form one canonical producer
+set.
+
+The backend ECR repositories (`onlineshop-*`) are defined with desired state
+`IMMUTABLE_WITH_EXCLUSION` (see `release/ecr/immutable-repositories.json`):
+`sha-*` and `release-*` tags can never be overwritten, only `main-latest` and
+`branch-*` may advance, and `latest` is absent for v1. The live repository
+mutation is applied in the consolidated Pass 3 verification pass. The
+`release-<version>` tag is minted server-side from the candidate bytes by
+`release/bin/promote-image-digest.sh` (never a rebuild).
+
 ## Docker Compose Build
 
 Run from the repository root:
@@ -163,3 +186,51 @@ Main configuration: [src/main/resources/application.yml](./src/main/resources/ap
 ## AWS CLI Conventions
 
 For AWS CLI commands (infrastructure queries, deployments, etc.), see the root [AGENTS.md](../AGENTS.md) — all AWS commands MUST include `--profile dpm-profile --region eu-north-1`.
+
+Repository pause/resume scripts log UTC timestamped steps, typical durations,
+resource-level AWS progress, and actual total runtime. Treat duration values as
+operational estimates, not timeout guarantees.
+
+## Pass 3.5 — Production hardening
+
+The production Items release target is **defined** by the hardening contract (see
+`plans/AUTOMATIC-BUILDS-AND-DEPLOY/explanations/PRODUCTION-HARDENING-DECISIONS.md`).
+This documents what a production release task definition/service **must** look
+like before it may be registered or promoted. **It is not a claim about the
+current live production state** — no live task-definition/service mutation has
+happened; the live read-back and any required tightening run in the
+consolidated Pass 3 verification pass:
+
+- The production task definition **must be** **digest-pinned** (`@sha256:`),
+  use `awsvpc`, Fargate, a named Service Connect port (`items-port`), `awslogs`,
+  a container health check, a positive `stopTimeout`, and
+  `versionConsistency=enabled`. `release/bin/validate-task-definition.sh` and
+  the `release_contract.ecs_config` fixture suite enforce this before any
+  registration; it also enforces that the execution role and task role (when
+  present) stay distinct.
+- Credentials **must be** injected only through `secrets[].valueFrom` with
+  **full** `arn:aws:secretsmanager:...` ARNs (`onlineshop/items/db`); never as
+  plaintext in `environment`/`command`. `release/bin/sanitize-task-definition.sh`
+  proves a digest-pin changes only the `image` field and keeps secrets in
+  `valueFrom`.
+- The Items ECS service **must be** configured with the deployment circuit
+  breaker with rollback, `minimumHealthyPercent=100`, `maximumPercent=200`, and
+  a capacity-provider strategy. Fargate Spot with desired count 1 is the
+  explicit v1 cost tradeoff and is not an HA SLA.
+- The explicit non-secret production identifiers (log group `/ecs/onlineshop-items`,
+  secret name, Service Connect namespace, execution role, ECR repository) live
+  in `scripts/config/production.env` and are verified read-only by
+  `scripts/inventory-production.sh` and
+  `scripts/verify-production-staging-separation.sh`.
+
+## Pass 3.7 — Release traceability
+
+The read-only release traceability queries (`release/bin/trace.sh` +
+`release_contract.traceability`) resolve the Items component in both directions:
+`commit --sha`/`digest --digest` map the Items ECR `sha-*`/`release-*` tags and
+digests, and `running` reports the **running** Items container digest from
+`tasks[].containers[].imageDigest` (never only the task-definition image URI),
+plus the release identity and approver from the matched official manifest.
+`audit` cross-checks the Items manifest digests against ECR and the running
+container. The offline gate is `bash tests/scripts/release_traceability_test.sh`;
+live lookups against real AWS are deferred to the consolidated verification pass.

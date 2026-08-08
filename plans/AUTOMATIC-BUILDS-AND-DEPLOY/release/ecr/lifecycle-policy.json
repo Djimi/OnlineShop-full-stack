@@ -1,0 +1,70 @@
+{
+  "accountId": "799111666795",
+  "region": "eu-north-1",
+  "repositories": [
+    "onlineshop-auth",
+    "onlineshop-items",
+    "onlineshop-api-gateway"
+  ],
+  "rules": [
+    {
+      "rulePriority": 1,
+      "description": "keep the most recent 10 release-* images (immediate rollback window)",
+      "selection": {
+        "tagStatus": "tagged",
+        "tagPrefixList": ["release-"],
+        "countType": "imageCountMoreThan",
+        "countNumber": 10
+      },
+      "action": { "type": "expire" }
+    },
+    {
+      "rulePriority": 2,
+      "description": "expire non-official sha-* candidates after 30 days",
+      "selection": {
+        "tagStatus": "tagged",
+        "tagPrefixList": ["sha-"],
+        "countType": "sinceImagePushed",
+        "countUnit": "days",
+        "countNumber": 30
+      },
+      "action": { "type": "expire" }
+    },
+    {
+      "rulePriority": 3,
+      "description": "expire the mutable main-latest convenience tag after 30 days",
+      "selection": {
+        "tagStatus": "tagged",
+        "tagPrefixList": ["main-latest"],
+        "countType": "sinceImagePushed",
+        "countUnit": "days",
+        "countNumber": 30
+      },
+      "action": { "type": "expire" }
+    },
+    {
+      "rulePriority": 4,
+      "description": "expire mutable branch-* convenience tags after 30 days",
+      "selection": {
+        "tagStatus": "tagged",
+        "tagPrefixList": ["branch-"],
+        "countType": "sinceImagePushed",
+        "countUnit": "days",
+        "countNumber": 30
+      },
+      "action": { "type": "expire" }
+    },
+    {
+      "rulePriority": 5,
+      "description": "expire untagged images after a 14-day grace period",
+      "selection": {
+        "tagStatus": "untagged",
+        "countType": "sinceImagePushed",
+        "countUnit": "days",
+        "countNumber": 14
+      },
+      "action": { "type": "expire" }
+    }
+  ],
+  "notes": "Pass 3, subphase 3.8 desired ECR lifecycle policy, identical for every backend repository. Rule order is load-bearing: ECR evaluates every rule and an image is expired by exactly one or zero rules; an image matching a higher-priority rule's tagging requirements can never be expired by a lower-priority rule (first-match-wins). Rule 1 therefore has the HIGHEST priority so a retained multi-tag release image (sha-* + release-*) inside the newest 10 is claimed by the keep-10 rule and the candidate rules never apply to it. ECR requires every tagged rule to carry an explicit tagPrefixList, so the candidate families (sha-*, main-latest, branch-*) MUST be enumerated — a generic negative/exclusion filter ('expire everything except releases') is not expressible and is never used; any tag outside the declared families is retained (fail-safe). Every tagged rule selects EXACTLY ONE tag prefix: AWS documents that a multi-entry tagPrefixList/tagPatternList selects only images carrying ALL the listed tags ('only the images with all specified tags are selected'), so a merged ['main-latest', 'branch-'] rule would silently select nothing — each family gets its own single-prefix rule (2, 3, 4), which is unambiguous under ECR's documented semantics, and the validator rejects multi-entry prefix lists (POLICY_TAGPREFIX_MULTI). ECR lifecycle evaluation is delayed (a policy change is applied by ECR's periodic evaluator, up to 24 hours); images referenced by manifest lists or OCI referrers are not selected. Preview with release/bin/preview-retention-policy.sh before any apply; apply only via release/bin/apply-retention-policy.sh (refused offline; the consolidated Pass 3 live pass sets ONLINESHOP_RETENTION_LIVE_APPLY=1) with immediate get-lifecycle-policy read-back."
+}

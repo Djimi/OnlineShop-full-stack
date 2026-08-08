@@ -1,0 +1,69 @@
+{
+  "family": "onlineshop-auth",
+  "taskRoleArn": "arn:aws:iam::799111666795:role/onlineshop-auth-task",
+  "executionRoleArn": "arn:aws:iam::799111666795:role/ecsTaskExecutionRole",
+  "networkMode": "awsvpc",
+  "requiresCompatibilities": [
+    "FARGATE"
+  ],
+  "cpu": "512",
+  "memory": "1024",
+  "containerDefinitions": [
+    {
+      "name": "auth",
+      "image": "799111666795.dkr.ecr.eu-north-1.amazonaws.com/onlineshop-auth:sha-263f0690aa08eaf24f23f715dea7e8895a759293",
+      "essential": true,
+      "versionConsistency": "enabled",
+      "stopTimeout": 30,
+      "portMappings": [
+        {
+          "containerPort": 9001,
+          "protocol": "tcp",
+          "name": "auth-port"
+        }
+      ],
+      "environment": [
+        {
+          "name": "SPRING_DATASOURCE_URL",
+          "value": "jdbc:postgresql://onlineshop-postgres-db.cf2gikqaqh9f.eu-north-1.rds.amazonaws.com:5432/auth"
+        },
+        {
+          "name": "SPRING_DATASOURCE_HIKARI_MAXIMUMPOOLSIZE",
+          "value": "10"
+        },
+        {
+          "name": "SPRING_DATASOURCE_HIKARI_MINIMUMIDLE",
+          "value": "1"
+        }
+      ],
+      "secrets": [
+        {
+          "name": "SPRING_DATASOURCE_USERNAME",
+          "valueFrom": "arn:aws:secretsmanager:eu-north-1:799111666795:secret:onlineshop/auth/db-umtxh1:username::"
+        },
+        {
+          "name": "SPRING_DATASOURCE_PASSWORD",
+          "valueFrom": "arn:aws:secretsmanager:eu-north-1:799111666795:secret:onlineshop/auth/db-umtxh1:password::"
+        }
+      ],
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/onlineshop-auth",
+          "awslogs-region": "eu-north-1",
+          "awslogs-stream-prefix": "auth"
+        }
+      },
+      "healthCheck": {
+        "command": [
+          "CMD-SHELL",
+          "curl -f http://localhost:9001/actuator/health/liveness || exit 1"
+        ],
+        "interval": 30,
+        "timeout": 5,
+        "retries": 3,
+        "startPeriod": 180
+      }
+    }
+  ]
+}

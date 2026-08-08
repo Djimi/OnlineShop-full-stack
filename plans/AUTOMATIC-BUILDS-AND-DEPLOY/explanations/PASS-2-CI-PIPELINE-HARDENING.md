@@ -1,5 +1,11 @@
 # Pass 2 — CI Pipeline Hardening & Staging: Implementation Details
 
+> Historical implementation record: the shared-cluster staging design below
+> was replaced on 2026-08-04. The authoritative design is the fully isolated
+> staging environment in [02_CI_PIPELINE_HARDENING.md](../02_CI_PIPELINE_HARDENING.md)
+> and [executed/INFO.md](../executed/INFO.md). The legacy
+> `scripts/setup-staging-env.sh` now exits before making changes.
+
 ## Overview
 
 Pass 2 transformed the manual MVP deployment (Pass 1) into an automated CI/CD pipeline with proper test gates, selective service builds, branch protection, and a staging environment. This document explains every change in detail.
@@ -156,6 +162,16 @@ Older in-progress builds on the same branch/PR are automatically cancelled when 
 
 ## 4. Staging Environment (2.7)
 
+> **Current implementation (2026-08-04):** The original shared-cluster design
+> below is historical. Staging now has its own VPC, ECS cluster, Cloud Map
+> namespace, RDS, security groups, and ALB. Every run creates empty RDS, applies
+> repository schemas and deterministic seeds, verifies restricted users, runs
+> E2E, and deletes RDS without a snapshot. Runtime code is in
+> `scripts/resume-staging.sh`, `scripts/bootstrap-staging-db.sh`,
+> `scripts/pause-staging.sh`, and `scripts/lib/lifecycle.sh`. All four lifecycle
+> entry points now emit UTC timestamped numbered steps, typical duration ranges,
+> resource-level waiter/no-op/verification progress, and actual total runtime.
+
 ### 4.1 Architecture
 
 The staging environment runs in the same ECS cluster (`onlineshop-cluster`) and Cloud Map namespace (`onlineshop.local`) as production, but uses different:
@@ -290,7 +306,8 @@ Called from the `e2e-staging` job in the workflow.
 
 ### `scripts/setup-staging-env.sh`
 
-Guided setup script that prints all commands needed to create the staging infrastructure. Already executed — kept for documentation and disaster recovery.
+Retired compatibility entry point. Deterministic lifecycle behavior is owned by
+the scripts listed in the current-implementation note above.
 
 ---
 
@@ -303,7 +320,7 @@ Guided setup script that prints all commands needed to create the staging infras
 | E2E tests in CI (non-staging) | No staging → no E2E gate. Runs against staging after main deploy |
 | ECR image tag immutability | Pass 3 (release traceability) |
 | ECR resource scoping | Pass 3 (tighten `Resource: "*"` to specific ARNs) |
-| Staging ALB auto-pause | Can integrate into `pause-playground.sh` in Pass 3 |
+| Staging ALB auto-pause | Completed by the isolated staging teardown path |
 | Old workflow removal | Completed by removing the duplicate `build-and-push.yml`; verify the replacement after merge to `main` |
 | Verify Auth 50% coverage | Run `cd Auth && ./mvnw verify` locally (requires Docker for Testcontainers) |
 

@@ -17,20 +17,34 @@ on:
           - auth
           - items
           - api-gateway
+          - frontend
           - all
 
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+# No workflow-level concurrency: build jobs run in parallel per ref. The
+# singleton staging mutation path is serialized at JOB level on `e2e-staging`
+# with cancel-in-progress: false (Pass 3, subphase 3.2) so a newer `main` push
+# can never race an older run's resume -> deploy -> e2e -> teardown cycle.
 
-env:
-  AWS_REGION: eu-north-1
-  ECR_REGISTRY: 799111666795.dkr.ecr.eu-north-1.amazonaws.com
+# Pass 3, subphase 3.3 least privilege: validation jobs (frontend, e2e-pr) are
+# scoped at job level to `contents: read` (no id-token: write). The AWS-facing
+# jobs still assume the single `github-actions-onlineshop` role here; the split
+# candidate-build / promotion / production / rollback roles and policies in
+# plans/AUTOMATIC-BUILDS-AND-DEPLOY/github-actions-role-layout.md are applied
+# in the consolidated verification pass once the roles exist.
 
 permissions:
   id-token: write
   contents: read
   pull-requests: read
+  actions: read # required to verify producer run conclusions via the GitHub API
+
+env:
+  AWS_REGION: eu-north-1
+  ECR_REGISTRY: 799111666795.dkr.ecr.eu-north-1.amazonaws.com
+  # Reusable release-contract scripts (Pass 3). All are invoked from the
+  # repository root; release-critical Actions below are pinned by full commit
+  # SHA with a version comment.
+  RELEASE: plans/AUTOMATIC-BUILDS-AND-DEPLOY/release
 
 jobs:
   changes:
@@ -44,11 +58,13 @@ jobs:
       # Fetch 20 commits instead of the default shallow single commit so
       # dorny/paths-filter can find the merge-base with the base branch locally,
       # avoiding extra git fetch roundtrips (it auto-fetches more if needed).
-      - uses: actions/checkout@v4
+      # actions/checkout@v4 (11d5960a326750d5838078e36cf38b85af677262)
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           fetch-depth: 20
 
-      - uses: dorny/paths-filter@v3
+      # dorny/paths-filter@v3 (6852f92c20ea7fd3b0c25de3b5112db3a98da050)
+      - uses: dorny/paths-filter@6852f92c20ea7fd3b0c25de3b5112db3a98da050
         id: filter
         with:
           filters: |
@@ -73,7 +89,7 @@ jobs:
             [ "$SERVICE" = "all" ] || [ "$SERVICE" = "auth" ] && echo "auth=true" >> $GITHUB_OUTPUT || echo "auth=false" >> $GITHUB_OUTPUT
             [ "$SERVICE" = "all" ] || [ "$SERVICE" = "items" ] && echo "items=true" >> $GITHUB_OUTPUT || echo "items=false" >> $GITHUB_OUTPUT
             [ "$SERVICE" = "all" ] || [ "$SERVICE" = "api-gateway" ] && echo "api-gateway=true" >> $GITHUB_OUTPUT || echo "api-gateway=false" >> $GITHUB_OUTPUT
-            [ "$SERVICE" = "all" ] && echo "frontend=true" >> $GITHUB_OUTPUT || echo "frontend=false" >> $GITHUB_OUTPUT
+            [ "$SERVICE" = "all" ] || [ "$SERVICE" = "frontend" ] && echo "frontend=true" >> $GITHUB_OUTPUT || echo "frontend=false" >> $GITHUB_OUTPUT
           elif [ "${{ github.ref }}" = "refs/heads/main" ]; then
             echo "auth=true" >> $GITHUB_OUTPUT
             echo "items=true" >> $GITHUB_OUTPUT
@@ -90,16 +106,19 @@ jobs:
     needs: changes
     if: needs.changes.outputs.auth == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      # actions/checkout@v4 (11d5960a326750d5838078e36cf38b85af677262)
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
 
-      - uses: actions/setup-java@v4
+      # actions/setup-java@v4 (d7793b545071e98d581d3bf084a51c3213318a07)
+      - uses: actions/setup-java@d7793b545071e98d581d3bf084a51c3213318a07
         with:
           java-version: '25'
           distribution: 'temurin'
 
-      - uses: actions/cache@v4
+      # actions/cache@v4 (0057852bfaa89a56745cba8c7296529d2fc39830)
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
         with:
           path: ~/.m2/repository
           key: ${{ runner.os }}-maven-auth-${{ hashFiles('Auth/pom.xml') }}
@@ -113,19 +132,22 @@ jobs:
 
       - name: Upload test report
         if: always()
-        uses: actions/upload-artifact@v4
+        # actions/upload-artifact@v4 (ea165f8d65b6e75b540449e92b4886f43607fa02)
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: auth-test-report
           path: Auth/target/reporting-output/
           if-no-files-found: ignore
 
-      - uses: aws-actions/configure-aws-credentials@v4
+      # aws-actions/configure-aws-credentials@v4 (ff717079ee2060e4bcee96c4779b553acc87447c)
+      - uses: aws-actions/configure-aws-credentials@ff717079ee2060e4bcee96c4779b553acc87447c
         if: success() && github.event_name != 'pull_request'
         with:
           role-to-assume: arn:aws:iam::799111666795:role/github-actions-onlineshop
           aws-region: ${{ env.AWS_REGION }}
 
-      - uses: aws-actions/amazon-ecr-login@v2
+      # aws-actions/amazon-ecr-login@v2 (d539f0932e70871a027e9d5a9d8fc38589180a64)
+      - uses: aws-actions/amazon-ecr-login@d539f0932e70871a027e9d5a9d8fc38589180a64
         if: success() && github.event_name != 'pull_request'
 
       - name: Compute Docker tags
@@ -142,15 +164,57 @@ jobs:
           fi
           echo "tags=$ALL_TAGS" >> $GITHUB_OUTPUT
 
-      - uses: docker/setup-buildx-action@v3
+      - name: Compute OCI labels
+        id: labels
+        if: success()
+        run: |
+          CREATED=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          {
+            echo "labels<<GH_LABELS"
+            echo "org.opencontainers.image.revision=${{ github.sha }}"
+            echo "org.opencontainers.image.source=https://github.com/${{ github.repository }}"
+            echo "org.opencontainers.image.created=$CREATED"
+            echo "org.opencontainers.image.title=OnlineShop auth service"
+            echo "org.onlineshop.component=auth"
+            echo "org.onlineshop.build-run=${{ github.run_id }}-${{ github.run_attempt }}"
+            echo "org.onlineshop.producer.run-id=${{ github.run_id }}"
+            echo "org.onlineshop.producer.run-attempt=${{ github.run_attempt }}"
+            echo "org.onlineshop.producer.event=${{ github.event_name }}"
+            echo "org.onlineshop.producer.ref=${{ github.ref }}"
+            echo "GH_LABELS"
+          } >> "$GITHUB_OUTPUT"
+
+      # docker/setup-buildx-action@v3 (8d2750c68a42422c14e847fe6c8ac0403b4cbd6f)
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f
         if: success()
 
-      - uses: docker/build-push-action@v6
+      # Idempotent sha-<full-sha> publishing (Pass 3, Decision 11): reuse a
+      # trusted canonical image instead of pushing rebuilt bytes. Runs after
+      # buildx setup so image-labels.sh can use `docker buildx imagetools`.
+      - name: Resolve candidate image publishing
+        id: publish
+        if: success() && github.event_name != 'pull_request'
+        env:
+          ECR_REGISTRY: ${{ env.ECR_REGISTRY }}
+          ECR_REPOSITORY: onlineshop-auth
+          CANDIDATE_TAG: sha-${{ github.sha }}
+          GITHUB_SHA: ${{ github.sha }}
+          GITHUB_RUN_ID: ${{ github.run_id }}
+          GITHUB_RUN_ATTEMPT: ${{ github.run_attempt }}
+          GITHUB_EVENT_NAME: ${{ github.event_name }}
+          GITHUB_REF: ${{ github.ref }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: bash "${{ env.RELEASE }}/bin/publish-candidate-image.sh" --profile dpm-profile --region ${{ env.AWS_REGION }}
+
+      # docker/build-push-action@v6 (10e90e3645eae34f1e60eeb005ba3a3d33f178e8)
+      - uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8
         if: success()
         with:
           context: Auth
-          push: ${{ github.event_name != 'pull_request' }}
+          push: ${{ github.event_name != 'pull_request' && steps.publish.outputs.decision == 'push' }}
           tags: ${{ steps.tags.outputs.tags }}
+          labels: ${{ steps.labels.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
@@ -158,16 +222,19 @@ jobs:
     needs: changes
     if: needs.changes.outputs.items == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      # actions/checkout@v4 (11d5960a326750d5838078e36cf38b85af677262)
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
 
-      - uses: actions/setup-java@v4
+      # actions/setup-java@v4 (d7793b545071e98d581d3bf084a51c3213318a07)
+      - uses: actions/setup-java@d7793b545071e98d581d3bf084a51c3213318a07
         with:
           java-version: '25'
           distribution: 'temurin'
 
-      - uses: actions/cache@v4
+      # actions/cache@v4 (0057852bfaa89a56745cba8c7296529d2fc39830)
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
         with:
           path: ~/.m2/repository
           key: ${{ runner.os }}-maven-items-${{ hashFiles('Items/pom.xml', 'common/pom.xml') }}
@@ -185,19 +252,22 @@ jobs:
 
       - name: Upload test report
         if: always()
-        uses: actions/upload-artifact@v4
+        # actions/upload-artifact@v4 (ea165f8d65b6e75b540449e92b4886f43607fa02)
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: items-test-report
           path: Items/target/site/jacoco/
           if-no-files-found: ignore
 
-      - uses: aws-actions/configure-aws-credentials@v4
+      # aws-actions/configure-aws-credentials@v4 (ff717079ee2060e4bcee96c4779b553acc87447c)
+      - uses: aws-actions/configure-aws-credentials@ff717079ee2060e4bcee96c4779b553acc87447c
         if: success() && github.event_name != 'pull_request'
         with:
           role-to-assume: arn:aws:iam::799111666795:role/github-actions-onlineshop
           aws-region: ${{ env.AWS_REGION }}
 
-      - uses: aws-actions/amazon-ecr-login@v2
+      # aws-actions/amazon-ecr-login@v2 (d539f0932e70871a027e9d5a9d8fc38589180a64)
+      - uses: aws-actions/amazon-ecr-login@d539f0932e70871a027e9d5a9d8fc38589180a64
         if: success() && github.event_name != 'pull_request'
 
       - name: Compute Docker tags
@@ -214,16 +284,59 @@ jobs:
           fi
           echo "tags=$ALL_TAGS" >> $GITHUB_OUTPUT
 
-      - uses: docker/setup-buildx-action@v3
+      - name: Compute OCI labels
+        id: labels
+        if: success()
+        run: |
+          CREATED=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          {
+            echo "labels<<GH_LABELS"
+            echo "org.opencontainers.image.revision=${{ github.sha }}"
+            echo "org.opencontainers.image.source=https://github.com/${{ github.repository }}"
+            echo "org.opencontainers.image.created=$CREATED"
+            echo "org.opencontainers.image.title=OnlineShop items service"
+            echo "org.onlineshop.component=items"
+            echo "org.onlineshop.build-run=${{ github.run_id }}-${{ github.run_attempt }}"
+            echo "org.onlineshop.producer.run-id=${{ github.run_id }}"
+            echo "org.onlineshop.producer.run-attempt=${{ github.run_attempt }}"
+            echo "org.onlineshop.producer.event=${{ github.event_name }}"
+            echo "org.onlineshop.producer.ref=${{ github.ref }}"
+            echo "org.onlineshop.common-revision=${{ github.sha }}"
+            echo "GH_LABELS"
+          } >> "$GITHUB_OUTPUT"
+
+      # docker/setup-buildx-action@v3 (8d2750c68a42422c14e847fe6c8ac0403b4cbd6f)
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f
         if: success()
 
-      - uses: docker/build-push-action@v6
+      # Idempotent sha-<full-sha> publishing (Pass 3, Decision 11): reuse a
+      # trusted canonical image instead of pushing rebuilt bytes. Runs after
+      # buildx setup so image-labels.sh can use `docker buildx imagetools`.
+      - name: Resolve candidate image publishing
+        id: publish
+        if: success() && github.event_name != 'pull_request'
+        env:
+          ECR_REGISTRY: ${{ env.ECR_REGISTRY }}
+          ECR_REPOSITORY: onlineshop-items
+          CANDIDATE_TAG: sha-${{ github.sha }}
+          GITHUB_SHA: ${{ github.sha }}
+          GITHUB_RUN_ID: ${{ github.run_id }}
+          GITHUB_RUN_ATTEMPT: ${{ github.run_attempt }}
+          GITHUB_EVENT_NAME: ${{ github.event_name }}
+          GITHUB_REF: ${{ github.ref }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: bash "${{ env.RELEASE }}/bin/publish-candidate-image.sh" --profile dpm-profile --region ${{ env.AWS_REGION }}
+
+      # docker/build-push-action@v6 (10e90e3645eae34f1e60eeb005ba3a3d33f178e8)
+      - uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8
         if: success()
         with:
           context: .
           file: Items/Dockerfile
-          push: ${{ github.event_name != 'pull_request' }}
+          push: ${{ github.event_name != 'pull_request' && steps.publish.outputs.decision == 'push' }}
           tags: ${{ steps.tags.outputs.tags }}
+          labels: ${{ steps.labels.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
@@ -231,16 +344,19 @@ jobs:
     needs: changes
     if: needs.changes.outputs.api-gateway == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      # actions/checkout@v4 (11d5960a326750d5838078e36cf38b85af677262)
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
 
-      - uses: actions/setup-java@v4
+      # actions/setup-java@v4 (d7793b545071e98d581d3bf084a51c3213318a07)
+      - uses: actions/setup-java@d7793b545071e98d581d3bf084a51c3213318a07
         with:
           java-version: '25'
           distribution: 'temurin'
 
-      - uses: actions/cache@v4
+      # actions/cache@v4 (0057852bfaa89a56745cba8c7296529d2fc39830)
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
         with:
           path: ~/.m2/repository
           key: ${{ runner.os }}-maven-api-gateway-${{ hashFiles('api-gateway/pom.xml') }}
@@ -254,19 +370,22 @@ jobs:
 
       - name: Upload test report
         if: always()
-        uses: actions/upload-artifact@v4
+        # actions/upload-artifact@v4 (ea165f8d65b6e75b540449e92b4886f43607fa02)
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: api-gateway-test-report
           path: api-gateway/target/surefire-reports/
           if-no-files-found: ignore
 
-      - uses: aws-actions/configure-aws-credentials@v4
+      # aws-actions/configure-aws-credentials@v4 (ff717079ee2060e4bcee96c4779b553acc87447c)
+      - uses: aws-actions/configure-aws-credentials@ff717079ee2060e4bcee96c4779b553acc87447c
         if: success() && github.event_name != 'pull_request'
         with:
           role-to-assume: arn:aws:iam::799111666795:role/github-actions-onlineshop
           aws-region: ${{ env.AWS_REGION }}
 
-      - uses: aws-actions/amazon-ecr-login@v2
+      # aws-actions/amazon-ecr-login@v2 (d539f0932e70871a027e9d5a9d8fc38589180a64)
+      - uses: aws-actions/amazon-ecr-login@d539f0932e70871a027e9d5a9d8fc38589180a64
         if: success() && github.event_name != 'pull_request'
 
       - name: Compute Docker tags
@@ -283,54 +402,373 @@ jobs:
           fi
           echo "tags=$ALL_TAGS" >> $GITHUB_OUTPUT
 
-      - uses: docker/setup-buildx-action@v3
+      - name: Compute OCI labels
+        id: labels
+        if: success()
+        run: |
+          CREATED=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          {
+            echo "labels<<GH_LABELS"
+            echo "org.opencontainers.image.revision=${{ github.sha }}"
+            echo "org.opencontainers.image.source=https://github.com/${{ github.repository }}"
+            echo "org.opencontainers.image.created=$CREATED"
+            echo "org.opencontainers.image.title=OnlineShop API gateway"
+            echo "org.onlineshop.component=api-gateway"
+            echo "org.onlineshop.build-run=${{ github.run_id }}-${{ github.run_attempt }}"
+            echo "org.onlineshop.producer.run-id=${{ github.run_id }}"
+            echo "org.onlineshop.producer.run-attempt=${{ github.run_attempt }}"
+            echo "org.onlineshop.producer.event=${{ github.event_name }}"
+            echo "org.onlineshop.producer.ref=${{ github.ref }}"
+            echo "GH_LABELS"
+          } >> "$GITHUB_OUTPUT"
+
+      # docker/setup-buildx-action@v3 (8d2750c68a42422c14e847fe6c8ac0403b4cbd6f)
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f
         if: success()
 
-      - uses: docker/build-push-action@v6
+      # Idempotent sha-<full-sha> publishing (Pass 3, Decision 11): reuse a
+      # trusted canonical image instead of pushing rebuilt bytes. Runs after
+      # buildx setup so image-labels.sh can use `docker buildx imagetools`.
+      - name: Resolve candidate image publishing
+        id: publish
+        if: success() && github.event_name != 'pull_request'
+        env:
+          ECR_REGISTRY: ${{ env.ECR_REGISTRY }}
+          ECR_REPOSITORY: onlineshop-api-gateway
+          CANDIDATE_TAG: sha-${{ github.sha }}
+          GITHUB_SHA: ${{ github.sha }}
+          GITHUB_RUN_ID: ${{ github.run_id }}
+          GITHUB_RUN_ATTEMPT: ${{ github.run_attempt }}
+          GITHUB_EVENT_NAME: ${{ github.event_name }}
+          GITHUB_REF: ${{ github.ref }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: bash "${{ env.RELEASE }}/bin/publish-candidate-image.sh" --profile dpm-profile --region ${{ env.AWS_REGION }}
+
+      # docker/build-push-action@v6 (10e90e3645eae34f1e60eeb005ba3a3d33f178e8)
+      - uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8
         if: success()
         with:
           context: api-gateway
-          push: ${{ github.event_name != 'pull_request' }}
+          push: ${{ github.event_name != 'pull_request' && steps.publish.outputs.decision == 'push' }}
           tags: ${{ steps.tags.outputs.tags }}
+          labels: ${{ steps.labels.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
+  frontend:
+    needs: changes
+    if: needs.changes.outputs.frontend == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # Pass 3, subphase 3.3: validation-only job. No `id-token: write`, so it can
+    # never request AWS OIDC credentials, and no repository-write permissions.
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      # actions/checkout@v4 (11d5960a326750d5838078e36cf38b85af677262)
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+
+      # actions/setup-node@v4 (49933ea5288caeca8642d1e84afbd3f7d6820020)
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run build
+
+  e2e-pr:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # Pass 3, subphase 3.3: validation-only job. No `id-token: write`, so it can
+    # never request AWS OIDC credentials, and no repository-write permissions.
+    permissions:
+      contents: read
+    steps:
+      # actions/checkout@v4 (11d5960a326750d5838078e36cf38b85af677262)
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+
+      - name: Build and start isolated candidate stack
+        run: docker compose up -d --build --wait auth-service items-service api-gateway
+
+      # actions/setup-java@v4 (d7793b545071e98d581d3bf084a51c3213318a07)
+      - uses: actions/setup-java@d7793b545071e98d581d3bf084a51c3213318a07
+        with:
+          java-version: '25'
+          distribution: 'temurin'
+
+      # actions/cache@v4 (0057852bfaa89a56745cba8c7296529d2fc39830)
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: ~/.m2/repository
+          key: ${{ runner.os }}-maven-e2e-${{ hashFiles('e2e-tests/pom.xml') }}
+          restore-keys: |
+            ${{ runner.os }}-maven-e2e-
+            ${{ runner.os }}-maven-
+
+      - name: Run blocking E2E tests
+        working-directory: e2e-tests
+        run: chmod +x mvnw && ./mvnw clean test
+
+      - name: Capture container diagnostics
+        if: failure()
+        run: docker compose ps && docker compose logs --no-color auth-service items-service api-gateway
+
+      - name: Stop isolated candidate stack
+        if: always()
+        run: docker compose down --volumes --remove-orphans
+
+  # Singleton staging mutation: resume -> deploy -> cloud E2E -> teardown, all
+  # owned by this one job. Job-level concurrency (cancel-in-progress: false)
+  # serializes main pushes so a newer run's resume can never race an older
+  # run's teardown; teardown is always() and belongs to the same run that
+  # created the environment.
   e2e-staging:
-    needs: [auth, items, api-gateway]
+    needs: [auth, items, api-gateway, frontend]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 60
+    concurrency:
+      group: ${{ github.workflow }}-staging-${{ github.ref }}
+      cancel-in-progress: false
+    outputs:
+      validatedAt: ${{ steps.validate.outputs.validatedAt }}
     steps:
-      - uses: actions/checkout@v4
+      # actions/checkout@v4 (11d5960a326750d5838078e36cf38b85af677262)
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
 
-      - uses: aws-actions/configure-aws-credentials@v4
+      # aws-actions/configure-aws-credentials@v4 (ff717079ee2060e4bcee96c4779b553acc87447c)
+      - uses: aws-actions/configure-aws-credentials@ff717079ee2060e4bcee96c4779b553acc87447c
         with:
           role-to-assume: arn:aws:iam::799111666795:role/github-actions-onlineshop
           aws-region: ${{ env.AWS_REGION }}
+
+      - name: Configure mandatory AWS CLI profile
+        run: |
+          aws configure set aws_access_key_id "$AWS_ACCESS_KEY_ID" --profile dpm-profile
+          aws configure set aws_secret_access_key "$AWS_SECRET_ACCESS_KEY" --profile dpm-profile
+          aws configure set aws_session_token "$AWS_SESSION_TOKEN" --profile dpm-profile
+          aws sts get-caller-identity --profile dpm-profile --region eu-north-1
+
+      - name: Resume isolated staging environment
+        run: bash scripts/resume-staging.sh --on-demand
 
       - name: Deploy to staging
         run: |
           chmod +x scripts/ci-deploy-staging.sh
           bash scripts/ci-deploy-staging.sh sha-${{ github.sha }}
 
-      - uses: actions/setup-java@v4
+      # actions/setup-java@v4 (d7793b545071e98d581d3bf084a51c3213318a07)
+      - uses: actions/setup-java@d7793b545071e98d581d3bf084a51c3213318a07
         with:
           java-version: '25'
           distribution: 'temurin'
 
-      - uses: actions/cache@v4
+      # actions/cache@v4 (0057852bfaa89a56745cba8c7296529d2fc39830)
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
         with:
           path: ~/.m2/repository
           key: ${{ runner.os }}-maven-e2e-${{ hashFiles('e2e-tests/pom.xml') }}
           restore-keys: |
             ${{ runner.os }}-maven-e2e-
+            ${{ runner.os }}-maven-
 
       - name: Run E2E tests against staging
         working-directory: e2e-tests
         run: |
           STAGING_URL=$(aws elbv2 describe-load-balancers \
-            --names onlineshop-staging-alb \
+            --names onlineshop-staging-v2-alb \
+            --profile dpm-profile \
+            --region eu-north-1 \
             --query 'LoadBalancers[0].DNSName' \
             --output text)
           echo "Testing against staging: $STAGING_URL"
           E2E_BASE_URL="http://$STAGING_URL" ./mvnw clean test
+
+      - name: Record staging validation timestamp
+        id: validate
+        if: success()
+        run: echo "validatedAt=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
+
+      - name: Capture staging failure diagnostics
+        if: failure()
+        run: bash scripts/capture-staging-diagnostics.sh > staging-diagnostics.txt 2>&1 || true
+
+      - name: Preserve staging failure diagnostics
+        if: failure()
+        # actions/upload-artifact@v4 (ea165f8d65b6e75b540449e92b4886f43607fa02)
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          # v4 artifacts are immutable: include the attempt so a rerun that
+          # fails staging again does not collide with the previous attempt.
+          name: staging-failure-${{ github.sha }}-${{ github.run_attempt }}
+          path: staging-diagnostics.txt
+          if-no-files-found: warn
+          retention-days: 14
+
+      # Teardown ownership: the run that resumed staging tears it down. This is
+      # always() and serialized by the job concurrency group above.
+      - name: Tear down isolated staging environment
+        if: always()
+        run: bash scripts/pause-staging.sh
+
+  # One candidate evidence bundle per successful main push: emitted only after
+  # Auth, Items, API Gateway, frontend, and the cloud staging E2E job all pass.
+  candidate-evidence:
+    needs: [auth, items, api-gateway, frontend, e2e-staging]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' &&
+        needs.auth.result == 'success' && needs.items.result == 'success' &&
+        needs.api-gateway.result == 'success' && needs.frontend.result == 'success' &&
+        needs.e2e-staging.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      BUNDLE_DIR: candidate-evidence
+      ARTIFACT_NAME: candidate-evidence-${{ github.sha }}-${{ github.run_attempt }}
+      SYFT_CACHE_DIR: /tmp/onlineshop-syft
+    steps:
+      # actions/checkout@v4 (11d5960a326750d5838078e36cf38b85af677262)
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+
+      # actions/setup-node@v4 (49933ea5288caeca8642d1e84afbd3f7d6820020)
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      # aws-actions/configure-aws-credentials@v4 (ff717079ee2060e4bcee96c4779b553acc87447c)
+      - uses: aws-actions/configure-aws-credentials@ff717079ee2060e4bcee96c4779b553acc87447c
+        with:
+          role-to-assume: arn:aws:iam::799111666795:role/github-actions-onlineshop
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Configure mandatory AWS CLI profile
+        run: |
+          aws configure set aws_access_key_id "$AWS_ACCESS_KEY_ID" --profile dpm-profile
+          aws configure set aws_secret_access_key "$AWS_SECRET_ACCESS_KEY" --profile dpm-profile
+          aws configure set aws_session_token "$AWS_SESSION_TOKEN" --profile dpm-profile
+          aws sts get-caller-identity --profile dpm-profile --region eu-north-1
+
+      # aws-actions/amazon-ecr-login@v2 (d539f0932e70871a027e9d5a9d8fc38589180a64)
+      - uses: aws-actions/amazon-ecr-login@d539f0932e70871a027e9d5a9d8fc38589180a64
+
+      # docker/setup-buildx-action@v3 (8d2750c68a42422c14e847fe6c8ac0403b4cbd6f)
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f
+
+      - name: Resolve backend digests
+        id: digests
+        run: |
+          for entry in "auth:AUTH_DIGEST" "items:ITEMS_DIGEST" "api-gateway:GATEWAY_DIGEST"; do
+            repo="${entry%%:*}"
+            var="${entry##*:}"
+            digest=$(aws ecr describe-images --profile dpm-profile --region ${{ env.AWS_REGION }} \
+              --repository-name "onlineshop-$repo" \
+              --image-ids "imageTag=sha-${{ github.sha }}" \
+              --query 'imageDetails[0].imageDigest' \
+              --output text)
+            echo "${var}=${digest}" >> "$GITHUB_ENV"
+            echo "onlineshop-$repo sha-${{ github.sha }} -> $digest"
+          done
+
+      - name: Verify canonical producer set
+        run: |
+          bash "${{ env.RELEASE }}/bin/verify-producer-set.sh" \
+            --sha "${{ github.sha }}" \
+            --registry "${{ env.ECR_REGISTRY }}" \
+            --profile dpm-profile --region ${{ env.AWS_REGION }}
+
+      - name: Read canonical producer identity
+        id: producer
+        run: |
+          RECORD=$(bash "${{ env.RELEASE }}/bin/image-labels.sh" \
+            --registry "${{ env.ECR_REGISTRY }}" --repository onlineshop-auth \
+            --tag "sha-${{ github.sha }}" --profile dpm-profile --region ${{ env.AWS_REGION }})
+          echo "producer-run-id=$(printf '%s' "$RECORD" | jq -r '.labels["org.onlineshop.producer.run-id"]')" >> "$GITHUB_OUTPUT"
+          echo "producer-run-attempt=$(printf '%s' "$RECORD" | jq -r '.labels["org.onlineshop.producer.run-attempt"]')" >> "$GITHUB_OUTPUT"
+
+      - name: Build frontend for the candidate artifact (VITE_API_URL='')
+        working-directory: frontend
+        run: |
+          npm ci
+          VITE_API_URL='' npm run build
+
+      - name: Package frontend candidate archive
+        run: bash "${{ env.RELEASE }}/bin/package-frontend.sh" --dist frontend/dist --out "${{ env.BUNDLE_DIR }}"
+
+      - name: Generate frontend SBOM
+        run: bash "${{ env.RELEASE }}/bin/generate-sbom.sh" --target "dir:frontend/dist" --output "${{ env.BUNDLE_DIR }}/frontend.spdx.json"
+
+      - name: Generate Auth SBOM
+        run: bash "${{ env.RELEASE }}/bin/generate-sbom.sh" --target "registry:${{ env.ECR_REGISTRY }}/onlineshop-auth@${{ env.AUTH_DIGEST }}" --output "${{ env.BUNDLE_DIR }}/auth.spdx.json"
+
+      - name: Generate Items SBOM
+        run: bash "${{ env.RELEASE }}/bin/generate-sbom.sh" --target "registry:${{ env.ECR_REGISTRY }}/onlineshop-items@${{ env.ITEMS_DIGEST }}" --output "${{ env.BUNDLE_DIR }}/items.spdx.json"
+
+      - name: Generate API Gateway SBOM
+        run: bash "${{ env.RELEASE }}/bin/generate-sbom.sh" --target "registry:${{ env.ECR_REGISTRY }}/onlineshop-api-gateway@${{ env.GATEWAY_DIGEST }}" --output "${{ env.BUNDLE_DIR }}/api-gateway.spdx.json"
+
+      - name: Record test conclusions
+        run: |
+          jq -n \
+            --arg auth "${{ needs.auth.result }}" \
+            --arg items "${{ needs.items.result }}" \
+            --arg apiGateway "${{ needs.api-gateway.result }}" \
+            --arg frontend "${{ needs.frontend.result }}" \
+            --arg e2eStaging "${{ needs.e2e-staging.result }}" \
+            '{auth: $auth, items: $items, apiGateway: $apiGateway, frontend: $frontend, e2eStaging: $e2eStaging}' \
+            > conclusions.json
+
+      - name: Emit candidate evidence bundle
+        run: |
+          bash "${{ env.RELEASE }}/bin/emit-candidate-evidence.sh" \
+            --bundle-dir "${{ env.BUNDLE_DIR }}" \
+            --artifact-name "${{ env.ARTIFACT_NAME }}" \
+            --auth-digest "${{ env.AUTH_DIGEST }}" \
+            --items-digest "${{ env.ITEMS_DIGEST }}" \
+            --api-gateway-digest "${{ env.GATEWAY_DIGEST }}" \
+            --frontend-sha256 "$(jq -r '.sha256' "${{ env.BUNDLE_DIR }}/frontend-package.json")" \
+            --validated-at "${{ needs.e2e-staging.outputs.validatedAt }}" \
+            --producer-run-id "${{ steps.producer.outputs.producer-run-id }}" \
+            --producer-run-attempt "${{ steps.producer.outputs.producer-run-attempt }}" \
+            --conclusions conclusions.json
+
+      - name: Upload candidate evidence bundle
+        id: upload
+        # actions/upload-artifact@v4 (ea165f8d65b6e75b540449e92b4886f43607fa02)
+        # v4 returns artifact-id, artifact-url and artifact-digest (the GitHub
+        # service-reported SHA-256 of the uploaded archive) as step outputs.
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: ${{ env.ARTIFACT_NAME }}
+          path: ${{ env.BUNDLE_DIR }}
+          retention-days: 30
+
+      - name: Record candidate evidence artifact identity
+        run: |
+          bash "${{ env.RELEASE }}/bin/record-artifact.sh" \
+            --run-id "${{ github.run_id }}" \
+            --run-attempt "${{ github.run_attempt }}" \
+            --artifact-id "${{ steps.upload.outputs.artifact-id }}" \
+            --artifact-url "${{ steps.upload.outputs.artifact-url }}" \
+            --artifact-digest "${{ steps.upload.outputs.artifact-digest }}" \
+            --artifact-name "${{ env.ARTIFACT_NAME }}" \
+            --output artifact-id.json
+
+      - name: Upload artifact ID record
+        # The bundle's own artifact ID/digest cannot live inside the bundle it
+        # describes (circular self-checksum), so the pointer artifact above is
+        # the durable external reference consumed by promotion.
+        # actions/upload-artifact@v4 (ea165f8d65b6e75b540449e92b4886f43607fa02)
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: candidate-artifact-id-${{ github.sha }}-${{ github.run_attempt }}
+          path: artifact-id.json
+          retention-days: 30

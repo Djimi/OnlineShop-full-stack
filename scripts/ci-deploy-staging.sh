@@ -9,9 +9,11 @@ if [ -z "$IMAGE_TAG" ]; then
   exit 1
 fi
 
-CLUSTER="onlineshop-cluster"
+CLUSTER="onlineshop-staging-cluster"
 ECR_BASE="799111666795.dkr.ecr.eu-north-1.amazonaws.com"
-AWS_ARGS="--region eu-north-1"
+AWS_ARGS="--profile dpm-profile --region eu-north-1"
+
+aws sts get-caller-identity $AWS_ARGS >/dev/null
 
 echo "=== Deploying tag '$IMAGE_TAG' to staging ==="
 
@@ -20,6 +22,23 @@ SERVICES=(
   "onlineshop-items-staging:onlineshop-items:items"
   "onlineshop-api-gateway-staging:onlineshop-api-gateway:api-gateway"
 )
+
+echo "Preflight: verifying '$IMAGE_TAG' exists in every ECR repository..."
+MISSING_IMAGE=0
+for svc_entry in "${SERVICES[@]}"; do
+  IFS=':' read -r _ ECR_REPO _ <<< "$svc_entry"
+  if ! aws ecr describe-images $AWS_ARGS --repository-name "$ECR_REPO" \
+    --image-ids "imageTag=$IMAGE_TAG" --query 'imageDetails[0].imageDigest' \
+    --output text >/dev/null 2>&1; then
+    echo "ERROR: $ECR_REPO:$IMAGE_TAG does not exist" >&2
+    MISSING_IMAGE=1
+  fi
+done
+[ "$MISSING_IMAGE" = "0" ] || {
+  echo "ERROR: refusing partial staging deployment; publish the same immutable tag to all repositories first." >&2
+  exit 1
+}
+echo "Preflight passed."
 
 for svc_entry in "${SERVICES[@]}"; do
   IFS=':' read -r SERVICE_NAME ECR_REPO CONTAINER_NAME <<< "$svc_entry"
@@ -35,7 +54,7 @@ for svc_entry in "${SERVICES[@]}"; do
 
   if [ -z "$TD_ARN" ] || [ "$TD_ARN" = "None" ]; then
     echo "ERROR: Service '$SERVICE_NAME' not found in cluster '$CLUSTER'"
-    echo "Run scripts/setup-staging-env.sh first to create staging infrastructure."
+    echo "Run the isolated staging provisioning/lifecycle scripts first."
     exit 1
   fi
 
@@ -72,6 +91,14 @@ for svc_entry in "${SERVICES[@]}"; do
     --query 'taskDefinition.taskDefinitionArn' \
     --output text)
 
+  REGISTERED_TD_ARN=$(aws ecs describe-task-definition $AWS_ARGS \
+    --task-definition "$NEW_TD_ARN" \
+    --query 'taskDefinition.taskDefinitionArn' --output text)
+  [ "$REGISTERED_TD_ARN" = "$NEW_TD_ARN" ] || {
+    echo "ERROR: task definition registration was not verified" >&2
+    exit 1
+  }
+
   echo "New task definition: $NEW_TD_ARN"
 
   echo "Updating service '$SERVICE_NAME' to use new task definition..."
@@ -82,21 +109,28 @@ for svc_entry in "${SERVICES[@]}"; do
     --desired-count 1 \
     --no-cli-pager > /dev/null
 
-  echo "Waiting for deployment to stabilize (60s timeout)..."
-  aws ecs wait services-stable $AWS_ARGS \
+  ACTIVE_TD_ARN=$(aws ecs describe-services $AWS_ARGS --cluster "$CLUSTER" \
+    --services "$SERVICE_NAME" --query 'services[0].taskDefinition' --output text)
+  [ "$ACTIVE_TD_ARN" = "$NEW_TD_ARN" ] || {
+    echo "ERROR: service task definition update was not verified" >&2
+    exit 1
+  }
+
+  echo "Waiting for deployment to stabilize..."
+  if ! aws ecs wait services-stable $AWS_ARGS \
     --cluster "$CLUSTER" \
-    --services "$SERVICE_NAME" \
-    --max-wait 60 2>/dev/null || {
-    echo "WARNING: Timed out waiting for '$SERVICE_NAME'. Checking task status..."
+    --services "$SERVICE_NAME"; then
+    echo "ERROR: '$SERVICE_NAME' did not stabilize. Checking task status..."
     TASK_ARN=$(aws ecs list-tasks $AWS_ARGS --cluster "$CLUSTER" --service-name "$SERVICE_NAME" --query 'taskArns[0]' --output text)
     if [ -n "$TASK_ARN" ] && [ "$TASK_ARN" != "None" ]; then
       aws ecs describe-tasks $AWS_ARGS --cluster "$CLUSTER" --tasks "$TASK_ARN" \
         --query 'tasks[0].{lastStatus:lastStatus,healthStatus:healthStatus,reason:stopReason}' \
         --output table
     fi
-  }
+    exit 1
+  fi
 
-  echo "'$SERVICE_NAME' deployment initiated."
+  echo "'$SERVICE_NAME' deployment is stable."
 done
 
 echo ""

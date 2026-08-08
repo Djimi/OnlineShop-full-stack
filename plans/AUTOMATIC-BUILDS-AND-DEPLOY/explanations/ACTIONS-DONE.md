@@ -33,8 +33,8 @@ Created `scripts/` directory with two self-contained bash scripts:
 
 | Script | Path | Purpose | Paused Cost |
 |---|---|---|---|
-| `pause-playground.sh` | `plans/AUTOMATIC-BUILDS-AND-DEPLOY/scripts/pause-playground.sh` | Scale ECS to 0 + delete ALB infrastructure | ~$1.25/month |
-| `resume-playground.sh` | `plans/AUTOMATIC-BUILDS-AND-DEPLOY/scripts/resume-playground.sh` | Recreate ALB + TG + listener, scale ECS to 1, wire up API Gateway | Running cost |
+| `pause-playground.sh` | `scripts/pause-playground.sh` | Scale ECS to 0 + delete ALB infrastructure | ~$1.25/month |
+| `resume-playground.sh` | `scripts/resume-playground.sh` | Recreate ALB + TG + listener, scale ECS to 1, wire up API Gateway | Running cost |
 
 **Hardcoded IDs embedded in scripts:**
 - VPC: `vpc-06eeb0bc47ecdbd61`
@@ -82,10 +82,10 @@ curl -s $ALB/items
 ### Run Pause/Resume
 ```bash
 # Pause (from repo root)
-bash plans/AUTOMATIC-BUILDS-AND-DEPLOY/scripts/pause-playground.sh
+bash scripts/pause-playground.sh
 
 # Resume
-bash plans/AUTOMATIC-BUILDS-AND-DEPLOY/scripts/resume-playground.sh
+bash scripts/resume-playground.sh
 ```
 
 ## Current Cost Projection (After Changes)

@@ -1,0 +1,977 @@
+{
+  "manifests": [
+    {
+      "components": {
+        "apiGateway": {
+          "candidateTag": "sha-0000000000000000000000000000000000000012",
+          "identity": "api-gateway/1.12.0",
+          "imageDigest": "sha256:3000000000000000000000000000000000000000000000000000000000000012",
+          "releaseTag": "release-1.12.0",
+          "repository": "onlineshop-api-gateway",
+          "sbom": "api-gateway.spdx.json",
+          "sourceSha": "0000000000000000000000000000000000000012",
+          "taskDefinitionArn": "arn:aws:ecs:eu-north-1:799111666795:task-definition/onlineshop-api-gateway:11"
+        },
+        "auth": {
+          "candidateTag": "sha-0000000000000000000000000000000000000012",
+          "identity": "auth/1.12.0",
+          "imageDigest": "sha256:1000000000000000000000000000000000000000000000000000000000000012",
+          "releaseTag": "release-1.12.0",
+          "repository": "onlineshop-auth",
+          "sbom": "auth.spdx.json",
+          "sourceSha": "0000000000000000000000000000000000000012",
+          "taskDefinitionArn": "arn:aws:ecs:eu-north-1:799111666795:task-definition/onlineshop-auth:3"
+        },
+        "frontend": {
+          "artifact": "frontend-dist.tar.gz",
+          "identity": "frontend/1.12.0",
+          "releasePrefix": "_releases/v1.12.0/",
+          "sbom": "frontend.spdx.json",
+          "sha256": "0000000000000000000000000000000000000000000000000000000000000112",
+          "sourceSha": "0000000000000000000000000000000000000012",
+          "versionMarker": "release.json"
+        },
+        "items": {
+          "candidateTag": "sha-0000000000000000000000000000000000000012",
+          "commonSourceSha": "0000000000000000000000000000000000000012",
+          "identity": "items/1.12.0",
+          "imageDigest": "sha256:2000000000000000000000000000000000000000000000000000000000000012",
+          "releaseTag": "release-1.12.0",
+          "repository": "onlineshop-items",
+          "sbom": "items.spdx.json",
+          "sourceSha": "0000000000000000000000000000000000000012",
+          "taskDefinitionArn": "arn:aws:ecs:eu-north-1:799111666795:task-definition/onlineshop-items:3"
+        }
+      },
+      "release": {
+        "artifactWorkflow": {
+          "conclusion": "success",
+          "event": "push",
+          "ref": "refs/heads/main",
+          "runAttempt": 1,
+          "runId": 98765432,
+          "url": "https://github.com/Djimi/OnlineShop-full-stack/actions/runs/98765432/attempts/1"
+        },
+        "candidateWorkflow": {
+          "conclusion": "success",
+          "event": "push",
+          "ref": "refs/heads/main",
+          "runAttempt": 1,
+          "runId": 98765432,
+          "url": "https://github.com/Djimi/OnlineShop-full-stack/actions/runs/98765432/attempts/1"
+        },
+        "createdAt": "2026-07-30T12:00:00Z",
+        "gitTag": "v1.12.0",
+        "promotionWorkflow": {
+          "actor": "djimi",
+          "approvedAt": "2026-07-30T14:00:00Z",
+          "approvedBy": "djimi",
+          "deployedAt": "2026-07-30T14:15:00.100Z",
+          "runId": 98765433
+        },
+        "repository": "Djimi/OnlineShop-full-stack",
+        "sourceSha": "0000000000000000000000000000000000000012",
+        "stagingValidation": {
+          "conclusion": "success",
+          "job": "e2e-staging",
+          "validatedAt": "2026-07-30T13:00:00Z"
+        },
+        "status": "official",
+        "version": "1.12.0"
+      },
+      "schemaVersion": 1
+    },
+    {
+      "components": {
+        "apiGateway": {
+          "candidateTag": "sha-0000000000000000000000000000000000000011",
+          "identity": "api-gateway/1.11.0",
+          "imageDigest": "sha256:3000000000000000000000000000000000000000000000000000000000000011",
+          "releaseTag": "release-1.11.0",
+          "repository": "onlineshop-api-gateway",
+          "sbom": "api-gateway.spdx.json",
+          "sourceSha": "0000000000000000000000000000000000000011",
+          "taskDefinitionArn": "arn:aws:ecs:eu-north-1:799111666795:task-definition/onlineshop-api-gateway:11"
+        },
+        "auth": {
+          "candidateTag": "sha-0000000000000000000000000000000000000011",
+          "identity": "auth/1.11.0",
+          "imageDigest": "sha256:1000000000000000000000000000000000000000000000000000000000000011",
+          "releaseTag": "release-1.11.0",
+          "repository": "onlineshop-auth",
+          "sbom": "auth.spdx.json",
+          "sourceSha": "0000000000000000000000000000000000000011",
+          "taskDefinitionArn": "arn:aws:ecs:eu-north-1:799111666795:task-definition/onlineshop-auth:3"
+        },
+        "frontend": {
+          "artifact": "frontend-dist.tar.gz",
+          "identity": "frontend/1.11.0",
+          "releasePrefix": "_releases/v1.11.0/",
+          "sbom": "frontend.spdx.json",
+          "sha256": "0000000000000000000000000000000000000000000000000000000000000111",
+          "sourceSha": "0000000000000000000000000000000000000011",
+          "versionMarker": "release.json"
+        },
+        "items": {
+          "candidateTag": "sha-0000000000000000000000000000000000000011",
+          "commonSourceSha": "0000000000000000000000000000000000000011",
+          "identity": "items/1.11.0",
+          "imageDigest": "sha256:2000000000000000000000000000000000000000000000000000000000000011",
+          "releaseTag": "release-1.11.0",
+          "repository": "onlineshop-items",
+          "sbom": "items.spdx.json",
+          "sourceSha": "0000000000000000000000000000000000000011",
+          "taskDefinitionArn": "arn:aws:ecs:eu-north-1:799111666795:task-definition/onlineshop-items:3"
+        }
+      },
+      "release": {
+        "artifactWorkflow": {
+          "conclusion": "success",
+          "event": "push",
+          "ref": "refs/heads/main",
+          "runAttempt": 1,
+          "runId": 98765432,
+          "url": "https://github.com/Djimi/OnlineShop-full-stack/actions/runs/98765432/attempts/1"
+        },
+        "candidateWorkflow": {
+          "conclusion": "success",
+          "event": "push",
+          "ref": "refs/heads/main",
+          "runAttempt": 1,
+          "runId": 98765432,
+          "url": "https://github.com/Djimi/OnlineShop-full-stack/actions/runs/98765432/attempts/1"
+        },
+        "createdAt": "2026-07-30T12:00:00Z",
+        "gitTag": "v1.11.0",
+        "promotionWorkflow": {
+          "actor": "djimi",
+          "approvedAt": "2026-07-30T14:00:00Z",
+          "approvedBy": "djimi",
+          "deployedAt": "2026-07-30T14:15:00.100Z",
+          "runId": 98765433
+        },
+        "repository": "Djimi/OnlineShop-full-stack",
+        "sourceSha": "0000000000000000000000000000000000000011",
+        "stagingValidation": {
+          "conclusion": "success",
+          "job": "e2e-staging",
+          "validatedAt": "2026-07-30T13:00:00Z"
+        },
+        "status": "official",
+        "version": "1.11.0"
+      },
+      "schemaVersion": 1
+    },
+    {
+      "components": {
+        "apiGateway": {
+          "candidateTag": "sha-0000000000000000000000000000000000000010",
+          "identity": "api-gateway/1.10.0",
+          "imageDigest": "sha256:3000000000000000000000000000000000000000000000000000000000000010",
+          "releaseTag": "release-1.10.0",
+          "repository": "onlineshop-api-gateway",
+          "sbom": "api-gateway.spdx.json",
+          "sourceSha": "0000000000000000000000000000000000000010",
+          "taskDefinitionArn": "arn:aws:ecs:eu-north-1:799111666795:task-definition/onlineshop-api-gateway:11"
+        },
+        "auth": {
+          "candidateTag": "sha-0000000000000000000000000000000000000010",
+          "identity": "auth/1.10.0",
+          "imageDigest": "sha256:1000000000000000000000000000000000000000000000000000000000000010",
+          "releaseTag": "release-1.10.0",
+          "repository": "onlineshop-auth",
+          "sbom": "auth.spdx.json",
+          "sourceSha": "0000000000000000000000000000000000000010",
+          "taskDefinitionArn": "arn:aws:ecs:eu-north-1:799111666795:task-definition/onlineshop-auth:3"
+        },
+        "frontend": {
+          "artifact": "frontend-dist.tar.gz",
+          "identity": "frontend/1.10.0",
+          "releasePrefix": "_releases/v1.10.0/",
+          "sbom": "frontend.spdx.json",
+          "sha256": "0000000000000000000000000000000000000000000000000000000000000110",
+          "sourceSha": "0000000000000000000000000000000000000010",
+          "versionMarker": "release.json"
+        },
+        "items": {
+          "candidateTag": "sha-0000000000000000000000000000000000000010",
+          "commonSourceSha": "0000000000000000000000000000000000000010",
+          "identity": "items/1.10.0",
+          "imageDigest": "sha256:2000000000000000000000000000000000000000000000000000000000000010",
+          "releaseTag": "release-1.10.0",
+          "repository": "onlineshop-items",
+          "sbom": "items.spdx.json",
+          "sourceSha": "0000000000000000000000000000000000000010",
+          "taskDefinitionArn": "arn:aws:ecs:eu-north-1:799111666795:task-definition/onlineshop-items:3"
+        }
+      },
+      "release": {
+        "artifactWorkflow": {
+          "conclusion": "success",
+          "event": "push",
+          "ref": "refs/heads/main",
+          "runAttempt": 1,
+          "runId": 98765432,
+          "url": "https://github.com/Djimi/OnlineShop-full-stack/actions/runs/98765432/attempts/1"
+        },
+        "candidateWorkflow": {
+          "conclusion": "success",
+          "event": "push",
+          "ref": "refs/heads/main",
+          "runAttempt": 1,
+          "runId": 98765432,
+          "url": "https://github.com/Djimi/OnlineShop-full-stack/actions/runs/98765432/attempts/1"
+        },
+        "createdAt": "2026-07-30T12:00:00Z",
+        "gitTag": "v1.10.0",
+        "promotionWorkflow": {
+          "actor": "djimi",
+          "approvedAt": "2026-07-30T14:00:00Z",
+          "approvedBy": "djimi",
+          "deployedAt": "2026-07-30T14:15:00.100Z",
+          "runId": 98765433
+        },
+        "repository": "Djimi/OnlineShop-full-stack",
+        "sourceSha": "0000000000000000000000000000000000000010",
+        "stagingValidation": {
+          "conclusion": "success",
+          "job": "e2e-staging",
+          "validatedAt": "2026-07-30T13:00:00Z"
+        },
+        "status": "official",
+        "version": "1.10.0"
+      },
+      "schemaVersion": 1
+    },
+    {
+      "components": {
+        "apiGateway": {
+          "candidateTag": "sha-0000000000000000000000000000000000000009",
+          "identity": "api-gateway/1.9.0",
+          "imageDigest": "sha256:3000000000000000000000000000000000000000000000000000000000000009",
+          "releaseTag": "release-1.9.0",
+          "repository": "onlineshop-api-gateway",
+          "sbom": "api-gateway.spdx.json",
+          "sourceSha": "0000000000000000000000000000000000000009",
+          "taskDefinitionArn": "arn:aws:ecs:eu-north-1:799111666795:task-definition/onlineshop-api-gateway:11"
+        },
+        "auth": {
+          "candidateTag": "sha-0000000000000000000000000000000000000009",
+          "identity": "auth/1.9.0",
+          "imageDigest": "sha256:1000000000000000000000000000000000000000000000000000000000000009",
+          "releaseTag": "release-1.9.0",
+          "repository": "onlineshop-auth",
+          "sbom": "auth.spdx.json",
+          "sourceSha": "0000000000000000000000000000000000000009",
+          "taskDefinitionArn": "arn:aws:ecs:eu-north-1:799111666795:task-definition/onlineshop-auth:3"
+        },
+        "frontend": {
+          "artifact": "frontend-dist.tar.gz",
+          "identity": "frontend/1.9.0",
+          "releasePrefix": "_releases/v1.9.0/",
+          "sbom": "frontend.spdx.json",
+          "sha256": "0000000000000000000000000000000000000000000000000000000000000109",
+          "sourceSha": "0000000000000000000000000000000000000009",
+          "versionMarker": "release.json"
+        },
+        "items": {
+          "candidateTag": "sha-0000000000000000000000000000000000000009",
+          "commonSourceSha": "0000000000000000000000000000000000000009",
+          "identity": "items/1.9.0",
+          "imageDigest": "sha256:2000000000000000000000000000000000000000000000000000000000000009",
+          "releaseTag": "release-1.9.0",
+          "repository": "onlineshop-items",
+          "sbom": "items.spdx.json",
+          "sourceSha": "0000000000000000000000000000000000000009",
+          "taskDefinitionArn": "arn:aws:ecs:eu-north-1:799111666795:task-definition/onlineshop-items:3"
+        }
+      },
+      "release": {
+        "artifactWorkflow": {
+          "conclusion": "success",
+          "event": "push",
+          "ref": "refs/heads/main",
+          "runAttempt": 1,
+          "runId": 98765432,
+          "url": "https://github.com/Djimi/OnlineShop-full-stack/actions/runs/98765432/attempts/1"
+        },
+        "candidateWorkflow": {
+          "conclusion": "success",
+          "event": "push",
+          "ref": "refs/heads/main",
+          "runAttempt": 1,
+          "runId": 98765432,
+          "url": "https://github.com/Djimi/OnlineShop-full-stack/actions/runs/98765432/attempts/1"
+        },
+        "createdAt": "2026-07-30T12:00:00Z",
+        "gitTag": "v1.9.0",
+        "promotionWorkflow": {
+          "actor": "djimi",
+          "approvedAt": "2026-07-30T14:00:00Z",
+          "approvedBy": "djimi",
+          "deployedAt": "2026-07-30T14:15:00.100Z",
+          "runId": 98765433
+        },
+        "repository": "Djimi/OnlineShop-full-stack",
+        "sourceSha": "0000000000000000000000000000000000000009",
+        "stagingValidation": {
+          "conclusion": "success",
+          "job": "e2e-staging",
+          "validatedAt": "2026-07-30T13:00:00Z"
+        },
+        "status": "official",
+        "version": "1.9.0"
+      },
+      "schemaVersion": 1
+    },
+    {
+      "components": {
+        "apiGateway": {
+          "candidateTag": "sha-0000000000000000000000000000000000000008",
+          "identity": "api-gateway/1.8.0",
+          "imageDigest": "sha256:3000000000000000000000000000000000000000000000000000000000000008",
+          "releaseTag": "release-1.8.0",
+          "repository": "onlineshop-api-gateway",
+          "sbom": "api-gateway.spdx.json",
+          "sourceSha": "0000000000000000000000000000000000000008",
+          "taskDefinitionArn": "arn:aws:ecs:eu-north-1:799111666795:task-definition/onlineshop-api-gateway:11"
+        },
+        "auth": {
+          "candidateTag": "sha-0000000000000000000000000000000000000008",
+          "identity": "auth/1.8.0",
+          "imageDigest": "sha256:1000000000000000000000000000000000000000000000000000000000000008",
+          "releaseTag": "release-1.8.0",
+          "repository": "onlineshop-auth",
+          "sbom": "auth.spdx.json",
+          "sourceSha": "0000000000000000000000000000000000000008",
+          "taskDefinitionArn": "arn:aws:ecs:eu-north-1:799111666795:task-definition/onlineshop-auth:3"
+        },
+        "frontend": {
+          "artifact": "frontend-dist.tar.gz",
+          "identity": "frontend/1.8.0",
+          "releasePrefix": "_releases/v1.8.0/",
+          "sbom": "frontend.spdx.json",
+          "sha256": "0000000000000000000000000000000000000000000000000000000000000108",
+          "sourceSha": "0000000000000000000000000000000000000008",
+          "versionMarker": "release.json"
+        },
+        "items": {
+          "candidateTag": "sha-0000000000000000000000000000000000000008",
+          "commonSourceSha": "0000000000000000000000000000000000000008",
+          "identity": "items/1.8.0",
+          "imageDigest": "sha256:2000000000000000000000000000000000000000000000000000000000000008",
+          "releaseTag": "release-1.8.0",
+          "repository": "onlineshop-items",
+          "sbom": "items.spdx.json",
+          "sourceSha": "0000000000000000000000000000000000000008",
+          "taskDefinitionArn": "arn:aws:ecs:eu-north-1:799111666795:task-definition/onlineshop-items:3"
+        }
+      },
+      "release": {
+        "artifactWorkflow": {
+          "conclusion": "success",
+          "event": "push",
+          "ref": "refs/heads/main",
+          "runAttempt": 1,
+          "runId": 98765432,
+          "url": "https://github.com/Djimi/OnlineShop-full-stack/actions/runs/98765432/attempts/1"
+        },
+        "candidateWorkflow": {
+          "conclusion": "success",
+          "event": "push",
+          "ref": "refs/heads/main",
+          "runAttempt": 1,
+          "runId": 98765432,
+          "url": "https://github.com/Djimi/OnlineShop-full-stack/actions/runs/98765432/attempts/1"
+        },
+        "createdAt": "2026-07-30T12:00:00Z",
+        "gitTag": "v1.8.0",
+        "promotionWorkflow": {
+          "actor": "djimi",
+          "approvedAt": "2026-07-30T14:00:00Z",
+          "approvedBy": "djimi",
+          "deployedAt": "2026-07-30T14:15:00.100Z",
+          "runId": 98765433
+        },
+        "repository": "Djimi/OnlineShop-full-stack",
+        "sourceSha": "0000000000000000000000000000000000000008",
+        "stagingValidation": {
+          "conclusion": "success",
+          "job": "e2e-staging",
+          "validatedAt": "2026-07-30T13:00:00Z"
+        },
+        "status": "official",
+        "version": "1.8.0"
+      },
+      "schemaVersion": 1
+    },
+    {
+      "components": {
+        "apiGateway": {
+          "candidateTag": "sha-0000000000000000000000000000000000000007",
+          "identity": "api-gateway/1.7.0",
+          "imageDigest": "sha256:3000000000000000000000000000000000000000000000000000000000000007",
+          "releaseTag": "release-1.7.0",
+          "repository": "onlineshop-api-gateway",
+          "sbom": "api-gateway.spdx.json",
+          "sourceSha": "0000000000000000000000000000000000000007",
+          "taskDefinitionArn": "arn:aws:ecs:eu-north-1:799111666795:task-definition/onlineshop-api-gateway:11"
+        },
+        "auth": {
+          "candidateTag": "sha-0000000000000000000000000000000000000007",
+          "identity": "auth/1.7.0",
+          "imageDigest": "sha256:1000000000000000000000000000000000000000000000000000000000000007",
+          "releaseTag": "release-1.7.0",
+          "repository": "onlineshop-auth",
+          "sbom": "auth.spdx.json",
+          "sourceSha": "0000000000000000000000000000000000000007",
+          "taskDefinitionArn": "arn:aws:ecs:eu-north-1:799111666795:task-definition/onlineshop-auth:3"
+        },
+        "frontend": {
+          "artifact": "frontend-dist.tar.gz",
+          "identity": "frontend/1.7.0",
+          "releasePrefix": "_releases/v1.7.0/",
+          "sbom": "frontend.spdx.json",
+          "sha256": "0000000000000000000000000000000000000000000000000000000000000107",
+          "sourceSha": "0000000000000000000000000000000000000007",
+          "versionMarker": "release.json"
+        },
+        "items": {
+          "candidateTag": "sha-0000000000000000000000000000000000000007",
+          "commonSourceSha": "0000000000000000000000000000000000000007",
+          "identity": "items/1.7.0",
+          "imageDigest": "sha256:2000000000000000000000000000000000000000000000000000000000000007",
+          "releaseTag": "release-1.7.0",
+          "repository": "onlineshop-items",
+          "sbom": "items.spdx.json",
+          "sourceSha": "0000000000000000000000000000000000000007",
+          "taskDefinitionArn": "arn:aws:ecs:eu-north-1:799111666795:task-definition/onlineshop-items:3"
+        }
+      },
+      "release": {
+        "artifactWorkflow": {
+          "conclusion": "success",
+          "event": "push",
+          "ref": "refs/heads/main",
+          "runAttempt": 1,
+          "runId": 98765432,
+          "url": "https://github.com/Djimi/OnlineShop-full-stack/actions/runs/98765432/attempts/1"
+        },
+        "candidateWorkflow": {
+          "conclusion": "success",
+          "event": "push",
+          "ref": "refs/heads/main",
+          "runAttempt": 1,
+          "runId": 98765432,
+          "url": "https://github.com/Djimi/OnlineShop-full-stack/actions/runs/98765432/attempts/1"
+        },
+        "createdAt": "2026-07-30T12:00:00Z",
+        "gitTag": "v1.7.0",
+        "promotionWorkflow": {
+          "actor": "djimi",
+          "approvedAt": "2026-07-30T14:00:00Z",
+          "approvedBy": "djimi",
+          "deployedAt": "2026-07-30T14:15:00.100Z",
+          "runId": 98765433
+        },
+        "repository": "Djimi/OnlineShop-full-stack",
+        "sourceSha": "0000000000000000000000000000000000000007",
+        "stagingValidation": {
+          "conclusion": "success",
+          "job": "e2e-staging",
+          "validatedAt": "2026-07-30T13:00:00Z"
+        },
+        "status": "official",
+        "version": "1.7.0"
+      },
+      "schemaVersion": 1
+    },
+    {
+      "components": {
+        "apiGateway": {
+          "candidateTag": "sha-0000000000000000000000000000000000000006",
+          "identity": "api-gateway/1.6.0",
+          "imageDigest": "sha256:3000000000000000000000000000000000000000000000000000000000000006",
+          "releaseTag": "release-1.6.0",
+          "repository": "onlineshop-api-gateway",
+          "sbom": "api-gateway.spdx.json",
+          "sourceSha": "0000000000000000000000000000000000000006",
+          "taskDefinitionArn": "arn:aws:ecs:eu-north-1:799111666795:task-definition/onlineshop-api-gateway:11"
+        },
+        "auth": {
+          "candidateTag": "sha-0000000000000000000000000000000000000006",
+          "identity": "auth/1.6.0",
+          "imageDigest": "sha256:1000000000000000000000000000000000000000000000000000000000000006",
+          "releaseTag": "release-1.6.0",
+          "repository": "onlineshop-auth",
+          "sbom": "auth.spdx.json",
+          "sourceSha": "0000000000000000000000000000000000000006",
+          "taskDefinitionArn": "arn:aws:ecs:eu-north-1:799111666795:task-definition/onlineshop-auth:3"
+        },
+        "frontend": {
+          "artifact": "frontend-dist.tar.gz",
+          "identity": "frontend/1.6.0",
+          "releasePrefix": "_releases/v1.6.0/",
+          "sbom": "frontend.spdx.json",
+          "sha256": "0000000000000000000000000000000000000000000000000000000000000106",
+          "sourceSha": "0000000000000000000000000000000000000006",
+          "versionMarker": "release.json"
+        },
+        "items": {
+          "candidateTag": "sha-0000000000000000000000000000000000000006",
+          "commonSourceSha": "0000000000000000000000000000000000000006",
+          "identity": "items/1.6.0",
+          "imageDigest": "sha256:2000000000000000000000000000000000000000000000000000000000000006",
+          "releaseTag": "release-1.6.0",
+          "repository": "onlineshop-items",
+          "sbom": "items.spdx.json",
+          "sourceSha": "0000000000000000000000000000000000000006",
+          "taskDefinitionArn": "arn:aws:ecs:eu-north-1:799111666795:task-definition/onlineshop-items:3"
+        }
+      },
+      "release": {
+        "artifactWorkflow": {
+          "conclusion": "success",
+          "event": "push",
+          "ref": "refs/heads/main",
+          "runAttempt": 1,
+          "runId": 98765432,
+          "url": "https://github.com/Djimi/OnlineShop-full-stack/actions/runs/98765432/attempts/1"
+        },
+        "candidateWorkflow": {
+          "conclusion": "success",
+          "event": "push",
+          "ref": "refs/heads/main",
+          "runAttempt": 1,
+          "runId": 98765432,
+          "url": "https://github.com/Djimi/OnlineShop-full-stack/actions/runs/98765432/attempts/1"
+        },
+        "createdAt": "2026-07-30T12:00:00Z",
+        "gitTag": "v1.6.0",
+        "promotionWorkflow": {
+          "actor": "djimi",
+          "approvedAt": "2026-07-30T14:00:00Z",
+          "approvedBy": "djimi",
+          "deployedAt": "2026-07-30T14:15:00.100Z",
+          "runId": 98765433
+        },
+        "repository": "Djimi/OnlineShop-full-stack",
+        "sourceSha": "0000000000000000000000000000000000000006",
+        "stagingValidation": {
+          "conclusion": "success",
+          "job": "e2e-staging",
+          "validatedAt": "2026-07-30T13:00:00Z"
+        },
+        "status": "official",
+        "version": "1.6.0"
+      },
+      "schemaVersion": 1
+    },
+    {
+      "components": {
+        "apiGateway": {
+          "candidateTag": "sha-0000000000000000000000000000000000000005",
+          "identity": "api-gateway/1.5.0",
+          "imageDigest": "sha256:3000000000000000000000000000000000000000000000000000000000000005",
+          "releaseTag": "release-1.5.0",
+          "repository": "onlineshop-api-gateway",
+          "sbom": "api-gateway.spdx.json",
+          "sourceSha": "0000000000000000000000000000000000000005",
+          "taskDefinitionArn": "arn:aws:ecs:eu-north-1:799111666795:task-definition/onlineshop-api-gateway:11"
+        },
+        "auth": {
+          "candidateTag": "sha-0000000000000000000000000000000000000005",
+          "identity": "auth/1.5.0",
+          "imageDigest": "sha256:1000000000000000000000000000000000000000000000000000000000000005",
+          "releaseTag": "release-1.5.0",
+          "repository": "onlineshop-auth",
+          "sbom": "auth.spdx.json",
+          "sourceSha": "0000000000000000000000000000000000000005",
+          "taskDefinitionArn": "arn:aws:ecs:eu-north-1:799111666795:task-definition/onlineshop-auth:3"
+        },
+        "frontend": {
+          "artifact": "frontend-dist.tar.gz",
+          "identity": "frontend/1.5.0",
+          "releasePrefix": "_releases/v1.5.0/",
+          "sbom": "frontend.spdx.json",
+          "sha256": "0000000000000000000000000000000000000000000000000000000000000105",
+          "sourceSha": "0000000000000000000000000000000000000005",
+          "versionMarker": "release.json"
+        },
+        "items": {
+          "candidateTag": "sha-0000000000000000000000000000000000000005",
+          "commonSourceSha": "0000000000000000000000000000000000000005",
+          "identity": "items/1.5.0",
+          "imageDigest": "sha256:2000000000000000000000000000000000000000000000000000000000000005",
+          "releaseTag": "release-1.5.0",
+          "repository": "onlineshop-items",
+          "sbom": "items.spdx.json",
+          "sourceSha": "0000000000000000000000000000000000000005",
+          "taskDefinitionArn": "arn:aws:ecs:eu-north-1:799111666795:task-definition/onlineshop-items:3"
+        }
+      },
+      "release": {
+        "artifactWorkflow": {
+          "conclusion": "success",
+          "event": "push",
+          "ref": "refs/heads/main",
+          "runAttempt": 1,
+          "runId": 98765432,
+          "url": "https://github.com/Djimi/OnlineShop-full-stack/actions/runs/98765432/attempts/1"
+        },
+        "candidateWorkflow": {
+          "conclusion": "success",
+          "event": "push",
+          "ref": "refs/heads/main",
+          "runAttempt": 1,
+          "runId": 98765432,
+          "url": "https://github.com/Djimi/OnlineShop-full-stack/actions/runs/98765432/attempts/1"
+        },
+        "createdAt": "2026-07-30T12:00:00Z",
+        "gitTag": "v1.5.0",
+        "promotionWorkflow": {
+          "actor": "djimi",
+          "approvedAt": "2026-07-30T14:00:00Z",
+          "approvedBy": "djimi",
+          "deployedAt": "2026-07-30T14:15:00.100Z",
+          "runId": 98765433
+        },
+        "repository": "Djimi/OnlineShop-full-stack",
+        "sourceSha": "0000000000000000000000000000000000000005",
+        "stagingValidation": {
+          "conclusion": "success",
+          "job": "e2e-staging",
+          "validatedAt": "2026-07-30T13:00:00Z"
+        },
+        "status": "official",
+        "version": "1.5.0"
+      },
+      "schemaVersion": 1
+    },
+    {
+      "components": {
+        "apiGateway": {
+          "candidateTag": "sha-0000000000000000000000000000000000000004",
+          "identity": "api-gateway/1.4.0",
+          "imageDigest": "sha256:3000000000000000000000000000000000000000000000000000000000000004",
+          "releaseTag": "release-1.4.0",
+          "repository": "onlineshop-api-gateway",
+          "sbom": "api-gateway.spdx.json",
+          "sourceSha": "0000000000000000000000000000000000000004",
+          "taskDefinitionArn": "arn:aws:ecs:eu-north-1:799111666795:task-definition/onlineshop-api-gateway:11"
+        },
+        "auth": {
+          "candidateTag": "sha-0000000000000000000000000000000000000004",
+          "identity": "auth/1.4.0",
+          "imageDigest": "sha256:1000000000000000000000000000000000000000000000000000000000000004",
+          "releaseTag": "release-1.4.0",
+          "repository": "onlineshop-auth",
+          "sbom": "auth.spdx.json",
+          "sourceSha": "0000000000000000000000000000000000000004",
+          "taskDefinitionArn": "arn:aws:ecs:eu-north-1:799111666795:task-definition/onlineshop-auth:3"
+        },
+        "frontend": {
+          "artifact": "frontend-dist.tar.gz",
+          "identity": "frontend/1.4.0",
+          "releasePrefix": "_releases/v1.4.0/",
+          "sbom": "frontend.spdx.json",
+          "sha256": "0000000000000000000000000000000000000000000000000000000000000104",
+          "sourceSha": "0000000000000000000000000000000000000004",
+          "versionMarker": "release.json"
+        },
+        "items": {
+          "candidateTag": "sha-0000000000000000000000000000000000000004",
+          "commonSourceSha": "0000000000000000000000000000000000000004",
+          "identity": "items/1.4.0",
+          "imageDigest": "sha256:2000000000000000000000000000000000000000000000000000000000000004",
+          "releaseTag": "release-1.4.0",
+          "repository": "onlineshop-items",
+          "sbom": "items.spdx.json",
+          "sourceSha": "0000000000000000000000000000000000000004",
+          "taskDefinitionArn": "arn:aws:ecs:eu-north-1:799111666795:task-definition/onlineshop-items:3"
+        }
+      },
+      "release": {
+        "artifactWorkflow": {
+          "conclusion": "success",
+          "event": "push",
+          "ref": "refs/heads/main",
+          "runAttempt": 1,
+          "runId": 98765432,
+          "url": "https://github.com/Djimi/OnlineShop-full-stack/actions/runs/98765432/attempts/1"
+        },
+        "candidateWorkflow": {
+          "conclusion": "success",
+          "event": "push",
+          "ref": "refs/heads/main",
+          "runAttempt": 1,
+          "runId": 98765432,
+          "url": "https://github.com/Djimi/OnlineShop-full-stack/actions/runs/98765432/attempts/1"
+        },
+        "createdAt": "2026-07-30T12:00:00Z",
+        "gitTag": "v1.4.0",
+        "promotionWorkflow": {
+          "actor": "djimi",
+          "approvedAt": "2026-07-30T14:00:00Z",
+          "approvedBy": "djimi",
+          "deployedAt": "2026-07-30T14:15:00.100Z",
+          "runId": 98765433
+        },
+        "repository": "Djimi/OnlineShop-full-stack",
+        "sourceSha": "0000000000000000000000000000000000000004",
+        "stagingValidation": {
+          "conclusion": "success",
+          "job": "e2e-staging",
+          "validatedAt": "2026-07-30T13:00:00Z"
+        },
+        "status": "official",
+        "version": "1.4.0"
+      },
+      "schemaVersion": 1
+    },
+    {
+      "components": {
+        "apiGateway": {
+          "candidateTag": "sha-0000000000000000000000000000000000000003",
+          "identity": "api-gateway/1.3.0",
+          "imageDigest": "sha256:3000000000000000000000000000000000000000000000000000000000000003",
+          "releaseTag": "release-1.3.0",
+          "repository": "onlineshop-api-gateway",
+          "sbom": "api-gateway.spdx.json",
+          "sourceSha": "0000000000000000000000000000000000000003",
+          "taskDefinitionArn": "arn:aws:ecs:eu-north-1:799111666795:task-definition/onlineshop-api-gateway:11"
+        },
+        "auth": {
+          "candidateTag": "sha-0000000000000000000000000000000000000003",
+          "identity": "auth/1.3.0",
+          "imageDigest": "sha256:1000000000000000000000000000000000000000000000000000000000000003",
+          "releaseTag": "release-1.3.0",
+          "repository": "onlineshop-auth",
+          "sbom": "auth.spdx.json",
+          "sourceSha": "0000000000000000000000000000000000000003",
+          "taskDefinitionArn": "arn:aws:ecs:eu-north-1:799111666795:task-definition/onlineshop-auth:3"
+        },
+        "frontend": {
+          "artifact": "frontend-dist.tar.gz",
+          "identity": "frontend/1.3.0",
+          "releasePrefix": "_releases/v1.3.0/",
+          "sbom": "frontend.spdx.json",
+          "sha256": "0000000000000000000000000000000000000000000000000000000000000103",
+          "sourceSha": "0000000000000000000000000000000000000003",
+          "versionMarker": "release.json"
+        },
+        "items": {
+          "candidateTag": "sha-0000000000000000000000000000000000000003",
+          "commonSourceSha": "0000000000000000000000000000000000000003",
+          "identity": "items/1.3.0",
+          "imageDigest": "sha256:2000000000000000000000000000000000000000000000000000000000000003",
+          "releaseTag": "release-1.3.0",
+          "repository": "onlineshop-items",
+          "sbom": "items.spdx.json",
+          "sourceSha": "0000000000000000000000000000000000000003",
+          "taskDefinitionArn": "arn:aws:ecs:eu-north-1:799111666795:task-definition/onlineshop-items:3"
+        }
+      },
+      "release": {
+        "artifactWorkflow": {
+          "conclusion": "success",
+          "event": "push",
+          "ref": "refs/heads/main",
+          "runAttempt": 1,
+          "runId": 98765432,
+          "url": "https://github.com/Djimi/OnlineShop-full-stack/actions/runs/98765432/attempts/1"
+        },
+        "candidateWorkflow": {
+          "conclusion": "success",
+          "event": "push",
+          "ref": "refs/heads/main",
+          "runAttempt": 1,
+          "runId": 98765432,
+          "url": "https://github.com/Djimi/OnlineShop-full-stack/actions/runs/98765432/attempts/1"
+        },
+        "createdAt": "2026-07-30T12:00:00Z",
+        "gitTag": "v1.3.0",
+        "promotionWorkflow": {
+          "actor": "djimi",
+          "approvedAt": "2026-07-30T14:00:00Z",
+          "approvedBy": "djimi",
+          "deployedAt": "2026-07-30T14:15:00.100Z",
+          "runId": 98765433
+        },
+        "repository": "Djimi/OnlineShop-full-stack",
+        "sourceSha": "0000000000000000000000000000000000000003",
+        "stagingValidation": {
+          "conclusion": "success",
+          "job": "e2e-staging",
+          "validatedAt": "2026-07-30T13:00:00Z"
+        },
+        "status": "official",
+        "version": "1.3.0"
+      },
+      "schemaVersion": 1
+    },
+    {
+      "components": {
+        "apiGateway": {
+          "candidateTag": "sha-0000000000000000000000000000000000000002",
+          "identity": "api-gateway/1.2.0",
+          "imageDigest": "sha256:3000000000000000000000000000000000000000000000000000000000000002",
+          "releaseTag": "release-1.2.0",
+          "repository": "onlineshop-api-gateway",
+          "sbom": "api-gateway.spdx.json",
+          "sourceSha": "0000000000000000000000000000000000000002",
+          "taskDefinitionArn": "arn:aws:ecs:eu-north-1:799111666795:task-definition/onlineshop-api-gateway:11"
+        },
+        "auth": {
+          "candidateTag": "sha-0000000000000000000000000000000000000002",
+          "identity": "auth/1.2.0",
+          "imageDigest": "sha256:1000000000000000000000000000000000000000000000000000000000000002",
+          "releaseTag": "release-1.2.0",
+          "repository": "onlineshop-auth",
+          "sbom": "auth.spdx.json",
+          "sourceSha": "0000000000000000000000000000000000000002",
+          "taskDefinitionArn": "arn:aws:ecs:eu-north-1:799111666795:task-definition/onlineshop-auth:3"
+        },
+        "frontend": {
+          "artifact": "frontend-dist.tar.gz",
+          "identity": "frontend/1.2.0",
+          "releasePrefix": "_releases/v1.2.0/",
+          "sbom": "frontend.spdx.json",
+          "sha256": "0000000000000000000000000000000000000000000000000000000000000102",
+          "sourceSha": "0000000000000000000000000000000000000002",
+          "versionMarker": "release.json"
+        },
+        "items": {
+          "candidateTag": "sha-0000000000000000000000000000000000000002",
+          "commonSourceSha": "0000000000000000000000000000000000000002",
+          "identity": "items/1.2.0",
+          "imageDigest": "sha256:2000000000000000000000000000000000000000000000000000000000000002",
+          "releaseTag": "release-1.2.0",
+          "repository": "onlineshop-items",
+          "sbom": "items.spdx.json",
+          "sourceSha": "0000000000000000000000000000000000000002",
+          "taskDefinitionArn": "arn:aws:ecs:eu-north-1:799111666795:task-definition/onlineshop-items:3"
+        }
+      },
+      "release": {
+        "artifactWorkflow": {
+          "conclusion": "success",
+          "event": "push",
+          "ref": "refs/heads/main",
+          "runAttempt": 1,
+          "runId": 98765432,
+          "url": "https://github.com/Djimi/OnlineShop-full-stack/actions/runs/98765432/attempts/1"
+        },
+        "candidateWorkflow": {
+          "conclusion": "success",
+          "event": "push",
+          "ref": "refs/heads/main",
+          "runAttempt": 1,
+          "runId": 98765432,
+          "url": "https://github.com/Djimi/OnlineShop-full-stack/actions/runs/98765432/attempts/1"
+        },
+        "createdAt": "2026-07-30T12:00:00Z",
+        "gitTag": "v1.2.0",
+        "promotionWorkflow": {
+          "actor": "djimi",
+          "approvedAt": "2026-07-30T14:00:00Z",
+          "approvedBy": "djimi",
+          "deployedAt": "2026-07-30T14:15:00.100Z",
+          "runId": 98765433
+        },
+        "repository": "Djimi/OnlineShop-full-stack",
+        "sourceSha": "0000000000000000000000000000000000000002",
+        "stagingValidation": {
+          "conclusion": "success",
+          "job": "e2e-staging",
+          "validatedAt": "2026-07-30T13:00:00Z"
+        },
+        "status": "official",
+        "version": "1.2.0"
+      },
+      "schemaVersion": 1
+    },
+    {
+      "components": {
+        "apiGateway": {
+          "candidateTag": "sha-0000000000000000000000000000000000000001",
+          "identity": "api-gateway/1.1.0",
+          "imageDigest": "sha256:3000000000000000000000000000000000000000000000000000000000000001",
+          "releaseTag": "release-1.1.0",
+          "repository": "onlineshop-api-gateway",
+          "sbom": "api-gateway.spdx.json",
+          "sourceSha": "0000000000000000000000000000000000000001",
+          "taskDefinitionArn": "arn:aws:ecs:eu-north-1:799111666795:task-definition/onlineshop-api-gateway:11"
+        },
+        "auth": {
+          "candidateTag": "sha-0000000000000000000000000000000000000001",
+          "identity": "auth/1.1.0",
+          "imageDigest": "sha256:1000000000000000000000000000000000000000000000000000000000000001",
+          "releaseTag": "release-1.1.0",
+          "repository": "onlineshop-auth",
+          "sbom": "auth.spdx.json",
+          "sourceSha": "0000000000000000000000000000000000000001",
+          "taskDefinitionArn": "arn:aws:ecs:eu-north-1:799111666795:task-definition/onlineshop-auth:3"
+        },
+        "frontend": {
+          "artifact": "frontend-dist.tar.gz",
+          "identity": "frontend/1.1.0",
+          "releasePrefix": "_releases/v1.1.0/",
+          "sbom": "frontend.spdx.json",
+          "sha256": "0000000000000000000000000000000000000000000000000000000000000101",
+          "sourceSha": "0000000000000000000000000000000000000001",
+          "versionMarker": "release.json"
+        },
+        "items": {
+          "candidateTag": "sha-0000000000000000000000000000000000000001",
+          "commonSourceSha": "0000000000000000000000000000000000000001",
+          "identity": "items/1.1.0",
+          "imageDigest": "sha256:2000000000000000000000000000000000000000000000000000000000000001",
+          "releaseTag": "release-1.1.0",
+          "repository": "onlineshop-items",
+          "sbom": "items.spdx.json",
+          "sourceSha": "0000000000000000000000000000000000000001",
+          "taskDefinitionArn": "arn:aws:ecs:eu-north-1:799111666795:task-definition/onlineshop-items:3"
+        }
+      },
+      "release": {
+        "artifactWorkflow": {
+          "conclusion": "success",
+          "event": "push",
+          "ref": "refs/heads/main",
+          "runAttempt": 1,
+          "runId": 98765432,
+          "url": "https://github.com/Djimi/OnlineShop-full-stack/actions/runs/98765432/attempts/1"
+        },
+        "candidateWorkflow": {
+          "conclusion": "success",
+          "event": "push",
+          "ref": "refs/heads/main",
+          "runAttempt": 1,
+          "runId": 98765432,
+          "url": "https://github.com/Djimi/OnlineShop-full-stack/actions/runs/98765432/attempts/1"
+        },
+        "createdAt": "2026-07-30T12:00:00Z",
+        "gitTag": "v1.1.0",
+        "promotionWorkflow": {
+          "actor": "djimi",
+          "approvedAt": "2026-07-30T14:00:00Z",
+          "approvedBy": "djimi",
+          "deployedAt": "2026-07-30T14:15:00.100Z",
+          "runId": 98765433
+        },
+        "repository": "Djimi/OnlineShop-full-stack",
+        "sourceSha": "0000000000000000000000000000000000000001",
+        "stagingValidation": {
+          "conclusion": "success",
+          "job": "e2e-staging",
+          "validatedAt": "2026-07-30T13:00:00Z"
+        },
+        "status": "official",
+        "version": "1.1.0"
+      },
+      "schemaVersion": 1
+    }
+  ],
+  "repository": "Djimi/OnlineShop-full-stack"
+}

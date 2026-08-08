@@ -1,0 +1,27 @@
+{
+  "serviceName": "onlineshop-auth",
+  "cluster": "onlineshop-cluster",
+  "desiredCount": 1,
+  "schedulingStrategy": "REPLICA",
+  "deploymentController": {
+    "type": "ECS"
+  },
+  "deploymentConfiguration": {
+    "deploymentCircuitBreaker": {
+      "enable": true,
+      "rollback": true
+    },
+    "minimumHealthyPercent": 100,
+    "maximumPercent": 200
+  },
+  "serviceConnectConfiguration": {
+    "enabled": true,
+    "namespace": "onlineshop.local",
+    "services": [
+      {
+        "portName": "auth-port",
+        "discoveryName": "auth"
+      }
+    ]
+  }
+}

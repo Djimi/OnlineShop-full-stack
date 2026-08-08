@@ -1,0 +1,13 @@
+{
+  "imageDigest": "sha256:50310c92745326299ce463ebd8ad2279a4ff0386a3701246e48165c65d5682b0",
+  "labels": {
+    "org.opencontainers.image.revision": "0000000000000000000000000000000000000000",
+    "org.opencontainers.image.created": "2026-08-04T12:00:00Z",
+    "org.onlineshop.component": "auth",
+    "org.onlineshop.build-run": "123456789-1",
+    "org.onlineshop.producer.run-id": "123456789",
+    "org.onlineshop.producer.run-attempt": "1",
+    "org.onlineshop.producer.event": "push",
+    "org.onlineshop.producer.ref": "refs/heads/main"
+  }
+}

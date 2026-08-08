@@ -1,0 +1,81 @@
+{
+  "frontend": {
+    "indexSha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+    "marker": {
+      "frontendSha256": "b9debb6b25ee6e6e534f7738d27f53f4153dbf361f097336741ae9fb54939ee4",
+      "sourceSha": "a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4",
+      "version": "1.2.1"
+    }
+  },
+  "officialRelease": {
+    "gitTag": "v1.2.1",
+    "sourceSha": "a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4",
+    "version": "1.2.1"
+  },
+  "paused": false,
+  "services": {
+    "onlineshop-api-gateway": {
+      "capacityProviderStrategy": [
+        {
+          "base": 1,
+          "capacityProvider": "FARGATE_SPOT",
+          "weight": 1
+        }
+      ],
+      "deployments": [
+        {
+          "id": "ecs-svc/0000000000000000006",
+          "rolloutState": "COMPLETED"
+        }
+      ],
+      "desiredCount": 1,
+      "loadBalancers": [
+        {
+          "containerName": "api-gateway",
+          "containerPort": 10000,
+          "targetGroupArn": "arn:aws:elasticloadbalancing:eu-north-1:799111666795:targetgroup/onlineshop-gateway-tg/29ba79a624079a04"
+        }
+      ],
+      "runningDigest": "sha256:31f9bfdf4d15f460167ba2b7ce9ada23278be1a9f115f06c01e5242901e8948e",
+      "taskDefinitionArn": "arn:aws:ecs:eu-north-1:799111666795:task-definition/onlineshop-api-gateway:14"
+    },
+    "onlineshop-auth": {
+      "capacityProviderStrategy": [
+        {
+          "base": 1,
+          "capacityProvider": "FARGATE_SPOT",
+          "weight": 1
+        }
+      ],
+      "deployments": [
+        {
+          "id": "ecs-svc/0000000000000000004",
+          "rolloutState": "COMPLETED"
+        }
+      ],
+      "desiredCount": 1,
+      "loadBalancers": [],
+      "runningDigest": "sha256:50310c92745326299ce463ebd8ad2279a4ff0386a3701246e48165c65d5682b0",
+      "taskDefinitionArn": "arn:aws:ecs:eu-north-1:799111666795:task-definition/onlineshop-auth:6"
+    },
+    "onlineshop-items": {
+      "capacityProviderStrategy": [
+        {
+          "base": 1,
+          "capacityProvider": "FARGATE_SPOT",
+          "weight": 1
+        }
+      ],
+      "deployments": [
+        {
+          "id": "ecs-svc/0000000000000000005",
+          "rolloutState": "COMPLETED"
+        }
+      ],
+      "desiredCount": 1,
+      "loadBalancers": [],
+      "runningDigest": "sha256:1a78d43d2aaaca3cafe41539f5fe211f4ef45152a1fa6af5b85006e93b019452",
+      "taskDefinitionArn": "arn:aws:ecs:eu-north-1:799111666795:task-definition/onlineshop-items:5"
+    }
+  }
+}

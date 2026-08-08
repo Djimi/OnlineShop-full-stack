@@ -62,14 +62,15 @@ set -euo pipefail
 PROFILE="${AWS_PROFILE:-dpm-profile}"
 REGION="${AWS_REGION:-eu-north-1}"
 
-# --- Hardcoded infrastructure (same IDs as pause/resume playground scripts) ---
-CLUSTER="onlineshop-cluster"
-SUBNETS="subnet-03b318e59490a891a,subnet-041e4cf18bfce06f8,subnet-0a009040ef6bce7cc"
-SG="sg-0b209104a6b15b157"
-RDS_HOST="onlineshop-postgres-db.cf2gikqaqh9f.eu-north-1.rds.amazonaws.com"
+# Defaults target production. Staging lifecycle scripts override these values,
+# keeping this SQL runner reusable without coupling either environment.
+CLUSTER="${ONLINESHOP_SQL_CLUSTER:-onlineshop-cluster}"
+SUBNETS="${ONLINESHOP_SQL_SUBNETS:-subnet-03b318e59490a891a,subnet-041e4cf18bfce06f8,subnet-0a009040ef6bce7cc}"
+SG="${ONLINESHOP_SQL_SECURITY_GROUP:-sg-0b209104a6b15b157}"
+RDS_HOST="${ONLINESHOP_SQL_RDS_HOST:-onlineshop-postgres-db.cf2gikqaqh9f.eu-north-1.rds.amazonaws.com}"
 EXEC_ROLE="arn:aws:iam::799111666795:role/ecsTaskExecutionRole"
-FAMILY="onlineshop-sql-runner"
-LOG_GROUP="/ecs/onlineshop-sql-runner"
+FAMILY="${ONLINESHOP_SQL_FAMILY:-onlineshop-sql-runner}"
+LOG_GROUP="${ONLINESHOP_SQL_LOG_GROUP:-/ecs/onlineshop-sql-runner}"
 CONTAINER_NAME="sql"
 STREAM_PREFIX="sql"
 MASTER_SECRET="onlineshop/rds/master"
@@ -96,6 +97,8 @@ while [ $# -gt 0 ]; do
 done
 
 [ -n "$DB" ] || { echo "ERROR: --database is required" >&2; exit 1; }
+[[ "$DB" =~ ^[a-zA-Z_][a-zA-Z0-9_]*$ ]] || { echo "ERROR: unsafe database name" >&2; exit 1; }
+[[ "$DB_USER" =~ ^[a-zA-Z_][a-zA-Z0-9_]*$ ]] || { echo "ERROR: unsafe database user" >&2; exit 1; }
 if [ -n "$SQL_FILE" ] && [ -n "$SQL_CMD" ]; then
   echo "ERROR: use --file OR --command, not both" >&2; exit 1
 fi
@@ -125,6 +128,7 @@ RESOLVED_EXTRA=()
 for pair in "${EXTRA_SECRETS[@]:-}"; do
   [ -n "$pair" ] || continue
   var="${pair%%=*}"
+  [[ "$var" =~ ^[A-Z_][A-Z0-9_]*$ ]] || { echo "ERROR: unsafe extra-secret variable: $var" >&2; exit 1; }
   ref="${pair#*=}"
   sid="${ref%:*}"
   key="${ref##*:}"
@@ -155,10 +159,10 @@ fi
 TD_JSON=$(mktemp /tmp/sql-runner-td.XXXXXX.json)
 chmod 600 "$TD_JSON"
 EXTRA_SECRETS_JSON=$(printf '%s\n' "${RESOLVED_EXTRA[@]:-}" | sed '/^$/d' || true)
-python3 - "$TD_JSON" "$CMD" "$SECRET_ARN" "$EXTRA_SECRETS_JSON" <<'PYEOF'
+python3 - "$TD_JSON" "$CMD" "$SECRET_ARN" "$EXTRA_SECRETS_JSON" "$FAMILY" "$EXEC_ROLE" "$LOG_GROUP" "$REGION" <<'PYEOF'
 import json, sys
 
-td_path, cmd, secret_arn, extra_raw = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
+td_path, cmd, secret_arn, extra_raw, family, execution_role, log_group, region = sys.argv[1:]
 
 secrets = [{"name": "PGPASSWORD", "valueFrom": f"{secret_arn}:password::"}]
 for line in extra_raw.splitlines():
@@ -170,12 +174,12 @@ for line in extra_raw.splitlines():
     secrets.append({"name": var, "valueFrom": f"{sid}:{key}::"})
 
 td = {
-    "family": "onlineshop-sql-runner",
+    "family": family,
     "networkMode": "awsvpc",
     "requiresCompatibilities": ["FARGATE"],
     "cpu": "256",
     "memory": "512",
-    "executionRoleArn": "arn:aws:iam::799111666795:role/ecsTaskExecutionRole",
+    "executionRoleArn": execution_role,
     "containerDefinitions": [{
         "name": "sql",
         "image": "postgres:18-alpine",
@@ -185,8 +189,8 @@ td = {
         "logConfiguration": {
             "logDriver": "awslogs",
             "options": {
-                "awslogs-group": "/ecs/onlineshop-sql-runner",
-                "awslogs-region": "eu-north-1",
+                "awslogs-group": log_group,
+                "awslogs-region": region,
                 "awslogs-stream-prefix": "sql"
             }
         }
@@ -198,17 +202,48 @@ print("TD JSON built")
 PYEOF
 
 # --- Register task definition -------------------------------------------------
-$AWS logs create-log-group --log-group-name "$LOG_GROUP" 2>/dev/null || true
+if ! $AWS logs describe-log-groups --log-group-name-prefix "$LOG_GROUP" \
+  --query 'logGroups[?logGroupName==`'"$LOG_GROUP"'`].logGroupName' --output text | \
+  grep -Fxq "$LOG_GROUP"; then
+  $AWS logs create-log-group --log-group-name "$LOG_GROUP"
+  $AWS logs describe-log-groups --log-group-name-prefix "$LOG_GROUP" \
+    --query 'logGroups[?logGroupName==`'"$LOG_GROUP"'`].logGroupName' --output text | \
+    grep -Fxq "$LOG_GROUP" || { echo "ERROR: log group creation was not verified" >&2; exit 1; }
+fi
 
 TD_ARN=$($AWS ecs register-task-definition --cli-input-json "file://$TD_JSON" \
   --query 'taskDefinition.taskDefinitionArn' --output text)
 rm -f "$TD_JSON"
+$AWS ecs describe-task-definition --task-definition "$TD_ARN" \
+  --query 'taskDefinition.taskDefinitionArn' --output text | grep -Fxq "$TD_ARN" || {
+  echo "ERROR: task definition registration was not verified" >&2; exit 1;
+}
 echo "Registered: $TD_ARN"
 
 cleanup_td() {
-  $AWS ecs deregister-task-definition --task-definition "$TD_ARN" >/dev/null 2>&1 || true
-  $AWS ecs delete-task-definitions --task-definitions "$TD_ARN" >/dev/null 2>&1 || true
+  local status
+  $AWS ecs deregister-task-definition --task-definition "$TD_ARN" >/dev/null
+  status=$($AWS ecs describe-task-definition --task-definition "$TD_ARN" \
+    --query 'taskDefinition.status' --output text)
+  [ "$status" = "INACTIVE" ] || { echo "ERROR: task definition deregistration was not verified" >&2; return 1; }
+  $AWS ecs delete-task-definitions --task-definitions "$TD_ARN" >/dev/null
+  status=$($AWS ecs describe-task-definition --task-definition "$TD_ARN" \
+    --query 'taskDefinition.status' --output text 2>/dev/null || true)
+  [ -z "$status" ] || [ "$status" = "DELETE_IN_PROGRESS" ] || {
+    echo "ERROR: task definition deletion was not verified (status: $status)" >&2; return 1;
+  }
 }
+
+cleanup_on_exit() {
+  local exit_code=$?
+  if [ "$KEEP_TD" = "0" ]; then
+    cleanup_td || exit_code=1
+  else
+    echo "--keep-td set: revision kept for explicit debugging: $TD_ARN" >&2
+  fi
+  return "$exit_code"
+}
+trap cleanup_on_exit EXIT
 
 # --- Run one-off task -----------------------------------------------------------
 TASK_ARN=$($AWS ecs run-task \
@@ -218,15 +253,10 @@ TASK_ARN=$($AWS ecs run-task \
 TASK_ID="${TASK_ARN##*/}"
 echo "Task: $TASK_ID"
 
-STATUS=""
-for i in $(seq 1 48); do
+if ! $AWS ecs wait tasks-stopped --cluster "$CLUSTER" --tasks "$TASK_ARN"; then
   STATUS=$($AWS ecs describe-tasks --cluster "$CLUSTER" --tasks "$TASK_ARN" \
     --query 'tasks[0].lastStatus' --output text)
-  [ "$STATUS" = "STOPPED" ] && break
-  sleep 5
-done
-if [ "$STATUS" != "STOPPED" ]; then
-  echo "ERROR: task did not stop within 4 min (last: $STATUS)" >&2
+  echo "ERROR: task did not stop before the AWS waiter timed out (last: $STATUS)" >&2
   echo "Inspect: aws ecs describe-tasks --profile $PROFILE --region $REGION --cluster $CLUSTER --tasks $TASK_ARN" >&2
   exit 1
 fi
@@ -248,15 +278,16 @@ echo "--- task logs ---"
 echo "-----------------"
 
 if [ "$EXIT_CODE" != "0" ]; then
-  echo "ERROR: SQL task failed (exit $EXIT_CODE). TD kept for inspection: $TD_ARN" >&2
-  echo "Cleanup: aws ecs deregister-task-definition --task-definition $TD_ARN --profile $PROFILE --region $REGION && aws ecs delete-task-definitions --task-definitions $TD_ARN --profile $PROFILE --region $REGION" >&2
+  echo "ERROR: SQL task failed (exit $EXIT_CODE). Logs above are preserved in $LOG_GROUP." >&2
   exit 1
 fi
 
 if [ "$KEEP_TD" = "0" ]; then
   cleanup_td
+  trap - EXIT
   echo "TD revision deregistered + deleted (clean)."
 else
   echo "--keep-td set: revision kept: $TD_ARN"
+  trap - EXIT
 fi
 echo "DONE"

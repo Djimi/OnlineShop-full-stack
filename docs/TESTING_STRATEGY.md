@@ -129,6 +129,78 @@ Resist the urge to write production code without a failing test first. The disci
 | JaCoCo configuration | Service `pom.xml` files — search for `jacoco-maven-plugin` |
 | Test data utilities | `*/src/test/java/**/testutil/` | -->
 
+## Release Contract, Candidate Evidence, ECR Release Tagging, Promotion, Production Hardening & Traceability Gates (Pass 3)
+
+The release tooling has six independent offline verification gates (read
+`plans/AUTOMATIC-BUILDS-AND-DEPLOY/release/README.md` and
+`docs/CI_CD_GOTCHAS.md` for full context):
+
+```bash
+# 3.1 manifest contract: validator, fixtures, checksums, input helpers
+bash tests/scripts/release_contract_test.sh
+
+# 3.2 candidate evidence: Python suites, workflow static checks,
+# reproducible frontend packaging, safe extraction, publish/reuse/fail-closed,
+# SBOM stub, evidence→manifest flow, artifact identity/digest recording
+bash tests/scripts/candidate_evidence_test.sh
+
+# 3.3 ECR release tagging, immutability, least privilege: immutable-repo
+# apply/read-back with drift fail-closed, server-side digest-preserving
+# mint/reuse/conflict/dry-run promotion, release-identity proceed/resume/
+# collision, IAM + OIDC trust policy validation, workflow job-permission and
+# tag-family static checks, mandatory profile/region + read-back scan
+bash tests/scripts/ecr_release_tagging_test.sh
+
+# 3.4 controlled staging-to-production promotion: the release_contract.promotion
+# decision layer (dispatch/run/ancestry/preflight/snapshot/plan/waiter/
+# frontend/verify/finalize/compensate), promote-release.yml static checks
+# (production Environment, shared non-cancelling production-mutation
+# concurrency, no rebuild, preflight repeated post-approval, compensate on
+# failure, SHA-pinned Actions), and stateful AWS + gh stub runs of
+# promotion-preflight/snapshot-production/verify-production/finalize-release/
+# compensate-production/deploy-production dry-run (fail-closed on unreviewed
+# schema changes, run/ancestry drift, digest/marker/ALB drift, publication
+# before verification, release-tag conflicts), plus a mandatory profile/region
+# + mutation read-back + no-secrets static scan
+bash tests/scripts/promotion_test.sh
+
+# 3.5 production hardening: task-definition + service-config fixtures
+# (CPU/memory, awsvpc, named Service Connect ports, logs, health, graceful
+# termination, digest-only images, versionConsistency, circuit breaker +
+# safe rolling), sanitized task-definition transforms (image-only diff, full-
+# ARN secrets[].valueFrom, no plaintext leaks), stateful AWS-stub runs of the
+# read-only production inventory, production/staging separation (identity +
+# topology), frontend S3 REST + OAC verify, CloudTrail coverage, lifecycle
+# environment guards, and the OAC migration tool with per-step read-back
+bash tests/scripts/production_hardening_test.sh
+
+# 3.7 release traceability: the four read-only lookups (commit/release/
+# running/digest) + the manifest<->ECR<->ECS<->frontend consistency audit via
+# release/bin/trace.sh and release_contract.traceability, offline fixture
+# coverage of consistent/paused/drift state (ECR tag digest, running digest,
+# frontend marker), newest-first ordering independent of index order, mixed/
+# incomplete running digest sets, sha-tag digest mismatch, candidate-run
+# conflicts, by-version immutable prefix-marker verification, malformed-marker
+# and partial describe-services failures closing as OBSERVED_READ_ERROR, a
+# stateful AWS-stub run of the live gather path proving the mandatory identity
+# preflight and read-only behavior, the read-only GitHub Releases index auto-
+# fetch (exact release-manifest.json asset selection), and missing/ambiguous/
+# contradictory fail-closed
+bash tests/scripts/release_traceability_test.sh
+```
+
+All six require Python 3.10+ with `pip install -r
+plans/AUTOMATIC-BUILDS-AND-DEPLOY/release/requirements.txt`
+(`jsonschema==4.26.0`, `PyYAML==6.0.3`) and optionally `ruff` + `shellcheck`.
+Live AWS/GitHub evidence (ECR repository settings read-back, real
+put-image behavior, the real OIDC environment subject, IAM Access Analyzer,
+the real production inventory read-back, the live frontend OAC migration, real
+CloudTrail read-back, the real traceability lookups/audit against live
+production, and the real owner-approved promotion — the `production`
+Environment approval, ECR/ECS/S3/CloudFront mutations and read-backs, and the
+GitHub Release publication) is verified in the consolidated Pass 3 verification
+pass, not by these offline gates.
+
 ### Running Tests
 
 > **Important:** Always run from the target service directory — NOT from a parent or sibling directory. Do NOT use `-f ../Service/pom.xml` patterns.

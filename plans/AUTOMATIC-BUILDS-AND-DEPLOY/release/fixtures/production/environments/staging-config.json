@@ -1,0 +1,31 @@
+{
+  "vpcId": "vpc-0e9b2c6911cf3d4e0",
+  "cluster": "onlineshop-staging-cluster",
+  "dbInstance": "onlineshop-staging-postgres",
+  "dbSubnetGroup": "onlineshop-staging-db-subnets",
+  "dbSecurityGroup": "sg-08c5d1008d1ce54ae",
+  "ecsSecurityGroup": "sg-0edd7fa1813d03018",
+  "albSecurityGroup": "sg-0e4c072113dd8d1e9",
+  "albName": "onlineshop-staging-v2-alb",
+  "targetGroupArn": "arn:aws:elasticloadbalancing:eu-north-1:799111666795:targetgroup/onlineshop-staging-tg-v2/8a9b0471c381e60b",
+  "gatewayService": "onlineshop-api-gateway-staging",
+  "namespace": "staging.onlineshop.local",
+  "services": [
+    "onlineshop-auth-staging",
+    "onlineshop-items-staging",
+    "onlineshop-api-gateway-staging"
+  ],
+  "subnets": [
+    "subnet-04f5da5a8cf1b1350",
+    "subnet-06b823d8d6b24333b"
+  ],
+  "secrets": [
+    "onlineshop/auth/db-staging",
+    "onlineshop/items/db-staging"
+  ],
+  "logGroups": [
+    "/ecs/onlineshop-auth-staging",
+    "/ecs/onlineshop-items-staging",
+    "/ecs/onlineshop-api-gateway-staging"
+  ]
+}

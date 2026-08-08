@@ -261,6 +261,11 @@ Create two scripts in the `plans/AUTOMATIC-BUILDS-AND-DEPLOY/scripts/` directory
 
 Run `pause-playground.sh` before going to sleep / weekend. Run `resume-playground.sh` when starting development.
 
+Staging follows the same on-demand cost discipline but does not retain database
+state: `resume-staging.sh` creates and bootstraps empty RDS, while
+`pause-staging.sh` deletes it without a final snapshot. Snapshot storage is
+incurred only when a debugging/DR snapshot is explicitly requested.
+
 ### Later (Pass 4)
 
 Add EventBridge scheduled scaling and a cost anomaly alarm (as planned in `04_OPERATIONAL_MATURITY.md`).
@@ -294,7 +299,7 @@ Add EventBridge scheduled scaling and a cost anomaly alarm (as planned in `04_OP
 
 - [x] **Switch to Fargate Spot** — done for items + gateway. Auth needs Spot switch + image fix.
 - [ ] **Fix auth: push missing image tag to ECR** — auth task stuck on `CannotPullContainerError` since ~July 27.
-- [ ] **Create `pause-playground.sh` and `resume-playground.sh`** — manual on/off when not coding
+- [x] **Create `scripts/pause-playground.sh` and `scripts/resume-playground.sh`** — manual on/off when not coding
 - [ ] **Add billing alert at $10/month** — AWS Budgets, free, catches cost surprises
 - [ ] **Be aware of public IPv4 charge** — $0.005/hr per IP ($10.95/month for 3 tasks). Scales to 0 with tasks — no charge when paused.
 - [ ] **Consider consolidating API Gateway + Auth into one service** — reduces Fargate task count from 3 to 2, saves ~$3.15/month Spot + $3.65/month IPv4 = ~$6.80/month (architectural change, evaluate in Pass 2)

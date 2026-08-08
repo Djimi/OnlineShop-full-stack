@@ -7,6 +7,7 @@ import { Input } from '../components/common/Input';
 import { authService } from '../services/authService';
 import toast from 'react-hot-toast';
 import { useState } from 'react';
+import { getApiErrorMessage } from '../utils/apiError';
 
 const registerSchema = z
   .object({
@@ -49,11 +50,8 @@ export default function Register() {
 
       toast.success(`Welcome ${response.username}. Please sign in.`);
       setTimeout(() => navigate('/login'), 2000);
-    } catch (error: any) {
-      const errorMessage =
-        error.response?.data?.detail ||
-        error.message ||
-        'Registration failed. Please try again.';
+    } catch (error: unknown) {
+      const errorMessage = getApiErrorMessage(error, 'Registration failed. Please try again.');
       toast.error(errorMessage);
       console.error('Registration error:', error);
     } finally {

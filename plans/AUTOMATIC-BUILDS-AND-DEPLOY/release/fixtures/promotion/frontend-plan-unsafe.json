@@ -1,0 +1,11 @@
+{
+  "steps": [
+    "live-assets",
+    "live-marker-index",
+    "invalidate"
+  ],
+  "deleteFlag": true,
+  "immutablePrefix": "_releases/v1.2.1/",
+  "marker": "release.json",
+  "indexHtml": "index.html"
+}

@@ -1,0 +1,16 @@
+{
+  "gitTag": {"exists": false, "sha": null},
+  "ecr": {
+    "onlineshop-auth": {"releaseDigest": null},
+    "onlineshop-items": {"releaseDigest": null},
+    "onlineshop-api-gateway": {"releaseDigest": null}
+  },
+  "frontend": {
+    "markerExists": true,
+    "marker": {
+      "version": "1.2.1",
+      "sourceSha": "a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4",
+      "frontendSha256": "b9debb6b25ee6e6e534f7738d27f53f4153dbf361f097336741ae9fb54939ee4"
+    }
+  }
+}

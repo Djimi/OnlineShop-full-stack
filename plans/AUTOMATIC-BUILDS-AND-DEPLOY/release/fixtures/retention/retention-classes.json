@@ -1,0 +1,12 @@
+{
+  "classes": {
+    "audit-evidence": "indefinite",
+    "candidate-artifact": 30,
+    "checksum": "indefinite",
+    "github-release": "indefinite",
+    "release-manifest": "indefinite",
+    "rollback-result": 14,
+    "sbom": "indefinite",
+    "staging-failure-diagnostics": 14
+  }
+}

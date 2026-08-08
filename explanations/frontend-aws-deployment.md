@@ -663,7 +663,7 @@ The ALB costs **~$24/month** even with zero traffic. ECS tasks cost **~$0.02–0
 ### Resume (start backend)
 
 ```bash
-bash plans/AUTOMATIC-BUILDS-AND-DEPLOY/scripts/resume-playground.sh --spot
+bash scripts/resume-playground.sh
 ```
 
 This script:
@@ -674,7 +674,7 @@ This script:
 ### Pause (stop backend)
 
 ```bash
-bash plans/AUTOMATIC-BUILDS-AND-DEPLOY/scripts/pause-playground.sh
+bash scripts/pause-playground.sh
 ```
 
 This script:
@@ -744,10 +744,10 @@ VITE_API_URL='' npm run build
 ### Playground Control
 ```bash
 # Start backend
-bash plans/AUTOMATIC-BUILDS-AND-DEPLOY/scripts/resume-playground.sh --spot
+bash scripts/resume-playground.sh
 
 # Stop backend (save money)
-bash plans/AUTOMATIC-BUILDS-AND-DEPLOY/scripts/pause-playground.sh
+bash scripts/pause-playground.sh
 ```
 
 ### Smoke Test

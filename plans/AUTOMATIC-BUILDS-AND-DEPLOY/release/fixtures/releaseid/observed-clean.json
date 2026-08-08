@@ -1,0 +1,9 @@
+{
+  "gitTag": {"exists": false, "sha": null},
+  "ecr": {
+    "onlineshop-auth": {"releaseDigest": null},
+    "onlineshop-items": {"releaseDigest": null},
+    "onlineshop-api-gateway": {"releaseDigest": null}
+  },
+  "frontend": {"markerExists": false, "marker": null}
+}

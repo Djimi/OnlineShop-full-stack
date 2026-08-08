@@ -1,0 +1,18 @@
+{
+  "accountId": "799111666795",
+  "region": "eu-north-1",
+  "repositories": [
+    "onlineshop-auth",
+    "onlineshop-items",
+    "onlineshop-api-gateway"
+  ],
+  "imageTagMutability": "IMMUTABLE_WITH_EXCLUSION",
+  "exclusionFilters": [
+    { "filterType": "WILDCARD", "filter": "main-latest" },
+    { "filterType": "WILDCARD", "filter": "branch-*" }
+  ],
+  "immutableTagFamilies": ["sha-<full-sha>", "release-<version>"],
+  "mutableExclusions": ["main-latest", "branch-*"],
+  "latestAbsent": true,
+  "notes": "Pass 3, subphase 3.3 desired ECR repository state. Every tag is immutable except the two explicit mutable exclusions; sha-* and release-* tags can never be overwritten, and `latest` stays absent for v1 (Decision 4). Apply with release/bin/apply-immutable-repositories.sh (mutation + immediate read-back) and verify read-only with release/bin/verify-immutable-repositories.sh."
+}
