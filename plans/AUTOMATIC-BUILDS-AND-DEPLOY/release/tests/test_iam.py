@@ -155,6 +155,20 @@ class IamPolicyValidationTests(unittest.TestCase):
             "arn:aws:secretsmanager:eu-north-1:799111666795:secret:rds!db-*",
         )
 
+    def test_staging_resume_network_permissions_cover_readbacks(self):
+        policy = load_policy("github-actions-staging-deploy-policy.json")
+        statements = {statement["Sid"]: statement for statement in policy["Statement"]}
+        network_actions = set(statements["ValidateIsolatedStagingNetwork"]["Action"])
+        self.assertIn("ec2:DescribeInternetGateways", network_actions)
+        self.assertEqual(
+            statements["ReadStagingTargetGroupAttributes"]["Action"],
+            "elasticloadbalancing:DescribeTargetGroupAttributes",
+        )
+        self.assertEqual(
+            statements["ReadStagingTargetGroupAttributes"]["Resource"],
+            "arn:aws:elasticloadbalancing:eu-north-1:799111666795:targetgroup/onlineshop-staging-tg-v2/8a9b0471c381e60b",
+        )
+
 
 class TrustPolicyValidationTests(unittest.TestCase):
     def test_source_controlled_trust_policy_is_valid(self):
