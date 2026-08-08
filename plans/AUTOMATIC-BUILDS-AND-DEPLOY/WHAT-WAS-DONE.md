@@ -681,6 +681,13 @@ run [31267620402](https://github.com/Djimi/OnlineShop-full-stack/actions/runs/31
 job `93128495549`, passed all 3 cloud E2E tests, including invalid-token → 401,
 and completed staging teardown.
 
+The same run's candidate-evidence job then failed before emitting its bundle
+because the runner had not installed the release contract's pinned Python
+requirements (`referencing` was missing). The workflow now sets up Python and
+installs `release/requirements.txt` before producer-set validation; the local
+candidate-evidence gate passes, and the next merged-main run will verify the
+full candidate-evidence path.
+
 ### 3.5 Existing production environment hardening ✅ (offline; live checks deferred)
 
 Implemented the offline half of subphase 3.5 — the hardened production target
