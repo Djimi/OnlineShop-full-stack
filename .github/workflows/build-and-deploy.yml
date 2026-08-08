@@ -558,7 +558,11 @@ jobs:
           aws sts get-caller-identity --profile dpm-profile --region eu-north-1
 
       - name: Resume isolated staging environment
-        run: bash scripts/resume-staging.sh --on-demand
+        # Provision the clean database and ALB while keeping ECS stopped. The
+        # deploy step must install this run's immutable image tag before any
+        # service starts; otherwise resume could pull a stale/deleted tag from
+        # the previous staging run and fail before deployment gets control.
+        run: bash scripts/resume-staging.sh --on-demand --defer-services
 
       - name: Deploy to staging
         run: |
