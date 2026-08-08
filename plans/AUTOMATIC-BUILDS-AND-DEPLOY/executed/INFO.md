@@ -2656,8 +2656,11 @@ job `93128495549`, then passed all 3 cloud E2E tests, including invalid-token â†
 The same run's candidate-evidence job failed afterward because the workflow
 did not install the release contract's pinned Python requirements, leaving
 `referencing` unavailable to the validator. The workflow now sets up Python
-and installs `release/requirements.txt` before producer-set validation; the
-local candidate-evidence gate passes, with merged-main verification pending.
-The first merged-main rerun then stopped during candidate-evidence setup
-because the copied `actions/setup-python` SHA was not resolvable; the workflow
-now uses the verified v5 commit SHA.
+and installs `release/requirements.txt` before producer-set validation. The
+first merged-main rerun then stopped during candidate-evidence setup because
+the copied `actions/setup-python` SHA was not resolvable; the workflow now
+uses the verified v5 commit SHA. Final merged-main verification
+[31271458491](https://github.com/Djimi/OnlineShop-full-stack/actions/runs/31271458491)
+passed staging resume, ordered deployment, all cloud E2E tests, teardown, and
+candidate evidence job `93142263971` end-to-end, including dependency
+installation and artifact emission.
