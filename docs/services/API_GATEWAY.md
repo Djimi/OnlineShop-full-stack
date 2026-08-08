@@ -36,7 +36,8 @@ curl -H "Authorization: Bearer <token>" \
 3. /items/** → require Authorization: Bearer <token>
 4. Validate token: L1 cache → L2 cache → Auth service
 5. On success → add X-User-Id, X-Username headers → forward
-6. On failure → 401 Unauthorized
+6. On invalid/expired token → 401 Unauthorized; downstream Auth unavailable →
+   503; Auth validation timeout → 504
 ```
 
 ## Token Validation Caching

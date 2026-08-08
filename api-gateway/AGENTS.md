@@ -119,6 +119,14 @@ api-gateway/
 
 - Service boots even if Redis is down (cache is optional).
 - Cached tokens continue to work during Auth outages; uncached tokens fail fast.
+- Auth validation uses the annotation-backed Resilience4j `TimeLimiterRegistry`
+  with a 5-second timeout to accommodate cold ECS-to-ECS/RDS validation. Future
+  changes must keep the registry and `@TimeLimiter(name = "authService")`
+  configuration aligned.
+- `CompletableFuture.join()` wraps downstream resilience exceptions; the
+  authentication filter unwraps `CompletionException`/`ExecutionException` so
+  service-unavailable and timeout failures retain their 503/504 status instead
+  of falling through to a generic 502.
 - Rate limiting can be disabled via `gateway.ratelimit.enabled=false` (useful for tests).
 
 ## Development Notes

@@ -18,7 +18,6 @@ import io.github.resilience4j.circuitbreaker.CircuitBreakerRegistry;
 import io.github.resilience4j.retry.Retry;
 import io.github.resilience4j.retry.RetryConfig;
 import io.github.resilience4j.retry.RetryRegistry;
-import io.github.resilience4j.timelimiter.TimeLimiter;
 import io.github.resilience4j.timelimiter.TimeLimiterConfig;
 import io.github.resilience4j.timelimiter.TimeLimiterRegistry;
 import lombok.extern.slf4j.Slf4j;
@@ -34,7 +33,7 @@ public class ResilienceConfig {
      * - Connection timeout: 5 seconds (time to establish connection)
      * - Read timeout: 5 seconds (time to read response)
      *
-     * Note: Resilience4j TimeLimiter (4s) triggers before these HTTP-level
+     * Note: Resilience4j TimeLimiter (5s) triggers before these HTTP-level
      * timeouts (5s), providing the primary timeout control. The HTTP-level
      * timeouts serve as a safety net if the TimeLimiter fails to trigger.
      */
@@ -93,13 +92,14 @@ public class ResilienceConfig {
     }
 
     @Bean
-    public TimeLimiter authServiceTimeLimiter() {
+    public TimeLimiterRegistry timeLimiterRegistry() {
         TimeLimiterConfig config = TimeLimiterConfig.custom()
-                .timeoutDuration(Duration.ofSeconds(4))
+                .timeoutDuration(Duration.ofSeconds(5))
                 .build();
 
         TimeLimiterRegistry registry = TimeLimiterRegistry.of(config);
-        return registry.timeLimiter("authService");
+        registry.timeLimiter("authService");
+        return registry;
     }
 
     /**

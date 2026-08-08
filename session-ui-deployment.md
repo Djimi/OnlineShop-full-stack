@@ -220,7 +220,7 @@ Edit applied successfully.
 138: 
 139: 1. **Self-referencing SG rules** — Added inbound tcp:9000-9001 + tcp:6379 on `sg-0b209104a6b15b157` from itself → API Gateway now reaches Auth/Items/Redis
 140: 2. **Service Connect DNS** — FIXED (2026-07-26). Enabled Service Connect on all 3 services, gateway uses `http://auth:9001` and `http://items:9000`
-141: 3. **Resilience4j TimeLimiter** — Auth validation timeout: 3s → 5s in `ResilienceConfig.java` (ECS task-to-task latency higher than localhost)
+141: 3. **Resilience4j TimeLimiter** — Auth validation uses the annotation-backed `TimeLimiterRegistry` with a 5-second timeout in `ResilienceConfig.java` (ECS task-to-task latency is higher than localhost)
 142: 4. **Rate limiting disabled** — `GATEWAY_RATELIMIT_ENABLED=false` because `RateLimitConfig.bucket4jProxyManager` connects to Redis eagerly
 143: 5. **HikariCP pool** — Auth: 100 → 10 connections (RDS `db.t4g.micro` max ~25 connections)
 144: 

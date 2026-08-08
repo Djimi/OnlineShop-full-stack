@@ -115,7 +115,9 @@ Every step executed in this plan **MUST** update [`executed/INFO.md`](./executed
 
 - [x] Investigated [main run 31259210183, `e2e-staging` job 93107532753](https://github.com/Djimi/OnlineShop-full-stack/actions/runs/31259210183/job/93107532753): staging resume failed before deployment because `rds:CreateDBInstance` was denied on `subgrp:onlineshop-staging-db-subnets`.
 - [x] Corrected `github-actions-staging-deploy-policy.json` by adding only the isolated staging DB subnet-group ARN to `ManageEphemeralStagingDatabase`; added an IAM regression test so the required DB and subnet-group scopes cannot drift apart.
-- [ ] Apply the corrected inline policy to the live `github-actions-onlineshop` role, read it back, then trigger a fresh `main` run and verify staging resume → deploy → E2E → teardown. This is pending AWS re-authentication because the local `dpm-profile` session expired.
+- [x] Applied the corrected inline policy to the live `github-actions-onlineshop` role and read it back after each change. The first post-auth run exposed additional least-privilege gaps (`DescribeInternetGateways`, `DescribeAvailabilityZones`, `DescribeAccountAttributes`, `GetSecurityGroupsForVpc`, and target-group attributes); each was added to the source policy and live policy, with the target-group attribute read scoped to `Resource: "*"` because ELBv2 rejected the exact target-group ARN.
+- [x] Fixed the next staging failure: `resume-staging.sh` was starting old ECS tasks before `ci-deploy-staging.sh` installed the candidate image, so CI now provisions clean RDS/ALB infrastructure with `--defer-services`, deploys the candidate, then starts services. This is covered by PR #39 and its merged `main` verification run 31265257478.
+- [ ] Verify the API-gateway timeout fix in the next merged `main` run: the previous run reached E2E but an uncached invalid-token lookup took about 3 seconds and was returned as 502. The gateway now wires the annotation to an explicit 5-second `TimeLimiterRegistry` and unwraps `CompletionException`; the source tests pass, but the live E2E confirmation is pending.
 
 ---
 
@@ -141,4 +143,6 @@ Every step executed in this plan **MUST** update [`executed/INFO.md`](./executed
 | ✅ Duplicate `build-and-push.yml` workflow | Removed; `build-and-deploy.yml` is the single active CI/CD workflow after merge |
 | ✅ Staging remained billable after E2E | Main CI tears staging down in an `always()` step: ECS→0, ALB deletion, and RDS deletion without snapshot retention |
 | ✅ Snapshot restoration preserved drift and stale test data | Every staging start now creates empty RDS, applies repository schemas/seeds, verifies grants and data as restricted users, then deploys services |
-| ⏳ Main CI staging resume lacked the RDS subnet-group resource scope | Source policy and regression test now include `arn:aws:rds:eu-north-1:799111666795:subgrp:onlineshop-staging-db-subnets`; live policy apply/read-back and a successful rerun remain pending AWS re-authentication |
+| ✅ Main CI staging resume lacked the RDS subnet-group resource scope | Added the exact subnet-group ARN to the source and live policies; the corrected workflow reached clean bootstrap and deployment |
+| ✅ Staging CI started stale images before candidate deployment | Added `resume-staging.sh --defer-services`; CI provisions RDS/ALB with ECS stopped, then deploys the candidate before scaling services |
+| ⏳ Uncached invalid-token E2E returned 502 on cold staging Auth lookup | Gateway registry wiring and wrapped-exception classification are fixed and unit-tested; merged-main E2E confirmation remains |

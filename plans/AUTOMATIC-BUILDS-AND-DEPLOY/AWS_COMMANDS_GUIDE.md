@@ -720,7 +720,10 @@ encrypted PostgreSQL 18.1 `db.t4g.micro` using RDS-managed master credentials,
 then `scripts/bootstrap-staging-db.sh` creates the two databases and restricted
 roles, applies the service-owned SQL, loads deterministic seeds, and reconnects
 as each application user for final read-back. No ECS application service starts
-until those checks pass. Default teardown retains no database snapshot.
+until those checks pass. In CI, `resume-staging.sh --defer-services` also keeps
+all ECS services at zero after bootstrap so candidate task definitions can be
+installed before any task starts; the normal operator-facing resume command
+starts services. Default teardown retains no database snapshot.
 
 ## D2. The "exit 0 but nothing happened" Trap
 

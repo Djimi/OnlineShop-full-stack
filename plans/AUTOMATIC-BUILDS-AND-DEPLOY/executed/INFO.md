@@ -2628,14 +2628,25 @@ against real production state, and real S3/frontend retention.
   `release/tests/test_iam.py` and included the staging policy in the source
   policy validation set.
 
-### Live verification status
+### Live verification and follow-up
 
-The first required AWS preflight command was run exactly as required:
+After AWS re-authentication, the required identity preflight succeeded. The
+inline policy was applied and read back after every mutation. The first
+corrected run reached clean RDS bootstrap, candidate deployment, healthy ALB
+targets, and teardown. It exposed additional least-privilege gaps in the
+read-only network/ELB calls; the source and live policy were updated, with
+target-group attributes using `Resource: "*"` because ELBv2 rejected the exact
+target-group ARN.
 
-```bash
-aws sts get-caller-identity --profile dpm-profile --region eu-north-1
-```
+The same run also exposed a CI ordering race: staging services started old
+image tags before `ci-deploy-staging.sh` installed the candidate. PR #39 added
+`resume-staging.sh --defer-services`, which leaves ECS at zero until candidate
+task definitions are registered. Corrected run `31265257478`, job
+`93122636659`, passed infrastructure and deployment and then reached E2E.
 
-It returned `Your session has expired`; no AWS mutation was retried or made.
-The live `put-role-policy` + `get-role`/`get-role-policy` read-back and fresh
-main workflow verification remain pending re-authentication.
+E2E identified a cold Auth lookup timeout that was misreported by the gateway
+as 502. The gateway now supplies the annotation-backed `authService`
+`TimeLimiterRegistry` with a 5-second timeout and unwraps
+`CompletionException`/`ExecutionException` so genuine timeouts retain 504
+classification. The gateway's 12 tests pass; a merged-main run remains the
+live confirmation of this final application fix.
