@@ -8,12 +8,20 @@ source "$SCRIPT_DIR/config/staging.env"
 source "$SCRIPT_DIR/lib/lifecycle.sh"
 
 CAPACITY_PROVIDER="FARGATE_SPOT"
-case "${1:-}" in
-  "") ;;
-  --on-demand) CAPACITY_PROVIDER="FARGATE" ;;
-  --help) echo "Usage: $0 [--on-demand]"; exit 0 ;;
-  *) echo "Usage: $0 [--on-demand]" >&2; exit 1 ;;
-esac
+START_SERVICES=true
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --on-demand) CAPACITY_PROVIDER="FARGATE" ;;
+    --defer-services) START_SERVICES=false ;;
+    --help)
+      echo "Usage: $0 [--on-demand] [--defer-services]"
+      echo "  --defer-services leaves ECS at desired=0 for a subsequent candidate deployment."
+      exit 0
+      ;;
+    *) echo "Usage: $0 [--on-demand] [--defer-services]" >&2; exit 1 ;;
+  esac
+  shift
+done
 
 # Staging is intentionally rebuilt from an empty database on every resume. The
 # error trap below captures evidence first, then returns the environment to its
@@ -60,15 +68,29 @@ lc_log_step "4/8" "20–60 seconds" "Create the staging ALB/listener and enforce
 ALB_ARN=$(lc_ensure_alb)
 lc_log_step "5/8" "under 15 seconds" "Verify the staging API gateway target-group attachment."
 lc_wire_gateway
-lc_log_step "6/8" "10–20 seconds" "Set all staging ECS services to desired=1 on $CAPACITY_PROVIDER."
-lc_scale_services 1 "$CAPACITY_PROVIDER"
-lc_log_step "7/8" "3–8 minutes" "Wait for all JVM services and Service Connect deployments to stabilize."
-lc_wait_services_stable
-ALB_DNS=$(lc_alb_dns "$ALB_ARN")
-lc_log_step "8/8" "5–60 seconds" "Probe the public route for the expected authentication response."
-lc_wait_http_unauthorized "$ALB_DNS" staging
+if [ "$START_SERVICES" = true ]; then
+  lc_log_step "6/8" "10–20 seconds" "Set all staging ECS services to desired=1 on $CAPACITY_PROVIDER."
+  lc_scale_services 1 "$CAPACITY_PROVIDER"
+  lc_log_step "7/8" "3–8 minutes" "Wait for all JVM services and Service Connect deployments to stabilize."
+  lc_wait_services_stable
+  ALB_DNS=$(lc_alb_dns "$ALB_ARN")
+  lc_log_step "8/8" "5–60 seconds" "Probe the public route for the expected authentication response."
+  lc_wait_http_unauthorized "$ALB_DNS" staging
+else
+  # CI must select the candidate task definitions before ECS starts pulling an
+  # image. Starting the paused services here would briefly use whatever image
+  # tag was left by the previous run and can fail before ci-deploy-staging.sh
+  # has a chance to replace it.
+  lc_log_step "6/6" "under 15 seconds" "Leave staging ECS services stopped for the candidate deployment."
+  lc_log "Staging infrastructure and the clean database are ready; application services remain at desired=0."
+fi
 
 START_COMPLETE=true
 trap - ERR
-lc_log_complete "Clean staging resume" "$RUN_STARTED_AT"
-lc_log "Staging is running against a clean database: http://$ALB_DNS"
+if [ "$START_SERVICES" = true ]; then
+  lc_log_complete "Clean staging resume" "$RUN_STARTED_AT"
+  lc_log "Staging is running against a clean database: http://$ALB_DNS"
+else
+  lc_log_complete "Clean staging infrastructure resume" "$RUN_STARTED_AT"
+  lc_log "Staging is ready for ci-deploy-staging.sh; ECS application services are intentionally stopped."
+fi

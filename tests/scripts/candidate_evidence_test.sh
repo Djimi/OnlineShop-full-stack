@@ -82,6 +82,8 @@ else:
     teardown = [s for s in steps if isinstance(s.get("run"), str) and "pause-staging.sh" in s.get("run", "")]
     if not resume:
         problems.append("e2e-staging job does not own resume-staging.sh")
+    elif "--defer-services" not in " ".join(str(s.get("run", "")) for s in resume):
+        problems.append("e2e-staging must defer ECS startup until candidate deployment")
     if not teardown:
         problems.append("e2e-staging job does not own pause-staging.sh teardown")
     elif teardown[0].get("if") != "always()":
