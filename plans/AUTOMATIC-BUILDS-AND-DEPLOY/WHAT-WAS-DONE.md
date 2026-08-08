@@ -675,9 +675,18 @@ The corrected run was [31265257478](https://github.com/Djimi/OnlineShop-full-sta
 `93122636659`. Infrastructure and deployment passed; E2E then identified a
 cold Auth lookup that exceeded the gateway's effective timeout and was
 misreported as 502. The gateway now uses an explicit annotation-backed
-5-second `TimeLimiterRegistry` and unwraps `CompletionException` so genuine
-timeouts retain 504 classification. Source tests pass; the next merged-main
-run is the live confirmation of this final application fix.
+5-second `TimeLimiterRegistry` and unwraps `CompletionException`/`ExecutionException`
+so genuine timeouts retain 504 classification. The merged-main verification
+run [31267620402](https://github.com/Djimi/OnlineShop-full-stack/actions/runs/31267620402),
+job `93128495549`, passed all 3 cloud E2E tests, including invalid-token → 401,
+and completed staging teardown.
+
+The same run's candidate-evidence job then failed before emitting its bundle
+because the runner had not installed the release contract's pinned Python
+requirements (`referencing` was missing). The workflow now sets up Python and
+installs `release/requirements.txt` before producer-set validation; the local
+candidate-evidence gate passes, and the next merged-main run will verify the
+full candidate-evidence path.
 
 ### 3.5 Existing production environment hardening ✅ (offline; live checks deferred)
 

@@ -641,6 +641,14 @@ jobs:
       # actions/checkout@v4 (11d5960a326750d5838078e36cf38b85af677262)
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
 
+      # actions/setup-python@v5 (0b93645e9fea731e1acf3a5843feb99726597842)
+      - uses: actions/setup-python@0b93645e9fea731e1acf3a5843feb99726597842
+        with:
+          python-version: '3.x'
+
+      - name: Install release-contract dependencies
+        run: python -m pip install --disable-pip-version-check -q -r "${{ env.RELEASE }}/requirements.txt"
+
       # actions/setup-node@v4 (49933ea5288caeca8642d1e84afbd3f7d6820020)
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
