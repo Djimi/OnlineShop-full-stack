@@ -675,9 +675,11 @@ The corrected run was [31265257478](https://github.com/Djimi/OnlineShop-full-sta
 `93122636659`. Infrastructure and deployment passed; E2E then identified a
 cold Auth lookup that exceeded the gateway's effective timeout and was
 misreported as 502. The gateway now uses an explicit annotation-backed
-5-second `TimeLimiterRegistry` and unwraps `CompletionException` so genuine
-timeouts retain 504 classification. Source tests pass; the next merged-main
-run is the live confirmation of this final application fix.
+5-second `TimeLimiterRegistry` and unwraps `CompletionException`/`ExecutionException`
+so genuine timeouts retain 504 classification. The merged-main verification
+run [31267620402](https://github.com/Djimi/OnlineShop-full-stack/actions/runs/31267620402),
+job `93128495549`, passed all 3 cloud E2E tests, including invalid-token → 401,
+and completed staging teardown.
 
 ### 3.5 Existing production environment hardening ✅ (offline; live checks deferred)
 

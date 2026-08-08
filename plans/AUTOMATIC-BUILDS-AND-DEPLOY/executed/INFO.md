@@ -2648,5 +2648,7 @@ E2E identified a cold Auth lookup timeout that was misreported by the gateway
 as 502. The gateway now supplies the annotation-backed `authService`
 `TimeLimiterRegistry` with a 5-second timeout and unwraps
 `CompletionException`/`ExecutionException` so genuine timeouts retain 504
-classification. The gateway's 12 tests pass; a merged-main run remains the
-live confirmation of this final application fix.
+classification. The gateway's 12 tests pass. Merged-main run
+[31267620402](https://github.com/Djimi/OnlineShop-full-stack/actions/runs/31267620402),
+job `93128495549`, then passed all 3 cloud E2E tests, including invalid-token →
+401, and completed staging teardown.
