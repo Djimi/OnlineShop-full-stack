@@ -10,7 +10,7 @@ import org.springframework.web.servlet.function.ServerResponse;
 public class ProductInfoHandler {
 
     private static final ProductInfoResponse RESPONSE =
-            new ProductInfoResponse("This is a test product for learning");
+            new ProductInfoResponse("This is a test product for learning another");
 
     public ServerResponse getProductInfo(ServerRequest request) {
         return ServerResponse.ok()
