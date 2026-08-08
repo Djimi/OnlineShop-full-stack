@@ -641,8 +641,8 @@ jobs:
       # actions/checkout@v4 (11d5960a326750d5838078e36cf38b85af677262)
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
 
-      # actions/setup-python@v5 (0b93645e9fea731e1acf3a5843feb99726597842)
-      - uses: actions/setup-python@0b93645e9fea731e1acf3a5843feb99726597842
+      # actions/setup-python@v5 (a26af69be951a213d495a4c3e4e4022e16d87065)
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
         with:
           python-version: '3.x'
 
