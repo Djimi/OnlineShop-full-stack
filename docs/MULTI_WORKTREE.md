@@ -1,117 +1,146 @@
 # Multi-Worktree Local Development
 
-## Overview
+## Create a worktree
 
-This project supports running multiple git worktrees simultaneously on the same machine without port collisions. Each worktree gets a unique set of host ports via a slot-based port isolation scheme managed by `scripts/dev-env.sh`.
-
-For a full step-by-step walkthrough of creating a worktree and starting its stack, see [MULTI_WORKTREE_WORKFLOW.md](./MULTI_WORKTREE_WORKFLOW.md).
-
-## Quick Start (new worktree)
+Run one command from any existing checkout:
 
 ```bash
-# In your new worktree, run once before the first docker compose up:
-scripts/dev-env.sh
+scripts/create-worktree.sh payments -b feature/payments
+```
 
-# Then start the stack as usual:
+This creates the worktree from `main`, allocates a unique development-port
+slot, and writes its managed `.env` block. A bare name such as `payments` is
+placed under the main checkout's sibling `<repository>-worktrees/` directory.
+
+Use an explicit path or base ref when needed:
+
+```bash
+scripts/create-worktree.sh ../review-123 -b review/123 origin/main
+```
+
+Success means:
+
+- no registered worktree in this clone claims the selected slot;
+- none of the slot's complete 20-port block was listening during allocation;
+- the new worktree contains one internally consistent, atomically written
+  `.env` claim.
+
+The command fails rather than falling back when the target base ref predates
+the current allocator. If Git created the worktree but allocation failed, the
+worktree and its new branch remain in place, and the command prints exact
+recovery or removal instructions for both.
+
+## Start and stop the stack
+
+```bash
+cd ../OnlineShop-full-stack-worktrees/payments
+scripts/dev-env.sh --check
 docker compose up -d --build
+
+# Later
+docker compose down
 ```
 
-Thats it. The script generates a `.env` file with your worktree's unique ports. Main checkout uses the legacy ports unchanged.
+`--check` validates the complete managed block and confirms that no other
+worktree claims the same slot. It does not require the ports to be free because
+this worktree's own stack may already be running.
 
-**Note:** The initial slot is derived from the worktree directory name — renaming before the first `dev-env.sh` run changes the slot. After first run, the slot is stored in `.env` and is stable.
+## Allocation model
 
-## `scripts/dev-env.sh` Usage
+Each non-main worktree receives one of 631 slots. A slot owns a 20-port block
+starting at port 20000. The ten currently published ports use offsets 0–9;
+offsets 10–19 are already reserved and checked for future services.
+
+| Offset | Service | Main checkout | Worktree slot N |
+|---:|---|---:|---:|
+| 0 | API gateway | 10000 | `20000 + N×20` |
+| 1 | Items | 9000 | gateway + 1 |
+| 2 | Auth | 9001 | gateway + 2 |
+| 3 | Frontend | 5173 | gateway + 3 |
+| 4 | Items PostgreSQL | 5432 | gateway + 4 |
+| 5 | Auth PostgreSQL | 5433 | gateway + 5 |
+| 6 | pgAdmin | 5051 | gateway + 6 |
+| 7 | Redis | 6379 | gateway + 7 |
+| 8 | Kafka host listener | 9092 | gateway + 8 |
+| 9 | Kafka UI | 8080 | gateway + 9 |
+
+The worktree basename hashes to the first candidate slot. Allocation then runs
+under a clone-wide `flock`: it reads every registered worktree's validated
+`.env` claim, checks all 20 ports in the candidate block, bumps when necessary,
+and writes once. Stopped stacks therefore retain their slots, concurrent
+creators cannot select the same slot, and offsets 10–19 remain safe for future
+services.
+
+All main-checkout ports must stay outside the complete worktree range
+`20020–32639`. Kafka therefore uses the standard host port `9092`; Compose maps
+that to the dedicated `PLAINTEXT_HOST` listener on container port `29092`.
+
+A claim is released when its worktree is removed. Stale Git metadata for a
+manually deleted directory is ignored with a warning and can be removed with
+`git worktree prune`.
+
+## Maintenance commands
 
 ```bash
-scripts/dev-env.sh              # Create/refresh managed .env block for this worktree
-scripts/dev-env.sh --check       # Guard: exit 0 if safe to 'up', 1 if you forgot dev-env.sh
-scripts/dev-env.sh --regenerate  # Down old stack, bump slot, rewrite .env
-scripts/dev-env.sh --exports     # Print export variables for host-run dev mode
-scripts/dev-env.sh --set-slot N  # Force a specific slot (1-631)
+scripts/dev-env.sh              # Show/reuse the existing claim; allocate only if absent
+scripts/dev-env.sh --check      # Validate this worktree's unique claim
+scripts/dev-env.sh --regenerate # Stop the old Compose project and move to the next free slot
+scripts/dev-env.sh --exports    # Print variables for host-run development
+scripts/dev-env.sh --set-slot N # Allocate one specific free slot
 ```
 
-**Note:** `--set-slot` only rewrites `.env` with a new slot — it does NOT take down existing containers from a previous slot. Use `docker compose down` first if you want to stop the old stack, or use `--regenerate` for a migrating change.
+Use `--regenerate --volumes` only when the old development volumes should also
+be deleted. `--set-slot` does not stop a stack on the previous slot; normally
+`--regenerate` is the safer recovery command.
 
-## Port Mapping
+## Host-run development
 
-Each worktree gets a slot number (1-631). Services sit at fixed offsets within the slot's 20-port block:
-
-| Offset | Service | Slot-0 (legacy) | Slot N = 20000 + N×20 + offset |
-|--------|---------|-----------------|-------------------------------|
-| +0 | api-gateway | 10000 | 20000+N×20+0 |
-| +1 | items-service | 9000 | +1 |
-| +2 | auth-service | 9001 | +2 |
-| +3 | frontend | 5173 | +3 |
-| +4 | items-postgres | 5432 | +4 |
-| +5 | auth-postgres | 5433 | +5 |
-| +6 | pgadmin | 5051 | +6 |
-| +7 | redis | 6379 | +7 |
-| +8 | kafka (external) | 29092 | +8 |
-| +9 | kafka-ui | 8080 | +9 |
-
-> **Kafka host port:** The Kafka external port is a single published listener (`PLAINTEXT_HOST`). External Kafka clients use this port; in-cluster consumers use Docker DNS (`kafka:9092`).
-
-All ports for a slot are sequential from the gateway: items = gateway+1, auth = gateway+2, etc. In Postman, set one variable (`gateway_url = http://localhost:<GATEWAY_PORT>`) and derive the rest by adding offsets.
-
-**Note:** Port offset derivation (gateway+N) only works for worktree slots (slots 1-631) where all ports live in a contiguous block. On the main checkout (slot 0), legacy ports are non-sequential — set each Postman variable individually.
-
-## Collision Probability
-
-631 slots × 20-port blocks. With 8 worktrees active, the probability of two sharing the same initial hash-derived slot is ~4.3%. If a collision occurs, it is caught at generation time (bind check) or surfaces as a bind error at `docker compose up`. Recovery: `scripts/dev-env.sh --regenerate`.
-
-## Container Names
-
-All `container_name:` directives have been removed from `docker-compose.yml`. Containers are named by Compose with the project prefix (e.g., `onlineshop-wt47-items-postgres-1`). Use `docker compose exec <service>` (not `docker exec <container>`) to run commands inside containers.
-
-## Daily Work
-
-- **Start**: `docker compose up -d --build` — plain Compose, no wrapper. This builds application images from the current source; no host-side JAR packaging is needed.
-- **Stop**: `docker compose down` (add `-v` to drop volumes).
-- **Logs**: `docker compose logs -f items-service`.
-- **Status**: `docker compose ps`.
-- **URL discovery**: Re-run `scripts/dev-env.sh` (idempotent) or read the `.env` managed block.
-
-## Host-Run Dev Mode
-
-Run a service on the host (e.g., `./mvnw spring-boot:run`) while infra runs in Docker:
+Load the worktree-specific service, database, Kafka, Redis, and frontend
+addresses before starting a component outside Compose:
 
 ```bash
 source <(scripts/dev-env.sh --exports)
-# Then start your service — all env vars are set
 
-# For frontend:
-npm run dev -- --port "$FRONTEND_PORT"
+# Examples
+cd Items
+SERVER_PORT="$ITEMS_SERVER_PORT" \
+SPRING_DATASOURCE_URL="$ITEMS_DATASOURCE_URL" \
+SPRING_DATASOURCE_USERNAME="$ITEMS_DATASOURCE_USERNAME" \
+SPRING_DATASOURCE_PASSWORD="$ITEMS_DATASOURCE_PASSWORD" \
+./run-dev.sh
+
+cd frontend && npm run dev -- --port "$FRONTEND_PORT"
 ```
 
-Per-service variable names are also exported for use in scripts and tooling that need distinct env vars per service:
-- Items: `ITEMS_SERVER_PORT`, `ITEMS_DATASOURCE_URL`, `ITEMS_DATASOURCE_USERNAME`, `ITEMS_DATASOURCE_PASSWORD`
-- Auth: `AUTH_SERVER_PORT`, `AUTH_DATASOURCE_URL`, `AUTH_DATASOURCE_USERNAME`, `AUTH_DATASOURCE_PASSWORD`
-- Gateway: `GATEWAY_SERVER_PORT`
+The frontend export is important: without `VITE_API_URL`, Vite falls back to
+the main checkout's gateway at port 10000.
 
-The generic `SERVER_PORT`, `SPRING_DATASOURCE_URL`, `SPRING_DATASOURCE_USERNAME`, `SPRING_DATASOURCE_PASSWORD` are still exported for backward compatibility (last service defined overwrites previous — only one service can use these at a time on the host).
-
-**WARNING:** `VITE_API_URL` must be set when running the frontend on the host. Without it, `api.ts` falls back to `http://localhost:10000` (main's gateway) — a silent cross-worktree data-plane mixup. The `--exports` output includes this warning.
-
-## E2E Tests Against a Worktree
+For E2E tests, run the Maven wrapper from the E2E module as required by the
+project testing rules:
 
 ```bash
-E2E_BASE_URL=http://localhost:<GATEWAY_PORT> ./mvnw clean test -f e2e-tests/pom.xml
+cd e2e-tests
+E2E_BASE_URL=http://localhost:<GATEWAY_PORT> ./mvnw clean test
 ```
 
-## Regenerate After Collision
+## Boundaries of the guarantee
 
-If `docker compose up` fails with a bind error:
+- The claim registry covers worktrees of one Git clone. A separate clone has a
+  separate Git common directory and allocation lock.
+- A non-participating application can bind a selected port after allocation.
+  The allocator observes the complete block during allocation; it cannot keep
+  all 20 ports bound for Docker indefinitely.
+- Linux tooling is required (`flock`, `ss`, and `md5sum`).
 
-```bash
-scripts/dev-env.sh --regenerate
-docker compose up -d --build
-```
-
-To also drop DB volumes:
-```bash
-scripts/dev-env.sh --regenerate --volumes
-```
+For a concise execution trace and recovery examples, see
+[MULTI_WORKTREE_WORKFLOW.md](./MULTI_WORKTREE_WORKFLOW.md).
 
 ## Teardown
 
-Before `git worktree remove`, run `docker compose down -v` to clean up containers and volumes. After worktree removal, the `.env` is gone and the project becomes hard to address.
+```bash
+docker compose down -v
+git worktree remove ../OnlineShop-full-stack-worktrees/payments
+```
+
+Removing the worktree deletes its untracked `.env` and therefore releases its
+slot claim. Use `-v` only when deleting the development data is intentional.

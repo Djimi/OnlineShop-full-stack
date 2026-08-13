@@ -76,16 +76,24 @@ When using Maven commands you MUST use the Maven wrapper (`./mvnw`) inside the s
 
 ## Starting Services Locally
 
-### First time in a worktree (required before `docker compose up`)
+### Create a worktree
 
 ```bash
-scripts/dev-env.sh --check  # Agent pre-up guard — exits 1 if you forgot dev-env.sh
+scripts/create-worktree.sh <path-or-name> -b <new-branch> [base-ref]
 ```
 
-### First-time setup (run once):
+This is the only supported creation path. In order, it validates the base,
+creates the branch and worktree directory, atomically writes a managed `.env`
+block with the Compose project, slot, and ten unique host ports, then prints
+the start command. The allocator checks the slot's complete 20-port block, so
+ten additional offsets remain reserved for future services. It does not start
+containers or create volumes. Do not split this into separate
+`git worktree add` and `scripts/dev-env.sh` steps.
+
+### Before `docker compose up`
 
 ```bash
-scripts/dev-env.sh           # Assigns unique ports, writes .env
+scripts/dev-env.sh --check  # Validates the complete, unique .env claim
 ```
 
 ### Multi-worktree guide

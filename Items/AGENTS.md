@@ -89,10 +89,16 @@ docker compose up -d items-postgres redis kafka
 
 The script installs `common` to the local Maven repo, then starts Items via `./mvnw spring-boot:run`. DevTools monitors `target/classes` — when your IDE recompiles a modified `.java` file, the app context reloads without a full JVM restart.
 
-> **Multi-worktree host-run:** In a non-main worktree, infra ports are slot-offset. Source the exports first:
+> **Multi-worktree host-run:** Create the worktree with the root
+> `scripts/create-worktree.sh` command. Its infrastructure ports are then
+> slot-offset; source the exports first:
 > ```bash
 > source <(scripts/dev-env.sh --exports)
 > docker compose up -d items-postgres redis kafka
+> SERVER_PORT="$ITEMS_SERVER_PORT" \
+> SPRING_DATASOURCE_URL="$ITEMS_DATASOURCE_URL" \
+> SPRING_DATASOURCE_USERNAME="$ITEMS_DATASOURCE_USERNAME" \
+> SPRING_DATASOURCE_PASSWORD="$ITEMS_DATASOURCE_PASSWORD" \
 > ./run-dev.sh
 > ```
 

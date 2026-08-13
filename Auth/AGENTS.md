@@ -102,10 +102,16 @@ Optional threshold overrides:
 
 ## Host-Run Dev Mode (Multi-Worktree)
 
-In a non-main worktree, run the auth service on the host with `--exports` to pick up worktree-specific ports:
+Create non-main worktrees with the root `scripts/create-worktree.sh` command so
+the port claim exists before any service starts. Then run the auth service on
+the host with `--exports` to pick up worktree-specific ports:
 
 ```bash
 source <(scripts/dev-env.sh --exports)
+SERVER_PORT="$AUTH_SERVER_PORT" \
+SPRING_DATASOURCE_URL="$AUTH_DATASOURCE_URL" \
+SPRING_DATASOURCE_USERNAME="$AUTH_DATASOURCE_USERNAME" \
+SPRING_DATASOURCE_PASSWORD="$AUTH_DATASOURCE_PASSWORD" \
 ./mvnw spring-boot:run
 ```
 

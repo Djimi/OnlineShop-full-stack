@@ -86,7 +86,10 @@ const API_BASE_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:10000';
 
 ### Multi-Worktree (Per-Worktree Frontend)
 
-In a non-main worktree, the frontend's `VITE_API_URL` is set to `http://localhost:<GATEWAY_PORT>` by the compose file (via `.env`). The containerized frontend auto-connects to the correct worktree gateway.
+Create non-main worktrees with the root `scripts/create-worktree.sh` command.
+The frontend's `VITE_API_URL` is then set to
+`http://localhost:<GATEWAY_PORT>` by the compose file via the allocated `.env`.
+The containerized frontend auto-connects to the correct worktree gateway.
 
 **Host-run frontend in a worktree:** Always source the exports before running Vite:
 

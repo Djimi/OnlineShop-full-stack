@@ -156,11 +156,13 @@ operational estimates, not timeout guarantees.
 
 ## Host-Run Dev Mode (Multi-Worktree)
 
-In a non-main worktree, run the gateway on the host with `--exports` to pick up worktree-specific ports:
+Create non-main worktrees with the root `scripts/create-worktree.sh` command so
+the port claim exists before any service starts. Then run the gateway on the
+host with `--exports` to pick up worktree-specific ports:
 
 ```bash
 source <(scripts/dev-env.sh --exports)
-./mvnw spring-boot:run
+SERVER_PORT="$GATEWAY_SERVER_PORT" ./mvnw spring-boot:run
 ```
 
 ## Pass 3.5 — Production hardening

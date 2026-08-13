@@ -12,11 +12,18 @@
 
 ## Multi-Worktree Port Conflicts
 
-If `docker compose up` fails with a bind error (port already in use):
+New worktrees must be created with the atomic creation command:
 
 ```bash
-# Check which worktree's ports you have
-scripts/dev-env.sh
+scripts/create-worktree.sh <path-or-name> -b <new-branch> [base-ref]
+```
+
+If an external application takes a port after allocation and `docker compose
+up` reports a bind error:
+
+```bash
+# Validate the complete claim and check for another worktree using the slot
+scripts/dev-env.sh --check
 
 # Regenerate with a new slot (downs old stack first)
 scripts/dev-env.sh --regenerate
@@ -32,7 +39,10 @@ ss -tlnH "sport = :<port>"    # shows the process listening on <port>
 docker ps --filter publish=<port>  # shows the container
 ```
 
-**Forgot to run dev-env.sh?** A bare `docker compose up` in a non-main worktree without running `scripts/dev-env.sh` will use main's ports — colliding with the main checkout if it's running. Run `scripts/dev-env.sh` first.
+**Missing `.env` claim?** The worktree was not created through the current
+wrapper, or allocation failed after Git created it. Run `scripts/dev-env.sh`
+inside that worktree to recover. The allocator fails closed when another
+worktree already owns the candidate slot.
 
 See [docs/MULTI_WORKTREE.md](./MULTI_WORKTREE.md) for full multi-worktree guide.
 
