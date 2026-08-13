@@ -5,3 +5,17 @@ Also can I optimize tokens
 
 To be done after codex credits are restored
 ----------
+
+When PR is opened and the branch name is "feature/*" and we push to it two builds will be triggered - once for the trigger for PR and one for the trigger for branch starting with "feature/". Should we improve this?
+
+------
+
+Currently it took too much time for STG deployment. chech this: https://github.com/Djimi/OnlineShop-full-stack/actions/runs/31273342432/job/93143162020
+
+Check "Resume isolated staging environment" and "Deploy to staging" steps --> they tool too much time
+
+------
+
+What will happen if multiple builds start in parallel which wants to deploy on STG? Will there be a problem?
+
+-----

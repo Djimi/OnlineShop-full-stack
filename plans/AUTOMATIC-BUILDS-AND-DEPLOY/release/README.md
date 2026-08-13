@@ -1,5 +1,11 @@
 # OnlineShop Release Contract — Local Validation Foundation
 
+> **New here?** Start with [GUIDE.md](./GUIDE.md) — the operator's guide to the
+> three-layer architecture (workflows → shell wrappers → Python decision layer),
+> the manifest contract, and the end-to-end flows (candidate evidence,
+> promotion, rollback, traceability, retention) with call diagrams and a
+> "who calls whom" cheat sheet.
+
 Subphases **3.1 + 3.2 + 3.3 + 3.5 + 3.7 + 3.8** of [03_RELEASE_TRACEABILITY.md](../03_RELEASE_TRACEABILITY.md).
 This directory is the source-controlled release contract consumed by every
 later phase (candidate evidence, promotion, rollback, traceability, retention).
