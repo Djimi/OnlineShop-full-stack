@@ -44,6 +44,12 @@ Do not persist one-off preferences or uncertain conclusions.
 
 You **MUST** be watching about these, as self-improving is a core mechanism to avoid the same mistakes.
 
+## Preferences
+- Prefer explaining with flows instead of separate files. That will make it easier to understand and maintain. If a flow is too complex, break it down into smaller flows.
+- Always start explaining on a higher level (concept) and go into details in the next paragraphs. Do not start with details and then explain the concept. That will make it harder to understand and maintain.
+- Prefer text diagrams and arrows instead of some nested bullets, or comma separated steps. Show independent, parallel, related executions on them
+- Be concise and on the point. Avoid long paragraphs and unnecessary details. If you need to explain a complex concept, break it down into smaller parts and explain each part separately. Better to explain something in 4 iterations instead of dumping 150 lines of explanation, so I have to write separate list with questions until reading
+
 
 ## Documentation Maintenance
 
