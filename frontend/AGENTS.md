@@ -86,19 +86,12 @@ const API_BASE_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:10000';
 
 ### Multi-Worktree (Per-Worktree Frontend)
 
-Create non-main worktrees with the root `scripts/create-worktree.sh` command.
+Create non-main worktrees with the root `scripts/create-worktree.py` command.
 The frontend's `VITE_API_URL` is then set to
 `http://localhost:<GATEWAY_PORT>` by the compose file via the allocated `.env`.
 The containerized frontend auto-connects to the correct worktree gateway.
-
-**Host-run frontend in a worktree:** Always source the exports before running Vite:
-
-```bash
-source <(scripts/dev-env.sh --exports)
-npm run dev -- --port "$FRONTEND_PORT"
-```
-
-**WARNING:** Without `--exports`, `VITE_API_URL` is unset and `api.ts` falls back to `http://localhost:10000` — main's gateway. This is a silent cross-worktree data-plane mixup, worse than a crash.
+The worktree command intentionally configures Compose only; it does not export
+host-run Vite variables.
 
 ## SPA Routing
 

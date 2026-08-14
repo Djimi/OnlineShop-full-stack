@@ -1,55 +1,51 @@
 # Multi-Worktree Local Development
 
-## Create a worktree
+## Create and start a worktree
 
-Run one command from any existing checkout:
-
-```bash
-scripts/create-worktree.sh payments -b feature/payments
-```
-
-This creates the worktree from `main`, allocates a unique development-port
-slot, and writes its managed `.env` block. A bare name such as `payments` is
-placed under the main checkout's sibling `<repository>-worktrees/` directory.
-
-Use an explicit path or base ref when needed:
+Run the single supported creation command from any checkout in the clone:
 
 ```bash
-scripts/create-worktree.sh ../review-123 -b review/123 origin/main
+scripts/create-worktree.py payments -b feature/payments
 ```
 
-Success means:
+A bare name is placed under the main checkout's sibling
+`<repository>-worktrees/` directory. An explicit path and base ref also work:
 
-- no registered worktree in this clone claims the selected slot;
-- none of the slot's complete 20-port block was listening during allocation;
-- the new worktree contains one internally consistent, atomically written
-  `.env` claim.
+```bash
+scripts/create-worktree.py ../review-123 -b review/123 origin/main
+```
 
-The command fails rather than falling back when the target base ref predates
-the current allocator. If Git created the worktree but allocation failed, the
-worktree and its new branch remain in place, and the command prints exact
-recovery or removal instructions for both.
+The selected base must contain `docker-compose.yml` with the project and ten
+port variables shown below. An older base without that contract is left as an
+incomplete worktree and reported with exact cleanup commands.
 
-## Start and stop the stack
+The command performs these steps in order:
+
+1. Validate the new branch, base ref, and target path.
+2. Create the Git branch and worktree.
+3. Lock allocation for the whole clone.
+4. Verify that the checked-out Compose file consumes the generated values.
+5. Find a slot that no registered worktree claims and whose ports are free.
+6. Write the worktree's Docker Compose values to `.env`.
+7. Print the allocated ports and start command.
+
+It does not start containers or create volumes. After it succeeds:
 
 ```bash
 cd ../OnlineShop-full-stack-worktrees/payments
-scripts/dev-env.sh --check
 docker compose up -d --build
-
-# Later
-docker compose down
 ```
 
-`--check` validates the complete managed block and confirms that no other
-worktree claims the same slot. It does not require the ports to be free because
-this worktree's own stack may already be running.
+Docker Compose automatically reads `.env`. The file contains one managed block
+with `COMPOSE_PROJECT_NAME`, `WORKTREE_SLOT`, and the ten host-port variables
+used by `docker-compose.yml`. Values outside that block are preserved.
 
-## Allocation model
+## Port allocation
 
-Each non-main worktree receives one of 631 slots. A slot owns a 20-port block
-starting at port 20000. The ten currently published ports use offsets 0–9;
-offsets 10–19 are already reserved and checked for future services.
+Each worktree owns one of 631 slots. Slot `N` starts at `20000 + N×20`, so slot
+1 is `20020–20039` and the complete worktree range is `20020–32639`. Offsets
+0–9 are assigned today; offsets 10–19 are reserved and checked so future
+services can use them safely.
 
 | Offset | Service | Main checkout | Worktree slot N |
 |---:|---|---:|---:|
@@ -64,76 +60,29 @@ offsets 10–19 are already reserved and checked for future services.
 | 8 | Kafka host listener | 9092 | gateway + 8 |
 | 9 | Kafka UI | 8080 | gateway + 9 |
 
-The worktree basename hashes to the first candidate slot. Allocation then runs
-under a clone-wide `flock`: it reads every registered worktree's validated
-`.env` claim, checks all 20 ports in the candidate block, bumps when necessary,
-and writes once. Stopped stacks therefore retain their slots, concurrent
-creators cannot select the same slot, and offsets 10–19 remain safe for future
-services.
+The worktree name hashes to the first candidate. Under a clone-wide file lock,
+the command reads claims from every registered worktree's `.env`, checks all
+20 candidate ports, and advances until it finds a free block. The lock prevents
+concurrent creators from choosing the same slot. A stopped stack keeps its
+claim until its worktree is removed. Each existing claim must contain the
+expected Compose project and ten ports for its slot; inconsistent claims stop
+allocation rather than being ignored.
 
-All main-checkout ports must stay outside the complete worktree range
-`20020–32639`. Kafka therefore uses the standard host port `9092`; Compose maps
-that to the dedicated `PLAINTEXT_HOST` listener on container port `29092`.
+## Failure and recovery
 
-A claim is released when its worktree is removed. Stale Git metadata for a
-manually deleted directory is ignored with a warning and can be removed with
-`git worktree prune`.
+If Git succeeds but allocation fails, the command leaves the new worktree and
+branch in place for inspection and prints their exact removal commands. Fix the
+reported cause, remove the incomplete worktree and branch, then run the same
+creation command again.
 
-## Maintenance commands
+If `docker compose up` later reports a bind error, another application took a
+claimed port after allocation. Stop that application and retry Compose. The
+allocator can only observe ports while it runs; it cannot reserve sockets for
+Docker indefinitely.
 
-```bash
-scripts/dev-env.sh              # Show/reuse the existing claim; allocate only if absent
-scripts/dev-env.sh --check      # Validate this worktree's unique claim
-scripts/dev-env.sh --regenerate # Stop the old Compose project and move to the next free slot
-scripts/dev-env.sh --exports    # Print variables for host-run development
-scripts/dev-env.sh --set-slot N # Allocate one specific free slot
-```
-
-Use `--regenerate --volumes` only when the old development volumes should also
-be deleted. `--set-slot` does not stop a stack on the previous slot; normally
-`--regenerate` is the safer recovery command.
-
-## Host-run development
-
-Load the worktree-specific service, database, Kafka, Redis, and frontend
-addresses before starting a component outside Compose:
-
-```bash
-source <(scripts/dev-env.sh --exports)
-
-# Examples
-cd Items
-SERVER_PORT="$ITEMS_SERVER_PORT" \
-SPRING_DATASOURCE_URL="$ITEMS_DATASOURCE_URL" \
-SPRING_DATASOURCE_USERNAME="$ITEMS_DATASOURCE_USERNAME" \
-SPRING_DATASOURCE_PASSWORD="$ITEMS_DATASOURCE_PASSWORD" \
-./run-dev.sh
-
-cd frontend && npm run dev -- --port "$FRONTEND_PORT"
-```
-
-The frontend export is important: without `VITE_API_URL`, Vite falls back to
-the main checkout's gateway at port 10000.
-
-For E2E tests, run the Maven wrapper from the E2E module as required by the
-project testing rules:
-
-```bash
-cd e2e-tests
-E2E_BASE_URL=http://localhost:<GATEWAY_PORT> ./mvnw clean test
-```
-
-## Boundaries of the guarantee
-
-- The claim registry covers worktrees of one Git clone. A separate clone has a
-  separate Git common directory and allocation lock.
-- A non-participating application can bind a selected port after allocation.
-  The allocator observes the complete block during allocation; it cannot keep
-  all 20 ports bound for Docker indefinitely.
-- Linux tooling is required (`flock`, `ss`, and `md5sum`).
-
-For a concise execution trace and recovery examples, see
-[MULTI_WORKTREE_WORKFLOW.md](./MULTI_WORKTREE_WORKFLOW.md).
+The claim registry and lock cover one Git clone. Separate clones do not see one
+another. The allocator is intentionally Linux-only because it uses Python's
+`fcntl` file locking.
 
 ## Teardown
 
@@ -142,5 +91,8 @@ docker compose down -v
 git worktree remove ../OnlineShop-full-stack-worktrees/payments
 ```
 
-Removing the worktree deletes its untracked `.env` and therefore releases its
-slot claim. Use `-v` only when deleting the development data is intentional.
+Removing the worktree removes its gitignored `.env` and releases the claim.
+Use `-v` only when deleting development data is intentional.
+
+For a concise execution trace, see
+[MULTI_WORKTREE_WORKFLOW.md](./MULTI_WORKTREE_WORKFLOW.md).

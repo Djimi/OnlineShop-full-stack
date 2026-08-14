@@ -79,26 +79,22 @@ When using Maven commands you MUST use the Maven wrapper (`./mvnw`) inside the s
 ### Create a worktree
 
 ```bash
-scripts/create-worktree.sh <path-or-name> -b <new-branch> [base-ref]
+scripts/create-worktree.py <path-or-name> -b <new-branch> [base-ref]
 ```
 
-This is the only supported creation path. In order, it validates the base,
-creates the branch and worktree directory, atomically writes a managed `.env`
-block with the Compose project, slot, and ten unique host ports, then prints
-the start command. The allocator checks the slot's complete 20-port block, so
-ten additional offsets remain reserved for future services. It does not start
-containers or create volumes. Do not split this into separate
-`git worktree add` and `scripts/dev-env.sh` steps.
-
-### Before `docker compose up`
-
-```bash
-scripts/dev-env.sh --check  # Validates the complete, unique .env claim
-```
+This is the only supported creation path. In order, it validates the request,
+creates the branch and worktree directory, verifies that the selected base uses
+the worktree Compose variables, atomically writes a managed `.env` block with
+the Compose project, slot, and ten unique host ports, then prints the start
+command. The allocator checks the slot's complete 20-port block, so ten
+additional offsets remain reserved for future services. It does not start
+containers or create volumes. Do not create development worktrees with a bare
+`git worktree add`; that bypasses port allocation.
 
 ### Multi-worktree guide
 
-See [docs/MULTI_WORKTREE.md](./docs/MULTI_WORKTREE.md) for full port isolation details, collision recovery, host-run dev mode, and Postman setup.
+See [docs/MULTI_WORKTREE.md](./docs/MULTI_WORKTREE.md) for port isolation,
+failure recovery, and teardown.
 
 ### Build and start
 

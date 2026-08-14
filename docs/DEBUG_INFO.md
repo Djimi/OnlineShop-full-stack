@@ -15,23 +15,17 @@
 New worktrees must be created with the atomic creation command:
 
 ```bash
-scripts/create-worktree.sh <path-or-name> -b <new-branch> [base-ref]
+scripts/create-worktree.py <path-or-name> -b <new-branch> [base-ref]
 ```
 
 If an external application takes a port after allocation and `docker compose
-up` reports a bind error:
+up` reports a bind error, stop that application and retry Compose. The
+creation command checks all 20 ports while allocating but cannot prevent a
+later process from binding one.
 
-```bash
-# Validate the complete claim and check for another worktree using the slot
-scripts/dev-env.sh --check
-
-# Regenerate with a new slot (downs old stack first)
-scripts/dev-env.sh --regenerate
-docker compose up -d --build
-
-# To also drop DB volumes when regenerating:
-scripts/dev-env.sh --regenerate --volumes
-```
+If the selected base ref predates the Compose port variables, creation stops
+after checkout and prints exact commands for removing the incomplete worktree
+and branch.
 
 **Manual debug:** find what's using a port:
 ```bash
@@ -39,10 +33,9 @@ ss -tlnH "sport = :<port>"    # shows the process listening on <port>
 docker ps --filter publish=<port>  # shows the container
 ```
 
-**Missing `.env` claim?** The worktree was not created through the current
-wrapper, or allocation failed after Git created it. Run `scripts/dev-env.sh`
-inside that worktree to recover. The allocator fails closed when another
-worktree already owns the candidate slot.
+**Missing `.env` claim?** The worktree was not created through the supported
+Python command, or allocation failed after Git created it. Inspect and remove
+the incomplete worktree, then recreate it with `scripts/create-worktree.py`.
 
 See [docs/MULTI_WORKTREE.md](./MULTI_WORKTREE.md) for full multi-worktree guide.
 

@@ -1,5 +1,10 @@
 # Multi-Worktree Local Dev Without Port Collisions — PLAN (revised)
 
+> Historical plan: its Bash commands and maintenance modes have been replaced
+> by the completed Python design in
+> [simplify-worktree-creation-PLAN.md](./simplify-worktree-creation-PLAN.md).
+> The only supported creation command is now `scripts/create-worktree.py`.
+
 > Rationale for every decision: `planning/multi-worktree-local-dev-REVIEW.md` (3-agent review, fixes F1–F10). This file is self-contained.
 
 > **Historical implementation record:** the slot count, bind-only allocation,
@@ -272,7 +277,7 @@ Bash, `set -euo pipefail`, runnable from any directory inside the repo. No state
 - [x] ✅ Concurrent-generation TOCTOU race — superseded by the clone-wide
       `flock` + validate + atomic-write allocator.
 - [x] ✅ Fresh worktrees missing `.env` — superseded by the single
-      `scripts/create-worktree.sh` creation command; creation and allocation are
+      `scripts/create-worktree.py` creation command; creation and allocation are
       now one fail-closed operation.
 - [x] ✅ `.env` is gitignored — the generator manages only the marked block and never clobbers existing secret lines (e.g., `POSTGRES_AWS_*`) — verified by fixture test.
 - [ ] Perf stack collides with main even today (fixed 5433/9001 + `perf-*` names ×3) — open; follow-up Task 6.
