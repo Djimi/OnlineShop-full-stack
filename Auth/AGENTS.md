@@ -100,14 +100,14 @@ Optional threshold overrides:
 --auth.troubleshooting.datasource.acquire-slow-threshold-ms=2
 ```
 
-## Host-Run Dev Mode (Multi-Worktree)
+## Multi-Worktree Ports
 
-In a non-main worktree, run the auth service on the host with `--exports` to pick up worktree-specific ports:
+Create non-main worktrees with the root `scripts/create-worktree.py` command.
+It writes the Auth and database host ports used by Docker Compose to the root
+`.env`. Automatic translation of those Compose values into host-run Spring
+variables is deliberately outside the worktree-creation command.
 
-```bash
-source <(scripts/dev-env.sh --exports)
-./mvnw spring-boot:run
-```
+Repository automation must follow [Script Guidelines](../docs/SCRIPT_GUIDELINES.md).
 
 ## AWS CLI Conventions
 
