@@ -55,18 +55,27 @@ Frontend releases will be deployed under immutable S3 release prefixes
 (`_releases/v<version>/`) with a `release.json` version marker; the promotion
 preflight (`release/bin/check-release-identity.sh`) fails closed on any prefix
 collision and resumes only when an existing marker exactly matches the
-validated manifest.
+validated manifest. Pass 3R.1 makes the handoff explicit: promotion consumes
+the candidate archive plus the actual production snapshot, publishes assets
+before the live marker, and renders an official manifest only from the
+deployment manifest after verification. `publish-frontend.sh`,
+`restore-frontend.sh`, and promotion compensation request
+`--checksum-algorithm SHA256` on every S3 write. Snapshot requires the live
+index's full-object `ChecksumSHA256` and the matching immutable prefix; an ETag
+is never accepted as a SHA-256 substitute. The role cutover is Pass 3R.9 and
+the live promotion/rollback proof is Pass 3R.10.
 
 ### Deploy to AWS
 ```bash
 # Build
 VITE_API_URL='' npm run build
 
-# Upload to S3
-aws s3 sync dist/ s3://onlineshop-frontend-799111666795/ --delete --profile dpm-profile --region eu-north-1
+# Upload to S3 (manual root sync only; release promotion uses publish-frontend.sh)
+# Keep old hashed assets and request a service-reported SHA-256 checksum.
+aws s3 sync dist/ s3://onlineshop-frontend-799111666795/ --checksum-algorithm SHA256 --profile dpm-profile --region eu-north-1
 
 # Invalidate CloudFront cache
-aws cloudfront create-invalidation --distribution-id EPS8MI3FV3B7X --paths "/*" --profile dpm-profile --region us-east-1
+aws cloudfront create-invalidation --distribution-id EPS8MI3FV3B7X --paths "/*" --profile dpm-profile --region eu-north-1
 ```
 
 ## API Integration

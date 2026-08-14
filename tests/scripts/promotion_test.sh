@@ -96,6 +96,16 @@ OUT=$(run_promotion dispatch --version 1.2.1 --run-id not-a-number 2>&1) \
   && fail "dispatch must reject a non-numeric run id"
 expect_issue_code "$OUT" INVALID_RUN_ID
 
+# Optional source_sha is a selector, but when supplied it must bind exactly to
+# the sourceSha recorded by the downloaded candidate evidence.
+OUT=$(run_promotion source-sha --requested "$SHA" --evidence "$VALID/candidate-v1.2.1.json")
+jq -e '.valid == true' <<<"$OUT" >/dev/null \
+  || fail "matching dispatch source SHA must be accepted"
+OUT=$(run_promotion source-sha --requested "ffffffffffffffffffffffffffffffffffffffff" \
+  --evidence "$VALID/candidate-v1.2.1.json" 2>&1) \
+  && fail "mismatching dispatch source SHA must fail closed"
+expect_issue_code "$OUT" SOURCE_SHA_MISMATCH
+
 # run
 OUT=$(run_promotion run --run "$FX/run-ok.json" --source-sha "$SHA")
 jq -e '.valid == true' <<<"$OUT" >/dev/null || fail "run evidence must pass on the ok fixture"
@@ -248,6 +258,8 @@ trigger = wf.get("on") or wf.get(True) or {}
 dispatch_inputs = (trigger.get("workflow_dispatch") or {}).get("inputs", {}) if isinstance(trigger, dict) else {}
 if "version" not in dispatch_inputs or "run_id" not in dispatch_inputs:
     problems.append("promote-release.yml must take version + run_id dispatch inputs")
+if "source_sha" not in dispatch_inputs:
+    problems.append("promote-release.yml must preserve the optional source_sha selector")
 
 # The production mutation job must use the protected production Environment
 # and the shared non-cancelling production concurrency group.
@@ -287,6 +299,19 @@ else:
         problems.append("the pre-approval preflight job must not require AWS (promotion-preflight.sh)")
     if "emit-candidate-manifest.sh" not in str(preflight) or "validate-manifest.sh" not in str(preflight):
         problems.append("the pre-approval preflight job must render and validate the candidate manifest")
+
+outputs = (preflight or {}).get("outputs", {}) if isinstance(preflight, dict) else {}
+if outputs.get("source_sha") != "${{ steps.inputs.outputs.source_sha }}":
+    problems.append("preflight must carry the validated source_sha into the approved job")
+for label, block in (("preflight", str(preflight)), ("promote", promote_text)):
+    if "source-sha" not in block:
+        problems.append(f"{label} must bind source_sha to candidate evidence via the release decision")
+    if '--requested "$SOURCE_SHA_VALUE"' not in block:
+        problems.append(f"{label} must pass the validated source_sha through quoted argv")
+    if "--evidence candidate-evidence/candidate-evidence.json" not in block:
+        problems.append(f"{label} must compare against the downloaded candidate evidence")
+    if 'rl_assert_full_sha "$SOURCE_SHA_VALUE"' not in block:
+        problems.append(f"{label} must validate source_sha before the semantic binding")
 
 # approvedBy is derived from the environment-approval evidence via the
 # actions/runs/{run}/approvals API, never from github.actor or user input.
@@ -366,6 +391,8 @@ write_stub_clis() {
   mkdir -p "$TMP/bin"
   cat > "$TMP/bin/aws" <<'PY'
 #!/usr/bin/env python3
+import base64
+import hashlib
 import json
 import os
 import sys
@@ -493,29 +520,61 @@ elif service == "s3api" and sub == "get-object":
             handle.write(str(content))
 elif service == "s3api" and sub == "head-object":
     key = arg("--key") or ""
-    record(f"s3api head-object {key}")
-    text(state["frontend"].get(key, "etag"))
+    checksum_mode = arg("--checksum-mode")
+    record(f"s3api head-object {key} checksum-mode={checksum_mode or '<missing>'}")
+    if checksum_mode != "ENABLED":
+        fail_not_found()
+    frontend = state["frontend"]
+    if "headChecksumSha256" in frontend:
+        checksum = frontend["headChecksumSha256"]
+    else:
+        checksum_hex = frontend.get("checksums", {}).get(key)
+        if checksum_hex is None:
+            checksum = None
+        else:
+            try:
+                checksum = base64.b64encode(bytes.fromhex(checksum_hex)).decode("ascii")
+            except ValueError:
+                # A test may inject malformed object metadata; do not repair it
+                # by deriving a checksum from the object's content.
+                checksum = checksum_hex
+    emit({
+        "checksum": checksum,
+        "checksumType": frontend.get("headChecksumType", "FULL_OBJECT"),
+    })
 elif service == "s3" and sub == "cp":
     # aws s3 cp <local-file> s3://bucket/key [--content-type X]
-    record("s3 cp")
+    checksum_algorithm = arg("--checksum-algorithm")
+    record(f"s3 cp checksum-algorithm={checksum_algorithm or '<missing>'}")
     uri = [a for a in args if a.startswith("s3://")]
     if uri:
         uri_index = args.index(uri[0])
         src = args[uri_index - 1] if uri_index > 0 else ""
         bucket, key = uri[0][len("s3://"):].split("/", 1)
         if src:
-            with open(src, encoding="utf-8") as handle:
-                content = handle.read()
+            with open(src, "rb") as handle:
+                raw = handle.read()
+            content = raw.decode("utf-8")
             try:
                 content = json.loads(content)
             except ValueError:
                 pass
-            state.setdefault("frontend", {})[key] = content
+            frontend = state.setdefault("frontend", {})
+            frontend[key] = content
+            checksums = frontend.setdefault("checksums", {})
+            if checksum_algorithm == "SHA256":
+                checksums[key] = hashlib.sha256(raw).hexdigest()
+            else:
+                # An overwrite without the requested SHA-256 must not retain
+                # stale metadata that would make a later snapshot pass.
+                checksums.pop(key, None)
+            frontend.pop("headChecksumSha256", None)
             persist()
     text("")
 elif service == "s3" and sub == "sync":
     # aws s3 sync <local-dir>/ s3://bucket/prefix [--exclude name ...]
-    record("s3 sync")
+    checksum_algorithm = arg("--checksum-algorithm")
+    record(f"s3 sync checksum-algorithm={checksum_algorithm or '<missing>'}")
     uri = [a for a in args if a.startswith("s3://")]
     excludes = []
     for index, item in enumerate(args):
@@ -536,11 +595,19 @@ elif service == "s3" and sub == "sync":
                     key = (prefix.rstrip("/") + "/" + rel) if prefix else rel
                     with open(full, encoding="utf-8") as handle:
                         content = handle.read()
+                    raw = content.encode("utf-8")
                     try:
                         content = json.loads(content)
                     except ValueError:
                         pass
-                    state.setdefault("frontend", {})[key] = content
+                    frontend = state.setdefault("frontend", {})
+                    frontend[key] = content
+                    checksums = frontend.setdefault("checksums", {})
+                    if checksum_algorithm == "SHA256":
+                        checksums[key] = hashlib.sha256(raw).hexdigest()
+                    else:
+                        checksums.pop(key, None)
+                    frontend.pop("headChecksumSha256", None)
             persist()
     text("")
 elif service == "s3api" and sub == "sync":
@@ -569,16 +636,40 @@ import sys
 url = sys.argv[2] if len(sys.argv) > 2 else ""
 data = json.load(open(os.environ["STUB_GH_DATA"], encoding="utf-8"))
 
-if re.search(r"/actions/runs/(\d+)/attempts", url):
+calls_path = os.environ.get("STUB_GH_CALLS")
+if calls_path:
+    with open(calls_path, "a", encoding="utf-8") as handle:
+        handle.write(url + "\n")
+
+
+def print_jobs(jobs):
+    # Match `gh api --jq '.jobs[] | ...'`: one JSON object per selected job.
+    for name, conclusion in jobs.items():
+        print(json.dumps({"name": name, "conclusion": conclusion}))
+
+attempt_jobs = re.search(r"/actions/runs/(\d+)/attempts/(\d+)/jobs$", url)
+if attempt_jobs:
+    attempt = attempt_jobs.group(2)
+    jobs = data.get("jobsByAttempt", {}).get(attempt)
+    if jobs is None:
+        print(f"no fixture jobs for attempt {attempt}", file=sys.stderr)
+        sys.exit(1)
+    print_jobs(jobs)
+elif re.search(r"/actions/runs/(\d+)/attempts/(\d+)$", url):
     run = data["run"]
     print(json.dumps({
-        "id": run["runId"], "run_attempt": run["runAttempt"],
+        "id": data.get("runIdResponse", run["runId"]),
+        "run_attempt": data.get("runAttemptResponse", run["runAttempt"]),
         "html_url": run.get("url", ""), "event": run["event"],
-        "head_branch": run["ref"], "head_sha": run["headSha"],
+        # GitHub's workflow-run REST API reports the branch name ("main"),
+        # not the fully-qualified ref stored by the release contract.
+        "head_branch": run["head_branch"], "head_sha": run["headSha"],
         "conclusion": run["conclusion"],
     }))
 elif "/actions/runs/" in url and "/jobs" in url:
-    print(json.dumps({"jobs": [{"name": n, "conclusion": c} for n, c in run["jobs"].items()]}))
+    # Deliberately model the unscoped endpoint as the latest attempt. The
+    # regression below must prove that this data cannot satisfy attempt 1.
+    print_jobs(data.get("latestJobs", data["run"]["jobs"]))
 elif "/artifacts" in url:
     print(json.dumps({"artifacts": [{"name": "candidate-evidence-" + run["headSha"] + "-1", "expired": False}]}))
 elif re.search(r"/git/matching-refs/tags/v", url):
@@ -598,12 +689,32 @@ elif "/releases/tags/" in url or "/releases" in url:
 elif "/git/refs/tags/" in url:
     # The scripts filter with `--jq '.object'`, so return the object shape.
     print(json.dumps({"sha": data.get("gitTagSha", ""), "type": "commit"}))
+elif "/git/ref/tags/v1.2.1" in url:
+    print(json.dumps({
+        "ref": "refs/tags/v1.2.1",
+        "object": {
+            "sha": data.get("gitTagObjectSha", data.get("gitTagSha", "")),
+            "type": data.get("gitTagType", "commit"),
+        },
+    }))
 elif "/git/tags/" in url:
-    print(json.dumps({"object": {"sha": data.get("gitTagSha", ""), "type": "commit"}}))
+    print(json.dumps({
+        "object": {
+            "sha": data.get("gitTagPeeledSha", data.get("gitTagSha", "")),
+            "type": "commit",
+        }
+    }))
 elif "/tags" in url:
+    live_tag = [] if data.get("omitLiveTag") else [{
+        "name": "v1.2.1",
+        "commit": {"sha": data.get("wrongLiveTagSha", data.get("gitTagSha", ""))},
+    }]
     print(json.dumps([
-        {"name": "v1.1.0", "commit": {"sha": data["lastOfficialSha"]}},
-        {"name": "v1.2.1", "commit": {"sha": data.get("gitTagSha", "")}},
+        [
+            {"name": "v2.0.0", "commit": {"sha": "b" * 40}},
+            {"name": "v1.1.0", "commit": {"sha": data["lastOfficialSha"]}},
+        ],
+        live_tag,
     ]))
 elif "/approvals" in url:
     print(json.dumps([
@@ -619,9 +730,12 @@ PY
 stub_state_ok() {
   python3 - "$TMP/state.json" "$TMP/gh-data.json" <<PY
 import json
+import hashlib
 import sys
 
 sha = "a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4"
+index_html = "<html>live-index</html>"
+index_sha = hashlib.sha256(index_html.encode()).hexdigest()
 state = {
     "identity": "799111666795",
     "ecr": {
@@ -753,6 +867,13 @@ state = {
     "frontend": {
         "release.json": {"version": "1.2.1", "sourceSha": sha, "frontendSha256": "b9debb6b25ee6e6e534f7738d27f53f4153dbf361f097336741ae9fb54939ee4"},
         "_releases/v1.2.1/release.json": {"version": "1.2.1", "sourceSha": sha, "frontendSha256": "b9debb6b25ee6e6e534f7738d27f53f4153dbf361f097336741ae9fb54939ee4"},
+        "_releases/v1.2.1/index.html": index_html,
+        "index.html": index_html,
+        "indexSha256": index_sha,
+        "checksums": {
+            "_releases/v1.2.1/index.html": index_sha,
+            "index.html": index_sha,
+        },
     },
     "alb": {"targetHealth": [{"target": {"id": "10.0.0.1"}, "targetHealth": {"state": "healthy"}}]},
 }
@@ -761,21 +882,34 @@ json.dump(state, open(sys.argv[1], "w"), indent=2, sort_keys=True)
 gh_data = {
     "run": {
         "runId": 123456789, "runAttempt": 1, "url": "https://github.com/x/actions/runs/123456789/attempts/1",
-        "event": "push", "ref": "refs/heads/main", "headSha": sha, "conclusion": "success",
+        "event": "push", "head_branch": "main",
+        "headSha": sha, "conclusion": "success",
         "jobs": {"auth": "success", "items": "success", "api-gateway": "success",
                  "frontend": "success", "e2e-staging": "success"},
     },
+    "jobsByAttempt": {
+        "1": {"auth": "success", "items": "success", "api-gateway": "success",
+              "frontend": "success", "e2e-staging": "success"},
+        "2": {"auth": "success", "items": "success", "api-gateway": "success",
+              "frontend": "success", "e2e-staging": "success"},
+    },
+    "latestJobs": {"auth": "success", "items": "success", "api-gateway": "success",
+                   "frontend": "success", "e2e-staging": "success"},
     "lastOfficialSha": "deadbeefcafebabe1234567890abcdef12345678",
     "mainSha": sha,
     "descendantOfOfficial": {"status": "ahead", "aheadBy": 5, "behindBy": 0},
     "reachableFromMain": {"status": "identical", "aheadBy": 0, "behindBy": 0},
     "gitTagSha": sha,
+    "gitTagType": "commit",
+    "gitTagObjectSha": sha,
+    "gitTagPeeledSha": sha,
     "release": {"id": 1, "tag_name": "v1.2.1", "target_commitish": sha,
                 "assets": [{"name": "release-manifest.json"}]},
 }
 json.dump(gh_data, open(sys.argv[2], "w"), indent=2, sort_keys=True)
 PY
   : > "$TMP/calls.txt"
+  : > "$TMP/gh-calls.txt"
 }
 
 write_stub_clis
@@ -783,6 +917,7 @@ export PATH="$TMP/bin:$PATH"
 export STUB_STATE="$TMP/state.json"
 export STUB_CALLS="$TMP/calls.txt"
 export STUB_GH_DATA="$TMP/gh-data.json"
+export STUB_GH_CALLS="$TMP/gh-calls.txt"
 export GITHUB_REPOSITORY=Djimi/OnlineShop-full-stack
 export GITHUB_TOKEN=t
 
@@ -797,6 +932,141 @@ assert_success bash "$RELEASE/bin/promotion-preflight.sh" \
   --identity <(jq -n '{action: "proceed", issues: []}') \
   --db-change absent --migration-reviewed false \
   --profile dpm-profile --region eu-north-1
+# The GitHub API gather path must also accept its real `head_branch: "main"`
+# shape and normalize it to the contract's `refs/heads/main`.
+stub_state_ok
+OUT=$(bash "$RELEASE/bin/promotion-preflight.sh" \
+  --manifest "$VALID/candidate-v1.2.1.json" \
+  --ancestry "$FX/ancestry-ok.json" \
+  --identity <(jq -n '{action: "proceed", issues: []}') \
+  --db-change absent --migration-reviewed false \
+  --profile dpm-profile --region eu-north-1 2>&1) \
+  || { printf '%s\n' "$OUT" >&2; fail "real GitHub head_branch main must pass promotion preflight"; }
+assert_contains "$OUT" "promotion-preflight: OK"
+# A contract-shaped `refs/heads/main` from a faulty API stub is not a valid
+# REST response and must not accidentally authorize the candidate.
+stub_state_ok
+python3 - "$TMP/gh-data.json" <<'PY'
+import json
+import sys
+
+path = sys.argv[1]
+with open(path, encoding="utf-8") as handle:
+    data = json.load(handle)
+data["run"]["head_branch"] = "refs/heads/main"
+with open(path, "w", encoding="utf-8") as handle:
+    json.dump(data, handle, indent=2, sort_keys=True)
+PY
+OUT=$(bash "$RELEASE/bin/promotion-preflight.sh" \
+  --manifest "$VALID/candidate-v1.2.1.json" \
+  --ancestry "$FX/ancestry-ok.json" \
+  --identity <(jq -n '{action: "proceed", issues: []}') \
+  --db-change absent --migration-reviewed false \
+  --profile dpm-profile --region eu-north-1 2>&1) \
+  && fail "contract-shaped head_branch must fail closed"
+assert_contains "$OUT" "RUN_REF_MISMATCH"
+# A different (but syntactically plausible) branch must also fail closed.
+stub_state_ok
+python3 - "$TMP/gh-data.json" <<'PY'
+import json
+import sys
+
+path = sys.argv[1]
+with open(path, encoding="utf-8") as handle:
+    data = json.load(handle)
+data["run"]["head_branch"] = "feature/release"
+with open(path, "w", encoding="utf-8") as handle:
+    json.dump(data, handle, indent=2, sort_keys=True)
+PY
+OUT=$(bash "$RELEASE/bin/promotion-preflight.sh" \
+  --manifest "$VALID/candidate-v1.2.1.json" \
+  --ancestry "$FX/ancestry-ok.json" \
+  --identity <(jq -n '{action: "proceed", issues: []}') \
+  --db-change absent --migration-reviewed false \
+  --profile dpm-profile --region eu-north-1 2>&1) \
+  && fail "wrong head_branch must fail closed"
+assert_contains "$OUT" "RUN_REF_MISMATCH"
+# A rerun-safe gather must use the exact attempt jobs endpoint. The unscoped
+# jobs endpoint is fixture-modeled as the latest attempt and reports success;
+# only the selected attempt 1 reports the staging failure, so accepting the
+# latest attempt would incorrectly authorize this candidate.
+stub_state_ok
+python3 - "$TMP/gh-data.json" <<'PY'
+import json
+import sys
+
+path = sys.argv[1]
+with open(path, encoding="utf-8") as handle:
+    data = json.load(handle)
+data["jobsByAttempt"]["1"]["e2e-staging"] = "failure"
+data["latestJobs"]["e2e-staging"] = "success"
+with open(path, "w", encoding="utf-8") as handle:
+    json.dump(data, handle, indent=2, sort_keys=True)
+PY
+OUT=$(bash "$RELEASE/bin/promotion-preflight.sh" \
+  --manifest "$VALID/candidate-v1.2.1.json" \
+  --ancestry "$FX/ancestry-ok.json" \
+  --identity <(jq -n '{action: "proceed", issues: []}') \
+  --db-change absent --migration-reviewed false \
+  --profile dpm-profile --region eu-north-1 2>&1) \
+  && fail "latest-attempt jobs must not satisfy the selected candidate attempt"
+assert_contains "$OUT" "RUN_STAGING_UNSUCCESSFUL"
+grep -Fxq "repos/Djimi/OnlineShop-full-stack/actions/runs/123456789/attempts/1/jobs" "$TMP/gh-calls.txt" \
+  || fail "promotion preflight must call the exact attempt-scoped jobs endpoint"
+if grep -Eq '/actions/runs/[0-9]+/jobs$' "$TMP/gh-calls.txt"; then
+  fail "promotion preflight must not call the unscoped latest-attempt jobs endpoint"
+fi
+# The attempt-scoped run endpoint must also identify the requested run before
+# any attempt metadata is consumed. Keep attempt, jobs, and all other evidence
+# valid so only this exact-run binding check can reject the response.
+stub_state_ok
+python3 - "$TMP/gh-data.json" <<'PY'
+import json
+import sys
+
+path = sys.argv[1]
+with open(path, encoding="utf-8") as handle:
+    data = json.load(handle)
+data["runIdResponse"] = 987654321
+with open(path, "w", encoding="utf-8") as handle:
+    json.dump(data, handle, indent=2, sort_keys=True)
+PY
+OUT=$(bash "$RELEASE/bin/promotion-preflight.sh" \
+  --manifest "$VALID/candidate-v1.2.1.json" \
+  --ancestry "$FX/ancestry-ok.json" \
+  --identity <(jq -n '{action: "proceed", issues: []}') \
+  --db-change absent --migration-reviewed false \
+  --profile dpm-profile --region eu-north-1 2>&1) \
+  && fail "attempt-scoped run response with a different id must fail closed"
+assert_contains "$OUT" "does not match requested run ID 123456789"
+grep -Fxq "repos/Djimi/OnlineShop-full-stack/actions/runs/123456789/attempts/1" "$TMP/gh-calls.txt" \
+  || fail "promotion preflight must call the exact attempt-scoped run endpoint"
+if grep -Fq "/actions/runs/123456789/attempts/1/jobs" "$TMP/gh-calls.txt"; then
+  fail "promotion preflight must reject a mismatched run id before reading attempt jobs"
+fi
+# The attempt-scoped run endpoint itself must identify the requested attempt.
+# Keep jobs and all other run evidence valid so only this binding check can
+# reject the response.
+stub_state_ok
+python3 - "$TMP/gh-data.json" <<'PY'
+import json
+import sys
+
+path = sys.argv[1]
+with open(path, encoding="utf-8") as handle:
+    data = json.load(handle)
+data["runAttemptResponse"] = 2
+with open(path, "w", encoding="utf-8") as handle:
+    json.dump(data, handle, indent=2, sort_keys=True)
+PY
+OUT=$(bash "$RELEASE/bin/promotion-preflight.sh" \
+  --manifest "$VALID/candidate-v1.2.1.json" \
+  --ancestry "$FX/ancestry-ok.json" \
+  --identity <(jq -n '{action: "proceed", issues: []}') \
+  --db-change absent --migration-reviewed false \
+  --profile dpm-profile --region eu-north-1 2>&1) \
+  && fail "attempt-scoped run response with a different attempt must fail closed"
+assert_contains "$OUT" "does not match requested attempt 1"
 # Unreviewed schema change fails closed.
 OUT=$(bash "$RELEASE/bin/promotion-preflight.sh" \
   --manifest "$VALID/candidate-v1.2.1.json" \
@@ -824,10 +1094,199 @@ SNAP=$(bash "$RELEASE/bin/snapshot-production.sh" \
   --profile dpm-profile --region eu-north-1)
 echo "$SNAP" | jq -e '.services["onlineshop-auth"].taskDefinitionArn != ""' >/dev/null \
   || fail "snapshot must capture the auth task definition"
+echo "$SNAP" | jq -e '
+  .officialRelease.version == .frontend.marker.version and
+  .officialRelease.gitTag == ("v" + .frontend.marker.version) and
+  .officialRelease.sourceSha == .frontend.marker.sourceSha and
+  .frontend.indexSha256 != ""
+' >/dev/null || fail "snapshot official identity must match the live frontend marker"
 grep -q "ecs describe-services" "$TMP/calls.txt" || fail "snapshot must read ECS services"
+grep -q "s3api head-object index.html checksum-mode=ENABLED" "$TMP/calls.txt" \
+  || fail "snapshot must request S3 checksum mode"
 if grep -Eq ' (put|create|update|delete|register|run)-' "$TMP/calls.txt"; then
   fail "snapshot-production.sh must be read-only"
 fi
+# A newer unrelated tag is present in the stub, but it must not override the
+# release named by the live frontend marker.
+jq -e '.officialRelease.version == "1.2.1" and .officialRelease.gitTag == "v1.2.1"' \
+  <<<"$SNAP" >/dev/null || fail "newer unrelated tag must not become the previous release"
+# Missing and mismatched canonical tags fail closed before snapshot output.
+stub_state_ok
+python3 - "$TMP/gh-data.json" <<'PY'
+import json
+import sys
+
+path = sys.argv[1]
+data = json.load(open(path, encoding="utf-8"))
+data["omitLiveTag"] = True
+json.dump(data, open(path, "w", encoding="utf-8"), indent=2, sort_keys=True)
+PY
+OUT=$(bash "$RELEASE/bin/snapshot-production.sh" \
+  --manifest "$VALID/candidate-v1.2.1.json" \
+  --profile dpm-profile --region eu-north-1 2>&1) \
+  && fail "snapshot must reject a missing canonical live-release tag"
+assert_contains "$OUT" "TAG_NOT_FOUND"
+
+stub_state_ok
+python3 - "$TMP/gh-data.json" <<'PY'
+import json
+import sys
+
+path = sys.argv[1]
+data = json.load(open(path, encoding="utf-8"))
+data["wrongLiveTagSha"] = "f" * 40
+json.dump(data, open(path, "w", encoding="utf-8"), indent=2, sort_keys=True)
+PY
+OUT=$(bash "$RELEASE/bin/snapshot-production.sh" \
+  --manifest "$VALID/candidate-v1.2.1.json" \
+  --profile dpm-profile --region eu-north-1 2>&1) \
+  && fail "snapshot must reject a canonical tag with the wrong source SHA"
+assert_contains "$OUT" "TAG_SHA_MISMATCH"
+
+# The immutable rollback source must agree with the captured live marker and
+# live index checksum. Exercise marker, bytes, and recorded checksum drift.
+stub_state_ok
+python3 - "$TMP/state.json" <<'PY'
+import json
+import sys
+
+path = sys.argv[1]
+state = json.load(open(path, encoding="utf-8"))
+state["frontend"]["_releases/v1.2.1/release.json"]["sourceSha"] = "f" * 40
+json.dump(state, open(path, "w", encoding="utf-8"), indent=2, sort_keys=True)
+PY
+OUT=$(bash "$RELEASE/bin/snapshot-production.sh" \
+  --manifest "$VALID/candidate-v1.2.1.json" \
+  --profile dpm-profile --region eu-north-1 2>&1) \
+  && fail "snapshot must reject a mismatched immutable prefix marker"
+assert_contains "$OUT" "prefix marker does not match"
+
+stub_state_ok
+python3 - "$TMP/state.json" <<'PY'
+import json
+import sys
+
+path = sys.argv[1]
+state = json.load(open(path, encoding="utf-8"))
+state["frontend"]["_releases/v1.2.1/index.html"] = "<html>wrong-prefix-index</html>"
+json.dump(state, open(path, "w", encoding="utf-8"), indent=2, sort_keys=True)
+PY
+OUT=$(bash "$RELEASE/bin/snapshot-production.sh" \
+  --manifest "$VALID/candidate-v1.2.1.json" \
+  --profile dpm-profile --region eu-north-1 2>&1) \
+  && fail "snapshot must reject immutable prefix index drift"
+assert_contains "$OUT" "prefix index checksum"
+
+stub_state_ok
+python3 - "$TMP/state.json" <<'PY'
+import json
+import sys
+
+path = sys.argv[1]
+state = json.load(open(path, encoding="utf-8"))
+state["frontend"]["indexSha256"] = "e" * 64
+state["frontend"]["checksums"]["index.html"] = "e" * 64
+json.dump(state, open(path, "w", encoding="utf-8"), indent=2, sort_keys=True)
+PY
+OUT=$(bash "$RELEASE/bin/snapshot-production.sh" \
+  --manifest "$VALID/candidate-v1.2.1.json" \
+  --profile dpm-profile --region eu-north-1 2>&1) \
+  && fail "snapshot must reject a wrong live index checksum"
+assert_contains "$OUT" "prefix index checksum"
+
+# S3 HeadObject exposes ChecksumSHA256 as base64. Missing, malformed, and
+# unsupported composite metadata must fail closed; an ETag cannot substitute.
+stub_state_ok
+python3 - "$TMP/state.json" <<'PY'
+import json
+import sys
+
+path = sys.argv[1]
+with open(path, encoding="utf-8") as handle:
+    state = json.load(handle)
+state["frontend"]["headChecksumSha256"] = None
+state["frontend"]["indexETag"] = '"etag-not-sha256"'
+json.dump(state, open(path, "w", encoding="utf-8"), indent=2, sort_keys=True)
+PY
+OUT=$(bash "$RELEASE/bin/snapshot-production.sh" \
+  --manifest "$VALID/candidate-v1.2.1.json" \
+  --profile dpm-profile --region eu-north-1 2>&1) \
+  && fail "snapshot must reject missing checksum metadata and ETag fallback"
+assert_contains "$OUT" "ChecksumSHA256 is absent"
+
+stub_state_ok
+python3 - "$TMP/state.json" <<'PY'
+import json
+import sys
+
+path = sys.argv[1]
+with open(path, encoding="utf-8") as handle:
+    state = json.load(handle)
+state["frontend"]["headChecksumSha256"] = "not-base64"
+json.dump(state, open(path, "w", encoding="utf-8"), indent=2, sort_keys=True)
+PY
+OUT=$(bash "$RELEASE/bin/snapshot-production.sh" \
+  --manifest "$VALID/candidate-v1.2.1.json" \
+  --profile dpm-profile --region eu-north-1 2>&1) \
+  && fail "snapshot must reject malformed base64 checksum metadata"
+assert_contains "$OUT" "not canonical base64"
+
+stub_state_ok
+python3 - "$TMP/state.json" <<'PY'
+import json
+import sys
+
+path = sys.argv[1]
+with open(path, encoding="utf-8") as handle:
+    state = json.load(handle)
+state["frontend"]["headChecksumType"] = "COMPOSITE"
+json.dump(state, open(path, "w", encoding="utf-8"), indent=2, sort_keys=True)
+PY
+OUT=$(bash "$RELEASE/bin/snapshot-production.sh" \
+  --manifest "$VALID/candidate-v1.2.1.json" \
+  --profile dpm-profile --region eu-north-1 2>&1) \
+  && fail "snapshot must reject composite checksum metadata"
+assert_contains "$OUT" "checksum type is not FULL_OBJECT"
+
+# Annotated tags are accepted only after the tag object is peeled to the same
+# commit SHA named by the live marker; a wrong peeled commit fails closed.
+stub_state_ok
+python3 - "$TMP/gh-data.json" <<'PY'
+import json
+import sys
+
+path = sys.argv[1]
+data = json.load(open(path, encoding="utf-8"))
+data["gitTagType"] = "tag"
+data["gitTagObjectSha"] = "c" * 40
+data["gitTagPeeledSha"] = data["gitTagSha"]
+json.dump(data, open(path, "w", encoding="utf-8"), indent=2, sort_keys=True)
+PY
+SNAP_ANNOTATED=$(bash "$RELEASE/bin/snapshot-production.sh" \
+  --manifest "$VALID/candidate-v1.2.1.json" \
+  --profile dpm-profile --region eu-north-1) \
+  || fail "snapshot must support a correctly peeled annotated canonical tag"
+jq -e '.officialRelease.sourceSha == .frontend.marker.sourceSha' <<<"$SNAP_ANNOTATED" >/dev/null \
+  || fail "annotated tag snapshot must retain the live source SHA"
+
+stub_state_ok
+python3 - "$TMP/gh-data.json" <<'PY'
+import json
+import sys
+
+path = sys.argv[1]
+data = json.load(open(path, encoding="utf-8"))
+data["gitTagType"] = "tag"
+data["gitTagObjectSha"] = "c" * 40
+data["gitTagPeeledSha"] = "d" * 40
+json.dump(data, open(path, "w", encoding="utf-8"), indent=2, sort_keys=True)
+PY
+OUT=$(bash "$RELEASE/bin/snapshot-production.sh" \
+  --manifest "$VALID/candidate-v1.2.1.json" \
+  --profile dpm-profile --region eu-north-1 2>&1) \
+  && fail "snapshot must reject an annotated tag peeled to the wrong commit"
+assert_contains "$OUT" "canonical Git tag SHA disagrees"
+
 # verify-production against the stub (consistent state) must pass.
 : > "$TMP/calls.txt"
 assert_success bash "$RELEASE/bin/verify-production.sh" \
@@ -946,7 +1405,12 @@ OUT=$(bash "$RELEASE/bin/compensate-production.sh" \
 assert_contains "$OUT" "restore frontend"
 jq -e '.frontend["release.json"].version == "1.1.0"' "$TMP/state.json" >/dev/null \
   || fail "frontend restore did not put the pre-promotion marker live"
-grep -q "s3 cp" "$TMP/calls.txt" || fail "frontend restore must publish the previous bytes"
+RESTORED_INDEX_SHA=$(printf '%s' '<html>old-index</html>' | sha256sum | awk '{print $1}')
+jq -e --arg sha "$RESTORED_INDEX_SHA" '.frontend.checksums["index.html"] == $sha' \
+  "$TMP/state.json" >/dev/null \
+  || fail "frontend compensation must establish SHA-256 metadata for live index.html"
+grep -q "s3 cp checksum-algorithm=SHA256" "$TMP/calls.txt" \
+  || fail "frontend restore must publish the previous bytes with SHA-256"
 
 # No-op frontend restore: live root already matches the snapshot.
 stub_state_ok
@@ -973,7 +1437,7 @@ assert_contains "$OUT" "no-op"
 echo "[ 8/10] deploy-production.sh dry-run (plan + sanitize, no mutation)"
 stub_state_ok
 OUT=$(bash "$RELEASE/bin/deploy-production.sh" \
-  --manifest "$VALID/official-v1.2.1.json" \
+  --manifest "$VALID/candidate-v1.2.1.json" \
   --snapshot "$FX/snapshot-ok.json" \
   --ecr-registry 799111666795.dkr.ecr.eu-north-1.amazonaws.com \
   --dry-run \
@@ -982,6 +1446,19 @@ assert_contains "$OUT" "dry-run"
 if grep -q "ecs register-task-definition" "$TMP/calls.txt"; then
   fail "deploy-production.sh --dry-run must not register task definitions"
 fi
+# A schema-valid but unknown source ARN must still fail closed at the AWS read;
+# keep this separate from the aligned snapshot fixture so the happy-path stub
+# does not hide an invalid production snapshot.
+jq '.services["onlineshop-auth"].taskDefinitionArn = "arn:aws:ecs:eu-north-1:799111666795:task-definition/onlineshop-auth:999"' \
+  "$FX/snapshot-ok.json" > "$TMP/snapshot-unknown-arn.json"
+OUT=$(bash "$RELEASE/bin/deploy-production.sh" \
+  --manifest "$VALID/candidate-v1.2.1.json" \
+  --snapshot "$TMP/snapshot-unknown-arn.json" \
+  --ecr-registry 799111666795.dkr.ecr.eu-north-1.amazonaws.com \
+  --dry-run \
+  --profile dpm-profile --region eu-north-1 2>&1) \
+  && fail "deploy-production.sh must reject an unknown snapshot task-definition ARN"
+assert_contains "$OUT" "cannot read the current task definition"
 
 # publish-frontend.sh functional: assets-first/index-last writes BOTH the live
 # root marker and the immutable per-release prefix marker, then reads them back.
@@ -1014,8 +1491,31 @@ jq -e '.frontend["release.json"].version == "1.2.1"' "$TMP/state.json" >/dev/nul
   || fail "publish-frontend must update the live root marker"
 jq -e '.frontend["_releases/v1.2.1/release.json"].version == "1.2.1"' "$TMP/state.json" >/dev/null \
   || fail "publish-frontend must write the immutable prefix marker"
+PUBLISHED_INDEX_SHA=$(sha256sum "$TMP/dist/index.html" | awk '{print $1}')
+jq -e --arg sha "$PUBLISHED_INDEX_SHA" '
+  .frontend.checksums["index.html"] == $sha and
+  .frontend.checksums["_releases/v1.2.1/index.html"] == $sha
+' "$TMP/state.json" >/dev/null \
+  || fail "publish-frontend must establish SHA-256 metadata for both index objects"
+grep -q "s3 sync checksum-algorithm=SHA256" "$TMP/calls.txt" \
+  || fail "publish-frontend must request SHA-256 on sync uploads"
+grep -q "s3 cp checksum-algorithm=SHA256" "$TMP/calls.txt" \
+  || fail "publish-frontend must request SHA-256 on index/marker uploads"
 grep -q "cloudfront create-invalidation" "$TMP/calls.txt" \
   || fail "publish-frontend must invalidate CloudFront"
+
+# A later overwrite that omits --checksum-algorithm must remove the metadata;
+# the checksum-requiring snapshot then fails closed instead of synthesizing a
+# digest from the object's bytes (or falling back to ETag).
+printf '<html>omitted-checksum</html>' > "$TMP/omitted-index.html"
+aws s3 cp --profile dpm-profile --region eu-north-1 \
+  "$TMP/omitted-index.html" "s3://onlineshop-frontend-799111666795/index.html" \
+  --content-type text/html >/dev/null
+OUT=$(bash "$RELEASE/bin/snapshot-production.sh" \
+  --manifest "$VALID/candidate-v1.2.1.json" \
+  --profile dpm-profile --region eu-north-1 2>&1) \
+  && fail "snapshot must fail after an index overwrite omits SHA-256"
+assert_contains "$OUT" "ChecksumSHA256 is absent"
 
 # ---------------------------------------------------------------------------
 echo "[ 9/10] Static scan: mandatory profile/region + read-backs + no secrets"

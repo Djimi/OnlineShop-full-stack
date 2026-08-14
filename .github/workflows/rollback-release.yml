@@ -56,10 +56,7 @@ on:
         default: false
 
 permissions:
-  id-token: write
-  contents: write
-  actions: read
-  deployments: write
+  contents: read
 
 concurrency:
   # One production mutation at a time; superseding/cancelling an in-progress
@@ -98,16 +95,23 @@ jobs:
 
       - name: Validate dispatch inputs (target version + requester)
         id: inputs
+        env:
+          RELEASE_DIR: ${{ env.RELEASE }}
+          INPUT_VERSION: ${{ github.event.inputs.version }}
+          INPUT_REQUESTER: ${{ github.event.inputs.requester }}
+          RUN_ACTOR: ${{ github.actor }}
         run: |
-          source "${{ env.RELEASE }}/bin/release-input.sh"
-          rl_assert_semver "${{ github.event.inputs.version }}" || exit 1
-          REQUESTER="${{ github.event.inputs.requester }}"
+          set -euo pipefail
+          source "$RELEASE_DIR/bin/release-input.sh"
+          rl_assert_semver "$INPUT_VERSION" || exit 1
+          rl_assert_github_login "$RUN_ACTOR" || exit 1
+          REQUESTER="$INPUT_REQUESTER"
           if [ -z "$REQUESTER" ]; then
-            REQUESTER="${{ github.actor }}"
+            REQUESTER="$RUN_ACTOR"
           fi
           rl_assert_github_login "$REQUESTER" || exit 1
-          echo "version=${{ github.event.inputs.version }}" >> "$GITHUB_OUTPUT"
-          echo "requester=$REQUESTER" >> "$GITHUB_OUTPUT"
+          printf 'version=%s\n' "$INPUT_VERSION" >> "$GITHUB_OUTPUT"
+          printf 'requester=%s\n' "$REQUESTER" >> "$GITHUB_OUTPUT"
 
       # aws-actions/configure-aws-credentials@v4 (ff717079ee2060e4bcee96c4779b553acc87447c)
       # The preflight is read-only; the rollback role grants exactly the reads it
@@ -131,20 +135,31 @@ jobs:
           aws sts get-caller-identity --profile dpm-profile --region eu-north-1
 
       - name: Install release contract dependencies
-        run: pip install -q -r "${{ env.RELEASE }}/requirements.txt"
+        env:
+          RELEASE_DIR: ${{ env.RELEASE }}
+        run: pip install -q -r "$RELEASE_DIR/requirements.txt"
 
       - name: Run read-only rollback preflight (before approval)
         id: preflight
-        run: |
-          bash "${{ env.RELEASE }}/bin/rollback-preflight.sh" \
-            --version "${{ steps.inputs.outputs.version }}" \
-            --schema-change "${{ github.event.inputs.schema_change == true && 'present' || 'absent' }}" \
-            --migration-reviewed "${{ github.event.inputs.migration_reviewed == true && 'true' || 'false' }}" \
-            --target-manifest rollback-target-manifest.json \
-            --profile dpm-profile --region ${{ env.AWS_REGION }}
         env:
+          RELEASE_DIR: ${{ env.RELEASE }}
+          ROLLBACK_VERSION: ${{ steps.inputs.outputs.version }}
+          SCHEMA_CHANGE: ${{ github.event.inputs.schema_change }}
+          MIGRATION_REVIEWED: ${{ github.event.inputs.migration_reviewed }}
           GH_TOKEN: ${{ github.token }}
-          GITHUB_REPOSITORY: ${{ env.GITHUB_REPOSITORY }}
+          REPOSITORY: ${{ env.GITHUB_REPOSITORY }}
+        run: |
+          set -euo pipefail
+          source "$RELEASE_DIR/bin/release-input.sh"
+          rl_assert_semver "$ROLLBACK_VERSION" || exit 1
+          case "$SCHEMA_CHANGE" in true|false) ;; *) echo "invalid schema_change" >&2; exit 1 ;; esac
+          case "$MIGRATION_REVIEWED" in true|false) ;; *) echo "invalid migration_reviewed" >&2; exit 1 ;; esac
+          bash "$RELEASE_DIR/bin/rollback-preflight.sh" \
+            --version "$ROLLBACK_VERSION" \
+            --schema-change "$([ "$SCHEMA_CHANGE" = true ] && printf present || printf absent)" \
+            --migration-reviewed "$MIGRATION_REVIEWED" \
+            --target-manifest rollback-target-manifest.json \
+            --profile dpm-profile --region "$AWS_REGION"
 
       - name: Upload the validated rollback target manifest
         # actions/upload-artifact@v4 (ea165f8d65b6e75b540449e92b4886f43607fa02)
@@ -162,6 +177,11 @@ jobs:
     needs: preflight
     runs-on: ubuntu-latest
     timeout-minutes: 90
+    permissions:
+      id-token: write
+      contents: read
+      actions: read
+      deployments: read
     environment:
       name: production
     steps:
@@ -187,7 +207,9 @@ jobs:
           aws sts get-caller-identity --profile dpm-profile --region eu-north-1
 
       - name: Install release contract dependencies
-        run: pip install -q -r "${{ env.RELEASE }}/requirements.txt"
+        env:
+          RELEASE_DIR: ${{ env.RELEASE }}
+        run: pip install -q -r "$RELEASE_DIR/requirements.txt"
 
       - name: Download the validated rollback target manifest
         # actions/download-artifact@v4 (fa0a91b85d4f404e444e00e005971372dc801d16)
@@ -202,8 +224,19 @@ jobs:
 
       - name: Run the full rollback preflight after approval and lock acquisition
         id: preflight2
+        env:
+          RELEASE_DIR: ${{ env.RELEASE }}
+          ROLLBACK_VERSION: ${{ github.event.inputs.version }}
+          SCHEMA_CHANGE: ${{ github.event.inputs.schema_change }}
+          MIGRATION_REVIEWED: ${{ github.event.inputs.migration_reviewed }}
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ env.GITHUB_REPOSITORY }}
         run: |
           set -euo pipefail
+          source "$RELEASE_DIR/bin/release-input.sh"
+          rl_assert_semver "$ROLLBACK_VERSION" || exit 1
+          case "$SCHEMA_CHANGE" in true|false) ;; *) echo "invalid schema_change" >&2; exit 1 ;; esac
+          case "$MIGRATION_REVIEWED" in true|false) ;; *) echo "invalid migration_reviewed" >&2; exit 1 ;; esac
           [ -f target/rollback-target-manifest.json ] || {
             echo "ERROR: rollback target manifest is unavailable" >&2
             exit 1
@@ -211,12 +244,12 @@ jobs:
           # Re-run the read-only preflight with a FRESH observed snapshot so the
           # release is still selectable (complete, in-window, not current) at the
           # moment of mutation; only this run authorizes mutation.
-          bash "${{ env.RELEASE }}/bin/rollback-preflight.sh" \
-            --version "${{ github.event.inputs.version }}" \
-            --schema-change "${{ github.event.inputs.schema_change == true && 'present' || 'absent' }}" \
-            --migration-reviewed "${{ github.event.inputs.migration_reviewed == true && 'true' || 'false' }}" \
+          bash "$RELEASE_DIR/bin/rollback-preflight.sh" \
+            --version "$ROLLBACK_VERSION" \
+            --schema-change "$([ "$SCHEMA_CHANGE" = true ] && printf present || printf absent)" \
+            --migration-reviewed "$MIGRATION_REVIEWED" \
             --target-manifest rollback-target-manifest.fresh.json \
-            --profile dpm-profile --region ${{ env.AWS_REGION }}
+            --profile dpm-profile --region "$AWS_REGION"
           # The revalidated manifest must be byte-identical to the one the
           # owner approved before the Environment gate; any divergence fails
           # closed. The deployment consumes the exact pre-approval bytes.
@@ -225,22 +258,19 @@ jobs:
             exit 1
           }
           cp target/rollback-target-manifest.json rollback-target-manifest.json
-          jq -e --arg v "${{ github.event.inputs.version }}" '.release.version == $v' \
+          jq -e --arg v "$ROLLBACK_VERSION" '.release.version == $v' \
             rollback-target-manifest.json >/dev/null
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GITHUB_REPOSITORY: ${{ env.GITHUB_REPOSITORY }}
 
       - name: Snapshot pre-rollback production state
         id: snapshot
+        env:
+          RELEASE_DIR: ${{ env.RELEASE }}
         run: |
-          bash "${{ env.RELEASE }}/bin/snapshot-production.sh" \
+          bash "$RELEASE_DIR/bin/snapshot-production.sh" \
             --manifest rollback-target-manifest.json \
-            --profile dpm-profile --region ${{ env.AWS_REGION }} \
+            --profile dpm-profile --region "$AWS_REGION" \
             > production-snapshot.json
           echo "snapshot written"
-        env:
-          GITHUB_REPOSITORY: ${{ env.GITHUB_REPOSITORY }}
 
       - name: Upload pre-rollback snapshot (compensation source)
         # actions/upload-artifact@v4 (ea165f8d65b6e75b540449e92b4886f43607fa02)
@@ -252,15 +282,17 @@ jobs:
 
       - name: Register digest-pinned task definitions and deploy
         id: deploy
+        env:
+          RELEASE_DIR: ${{ env.RELEASE }}
         run: |
           set -euo pipefail
           # deploy-rollback.sh emits the deployment manifest (the target bytes +
           # the newly registered task-definition ARNs) on stdout.
-          bash "${{ env.RELEASE }}/bin/deploy-rollback.sh" \
+          bash "$RELEASE_DIR/bin/deploy-rollback.sh" \
             --manifest rollback-target-manifest.json \
             --snapshot production-snapshot.json \
             --ecr-registry 799111666795.dkr.ecr.eu-north-1.amazonaws.com \
-            --profile dpm-profile --region ${{ env.AWS_REGION }} \
+            --profile dpm-profile --region "$AWS_REGION" \
             > deployment-manifest.json
           jq -e '.components.auth.taskDefinitionArn and .components.items.taskDefinitionArn and .components.apiGateway.taskDefinitionArn' \
             deployment-manifest.json >/dev/null
@@ -268,48 +300,59 @@ jobs:
 
       - name: Restore frontend from the retained immutable prefix
         id: frontend
+        env:
+          RELEASE_DIR: ${{ env.RELEASE }}
         run: |
-          bash "${{ env.RELEASE }}/bin/restore-frontend.sh" \
+          bash "$RELEASE_DIR/bin/restore-frontend.sh" \
             --manifest rollback-target-manifest.json \
             --bucket onlineshop-frontend-799111666795 \
             --distribution EPS8MI3FV3B7X \
-            --profile dpm-profile --region ${{ env.AWS_REGION }}
+            --profile dpm-profile --region "$AWS_REGION"
 
       - name: Verify production after rollback
         id: verify
+        env:
+          RELEASE_DIR: ${{ env.RELEASE }}
         run: |
-          bash "${{ env.RELEASE }}/bin/verify-rollback.sh" \
+          bash "$RELEASE_DIR/bin/verify-rollback.sh" \
             --manifest deployment-manifest.json \
-            --profile dpm-profile --region ${{ env.AWS_REGION }}
+            --profile dpm-profile --region "$AWS_REGION"
 
       - name: Record the rollback result / audit annotation
         id: result
+        env:
+          RELEASE_DIR: ${{ env.RELEASE }}
+          REPOSITORY: ${{ env.GITHUB_REPOSITORY }}
+          ROLLBACK_RUN_ID: ${{ github.run_id }}
+          SERVER_URL: ${{ github.server_url }}
+          REQUESTER: ${{ needs.preflight.outputs.requester }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
+          source "$RELEASE_DIR/bin/release-input.sh"
+          rl_assert_positive_integer "$ROLLBACK_RUN_ID" || exit 1
+          rl_assert_github_login "$REQUESTER" || exit 1
           # `approvedBy` is derived from the GitHub environment-approval evidence
           # for this run (`actions/runs/{run}/approvals`), never from github.actor
           # or user input (Decision 5). It fails closed if the approved
           # `production` review cannot be resolved.
-          APPROVED_BY=$(gh api "repos/${{ env.GITHUB_REPOSITORY }}/actions/runs/${{ github.run_id }}/approvals" \
+          APPROVED_BY=$(gh api "repos/$REPOSITORY/actions/runs/$ROLLBACK_RUN_ID/approvals" \
             --jq '[.[] | select(.state == "approved") | select((.environments // []) | any(.name == "production")) | .user.login] | if length == 0 then error("no approved production environment review") else .[0] end')
           [[ "$APPROVED_BY" =~ ^[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?$ ]] || {
             echo "ERROR: invalid approver login" >&2
             exit 1
           }
-          bash "${{ env.RELEASE }}/bin/record-rollback-result.sh" \
+          bash "$RELEASE_DIR/bin/record-rollback-result.sh" \
             --manifest deployment-manifest.json \
             --snapshot production-snapshot.json \
-            --run-id "${{ github.run_id }}" \
-            --workflow-url "${{ github.server_url }}/${{ env.GITHUB_REPOSITORY }}/actions/runs/${{ github.run_id }}" \
-            --requester "${{ needs.preflight.outputs.requester }}" \
+            --run-id "$ROLLBACK_RUN_ID" \
+            --workflow-url "$SERVER_URL/$REPOSITORY/actions/runs/$ROLLBACK_RUN_ID" \
+            --requester "$REQUESTER" \
             --approver "$APPROVED_BY" \
             --outcome success \
-            --profile dpm-profile --region ${{ env.AWS_REGION }} \
+            --profile dpm-profile --region "$AWS_REGION" \
             > rollback-result.json
           echo "rollback result recorded"
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GITHUB_REPOSITORY: ${{ env.GITHUB_REPOSITORY }}
 
       - name: Upload the rollback result (audit annotation)
         # actions/upload-artifact@v4 (ea165f8d65b6e75b540449e92b4886f43607fa02)
@@ -334,6 +377,10 @@ jobs:
     if: failure() && needs.rollback.result == 'failure'
     runs-on: ubuntu-latest
     timeout-minutes: 60
+    permissions:
+      contents: read
+      actions: read
+      id-token: write
     steps:
       # actions/checkout@v4 (11d5960a326750d5838078e36cf38b85af677262)
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
@@ -363,6 +410,9 @@ jobs:
           github-token: ${{ github.token }}
 
       - name: Restore from the pre-rollback snapshot
+        env:
+          RELEASE_DIR: ${{ env.RELEASE }}
+          GITHUB_REPOSITORY: ${{ env.GITHUB_REPOSITORY }}
         run: |
           [ -f snapshot/production-snapshot.json ] || {
             echo "ERROR: pre-rollback snapshot is unavailable; stopping with a mixed-state incident record" >&2
@@ -372,9 +422,7 @@ jobs:
           # reverse deploy order. The frontend restore is a no-op when the live
           # root already matches the snapshot and a real restore (from the
           # previous immutable prefix) when it does not.
-          bash "${{ env.RELEASE }}/bin/compensate-production.sh" \
+          bash "$RELEASE_DIR/bin/compensate-production.sh" \
             --snapshot snapshot/production-snapshot.json \
             --changed '["frontend","auth","items","apiGateway"]' \
-            --profile dpm-profile --region ${{ env.AWS_REGION }}
-        env:
-          GITHUB_REPOSITORY: ${{ env.GITHUB_REPOSITORY }}
+            --profile dpm-profile --region "$AWS_REGION"

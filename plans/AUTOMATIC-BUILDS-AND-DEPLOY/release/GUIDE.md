@@ -124,6 +124,14 @@ Global invariants (enforced by the gates):
 **Result:** one immutable evidence bundle per successful main push. No SemVer
 yet — the version is assigned *later* at promotion time (`emit-candidate-manifest.sh`).
 
+The workflow security boundary is explicit: workflow-level permissions are
+`contents: read`, job-level permissions add only the required read, OIDC, or
+deployment scope, and untrusted GitHub contexts reach shell through step
+`env`. Event-specific refs and full SHAs are validated before quoted argv is
+used. Pull-request credential bootstrap/publication stays disabled; the
+structural PR/trusted-job split is Pass 3R.2/3R.3 and the purpose-specific role
+cutover is Pass 3R.9.
+
 ---
 
 ## 5. Flow B — Promotion: staging → production (subphase 3.4)
@@ -145,22 +153,23 @@ yet — the version is assigned *later* at promotion time (`emit-candidate-manif
  ▼  GitHub requires owner approval on the protected "production" Environment
  │
 ┌─ promote JOB (approved; shared non-cancelling concurrency "production-mutation") ─┐
-│ 1. re-download evidence for the SAME attempt + re-render manifest                │
+│ 1. re-download evidence for the SAME run/attempt + re-render manifest             │
 │ 2. promotion-preflight.sh ──► release_contract.promotion                         │
 │      dispatch → run → ancestry → preflight (incl. Decision-8 DB review)          │
 │    check-release-identity.sh ──► release_contract.releaseid                      │
 │      (git tag / ECR release tags / frontend marker: free, resume, or fail-closed)│
 │ 3. unpack-frontend.sh (safe extract + checksum verify)                           │
-│ 4. snapshot-production.sh ──► promotion snapshot        → production-snapshot    │
-│ 5. deploy-production.sh ──► promotion plan + waiter                               │
+│ 4. snapshot-production.sh ──► actual-live-release snapshot                       │
+│      current TD ARNs + live marker/index checksum + immutable prefix + tag       │
+│ 5. deploy-production.sh(candidate + snapshot) ──► promotion plan + waiter       │
 │      per backend: sanitize-task-definition.sh (image-only digest pin)            │
 │                   validate-task-definition.sh (hardening rules)                  │
 │      register TD revision → update service → wait bound deployment                │
 │      → deployment-manifest.json (candidate bytes + new TD ARNs)                  │
-│ 6. publish-frontend.sh ──► promotion frontend                                     │
+│ 6. publish-frontend.sh ──► promotion frontend (all S3 writes SHA256)             │
 │      assets-first/index-last, no --delete, immutable _releases/v<version>/        │
 │      prefix + live-root marker, CloudFront invalidation                           │
-│ 7. render official-manifest.json                                                 │
+│ 7. render official-manifest.json from deployment-manifest.json                   │
 │      approvedBy = gh api runs/{run}/approvals  (never github.actor!)             │
 │ 8. verify-production.sh ──► promotion verify (running digests, TD ARNs,          │
 │      frontend marker, ALB health)                                                │
@@ -175,13 +184,18 @@ yet — the version is assigned *later* at promotion time (`emit-candidate-manif
 ┌─ compensate JOB ──────────────────────────────────────────────────────┐
 │ compensate-production.sh --changed '["frontend","auth","items",       │
 │   "apiGateway"]' ──► promotion compensate                              │
-│ restores the exact pre-promotion snapshot in reverse order             │
+│ restores the exact pre-promotion snapshot in reverse order (SHA256 writes)│
 └───────────────────────────────────────────────────────────────────────┘
 ```
 
 **Key properties:** exact candidate bytes are consumed, never rebuilt; the
 post-approval preflight re-validates with a fresh snapshot (time-of-check race
-closure); the reward (official release) is only minted after verification.
+closure); the candidate carries no current TD ARN; the snapshot fails closed
+unless the live marker, immutable prefix, full-object S3 checksum, and exact
+canonical Git tag/source SHA agree; and the official release is only minted
+from the deployment manifest after verification. GitHub workflow-run reads use
+the attempt-scoped endpoints, where REST `head_branch: "main"` is normalized
+to `refs/heads/main`; the selected run `id`/`run_attempt` must match exactly.
 
 ---
 
@@ -213,7 +227,7 @@ existing official release (never a tag/digest/SHA).
 │      NO ECR tag minting, NO rebuild, NO new release                   │
 │ 4. restore-frontend.sh ──► rollback frontend-restore                  │
 │      live root restored from retained immutable _releases/v<version>/ │
-│      marker/index last, no --delete, CloudFront invalidation          │
+│      marker/index last, no --delete, SHA256 writes, invalidation       │
 │ 5. verify-rollback.sh ──► rollback verify (paused env fails closed)   │
 │ 6. record-rollback-result.sh ──► rollback result                      │
 │      requester (from preflight) + approver (from approval evidence,   │
@@ -310,6 +324,8 @@ ops tooling backed by `release_contract.ecs_config`, `.sanitize`,
 | `release_contract_test.sh` | 3.1 manifest contract + validator |
 | `candidate_evidence_test.sh` | 3.2 evidence bundle flow + workflow static checks |
 | `ecr_release_tagging_test.sh` | 3.3 ECR mint/reuse/identity/IAM |
+| `ci_security_contract_test.sh` | 3R.1 workflow context/permission boundary + hostile-input checks |
+| `promotion_handoff_test.sh` | 3R.1 stateful candidate → snapshot → deployment → official → verify → finalize handoff |
 | `promotion_test.sh` | 3.4 full promotion + compensate |
 | `production_hardening_test.sh` | 3.5 TD/service config, inventory, separation, OAC, CloudTrail |
 | `rollback_test.sh` | 3.6 rollback + result + compensate |
@@ -338,7 +354,8 @@ offline gates deliberately do not claim them.
 | `apply/verify-immutable-repositories.sh` | — (aws) | repo mutability settings |
 | `promotion-preflight.sh` | `promotion` (dispatch/run/ancestry/preflight) | candidate gate |
 | `snapshot-production.sh` | `promotion` (snapshot) | compensation source |
-| `deploy-production.sh` / `deploy-rollback.sh` | `promotion`/`rollback` (plan, waiter) | digest-pinned deploy |
+| `deploy-production.sh` / `deploy-rollback.sh` | `promotion`/`rollback` (plan, waiter) | candidate/target + snapshot → digest-pinned deploy |
+| `official.py` | — (pure Python) | live marker → exact canonical Git tag resolution |
 | `sanitize-task-definition.sh` / `validate-task-definition.sh` | `sanitize` / `ecs_config` | TD transform + hardening |
 | `publish-frontend.sh` / `restore-frontend.sh` | `promotion`/`rollback` (frontend) | S3 prefix publication / restore |
 | `verify-production.sh` / `verify-rollback.sh` | `promotion`/`rollback` (verify) | post-deploy proof |

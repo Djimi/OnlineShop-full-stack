@@ -121,12 +121,14 @@ else:
         problems.append("candidate-evidence evidence upload step must have id: upload")
     if "record-artifact.sh" not in " ".join(str(s.get("run", "")) for s in steps):
         problems.append("candidate-evidence must call record-artifact.sh")
-    if "steps.upload.outputs.artifact-digest" not in " ".join(str(s.get("run", "")) for s in steps):
+    # The expression is intentionally transferred through step env (the
+    # security contract forbids embedding GitHub contexts in run: scripts).
+    if "steps.upload.outputs.artifact-digest" not in " ".join(str(s) for s in steps):
         problems.append("candidate-evidence record step must consume steps.upload.outputs.artifact-digest")
 
-perm = wf.get("permissions", {})
-if perm.get("actions") != "read":
-    problems.append("workflow permissions must include actions: read")
+    evidence_permissions = evidence.get("permissions") or {}
+    if evidence_permissions.get("actions") != "read":
+        problems.append("candidate-evidence job permissions must include actions: read")
 
 for backend in ("auth", "items", "api-gateway"):
     job = jobs.get(backend)

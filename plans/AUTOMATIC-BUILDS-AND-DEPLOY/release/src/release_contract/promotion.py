@@ -46,6 +46,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 from dataclasses import dataclass, field
 from typing import Any
@@ -80,6 +81,8 @@ DEPLOY_ORDER = ("auth", "items", "apiGateway", "frontend")
 
 # Reverse deploy order: the compensation order for changed components.
 COMPENSATION_ORDER = tuple(reversed(DEPLOY_ORDER))
+_FULL_SHA_RE = re.compile(r"^[0-9a-f]{40}$")
+_SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 
 
 def _issue(code: str, field: str, message: str) -> dict[str, str]:
@@ -143,6 +146,51 @@ def dispatch_issues(version: Any, run_id: Any) -> Decision:
                 "INVALID_RUN_ID",
                 "runId",
                 f"candidate run id must be a positive integer, got {run_id!r}",
+            )
+        )
+    return Decision(not issues, "", issues)
+
+
+def source_sha_issues(requested_sha: Any, evidence_sha: Any) -> Decision:
+    """Bind an optional dispatch SHA to the downloaded candidate evidence.
+
+    ``source_sha`` is intentionally an optional selector: when omitted, the
+    selected run head and the evidence bundle remain authoritative.  When it
+    is supplied, however, it must be a canonical full SHA and must match the
+    evidence bundle exactly.  This closes the gap where a validated but
+    ignored dispatch input could select a different candidate than the owner
+    intended.
+    """
+    if requested_sha in (None, ""):
+        return Decision(True, "", [])
+
+    issues: list[dict[str, str]] = []
+    if not isinstance(requested_sha, str) or not _FULL_SHA_RE.fullmatch(requested_sha):
+        issues.append(
+            _issue(
+                "INVALID_SHA",
+                "dispatch.sourceSha",
+                "dispatch source SHA must be 40 lowercase hexadecimal characters, "
+                f"got {requested_sha!r}",
+            )
+        )
+        return Decision(False, "", issues)
+
+    if not isinstance(evidence_sha, str) or not _FULL_SHA_RE.fullmatch(evidence_sha):
+        issues.append(
+            _issue(
+                "EVIDENCE_SOURCE_SHA_INVALID",
+                "evidence.release.sourceSha",
+                f"candidate evidence source SHA is invalid: {evidence_sha!r}",
+            )
+        )
+    elif requested_sha != evidence_sha:
+        issues.append(
+            _issue(
+                "SOURCE_SHA_MISMATCH",
+                "dispatch.sourceSha",
+                f"dispatch source SHA {requested_sha!r} does not match candidate "
+                f"evidence source SHA {evidence_sha!r}",
             )
         )
     return Decision(not issues, "", issues)
@@ -511,8 +559,49 @@ def snapshot_issues(snapshot: Any, manifest: Any) -> Decision:
                     "SNAPSHOT_MISSING_FIELD",
                     f"snapshot.frontend.{required}",
                     f"pre-promotion snapshot must record frontend.{required}",
+                    )
+                )
+
+    marker = frontend.get("marker")
+    if isinstance(marker, dict):
+        marker_version = marker.get("version")
+        marker_source_sha = marker.get("sourceSha")
+        marker_frontend_sha = marker.get("frontendSha256")
+        if not isinstance(marker_version, str) or not is_valid_semver(marker_version):
+            issues.append(
+                _issue(
+                    "SNAPSHOT_MARKER_INVALID",
+                    "snapshot.frontend.marker.version",
+                    "live frontend marker version must be canonical SemVer",
                 )
             )
+        if not isinstance(marker_source_sha, str) or not _FULL_SHA_RE.fullmatch(marker_source_sha):
+            issues.append(
+                _issue(
+                    "SNAPSHOT_MARKER_INVALID",
+                    "snapshot.frontend.marker.sourceSha",
+                    "live frontend marker sourceSha must be a full lowercase commit SHA",
+                )
+            )
+        if not isinstance(marker_frontend_sha, str) or not _SHA256_RE.fullmatch(
+            marker_frontend_sha
+        ):
+            issues.append(
+                _issue(
+                    "SNAPSHOT_MARKER_INVALID",
+                    "snapshot.frontend.marker.frontendSha256",
+                    "live frontend marker frontendSha256 must be a lowercase SHA-256 hex digest",
+                )
+            )
+    index_sha = frontend.get("indexSha256")
+    if not isinstance(index_sha, str) or not _SHA256_RE.fullmatch(index_sha):
+        issues.append(
+            _issue(
+                "SNAPSHOT_INDEX_INVALID",
+                "snapshot.frontend.indexSha256",
+                "live frontend indexSha256 must be a lowercase SHA-256 hex digest",
+            )
+        )
 
     official = snapshot.get("officialRelease")
     if not isinstance(official, dict) or not official.get("version"):
@@ -523,6 +612,35 @@ def snapshot_issues(snapshot: Any, manifest: Any) -> Decision:
                 "the current official release identity must be recorded for resume",
             )
         )
+    else:
+        official_version = official.get("version")
+        official_tag = official.get("gitTag")
+        official_source_sha = official.get("sourceSha")
+        if (
+            not isinstance(official_version, str)
+            or not is_valid_semver(official_version)
+            or official_tag != f"v{official_version}"
+            or not isinstance(official_source_sha, str)
+            or not _FULL_SHA_RE.fullmatch(official_source_sha)
+        ):
+            issues.append(
+                _issue(
+                    "SNAPSHOT_OFFICIAL_INVALID",
+                    "snapshot.officialRelease",
+                    "official release must contain canonical version/gitTag/sourceSha identity",
+                )
+            )
+        if isinstance(marker, dict) and (
+            official_version != marker.get("version")
+            or official_source_sha != marker.get("sourceSha")
+        ):
+            issues.append(
+                _issue(
+                    "SNAPSHOT_OFFICIAL_MISMATCH",
+                    "snapshot.officialRelease",
+                    "official release identity must match the captured live frontend marker",
+                )
+            )
 
     return Decision(not issues, "", issues)
 
@@ -1140,6 +1258,13 @@ def _cmd_dispatch(args: argparse.Namespace) -> int:
     return _emit(dispatch_issues(args.version, args.run_id))
 
 
+def _cmd_source_sha(args: argparse.Namespace) -> int:
+    evidence = _read_json(args.evidence)
+    release = evidence.get("release") if isinstance(evidence, dict) else None
+    evidence_sha = release.get("sourceSha") if isinstance(release, dict) else None
+    return _emit(source_sha_issues(args.requested, evidence_sha))
+
+
 def _cmd_run(args: argparse.Namespace) -> int:
     run = _read_json(args.run)
     return _emit(run_evidence_issues(run, args.source_sha))
@@ -1192,6 +1317,13 @@ def build_parser() -> argparse.ArgumentParser:
     dispatch.add_argument("--version", required=True, metavar="SEMVER")
     dispatch.add_argument("--run-id", required=True, metavar="INT")
     dispatch.set_defaults(func=_cmd_dispatch)
+
+    source_sha = sub.add_parser(
+        "source-sha", help="bind an optional dispatch source SHA to candidate evidence"
+    )
+    source_sha.add_argument("--requested", required=True, metavar="SHA")
+    source_sha.add_argument("--evidence", required=True, metavar="FILE")
+    source_sha.set_defaults(func=_cmd_source_sha)
 
     run = sub.add_parser("run", help="verify the candidate run evidence")
     run.add_argument("--run", required=True, metavar="FILE", help="GitHub run record JSON file")

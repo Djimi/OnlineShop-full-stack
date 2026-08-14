@@ -69,6 +69,7 @@ write_stub_clis() {
 #!/usr/bin/env python3
 import json
 import os
+import re
 import sys
 
 state_path = os.environ["STUB_STATE"]
@@ -254,6 +255,7 @@ python3 -m py_compile "$RELEASE"/src/release_contract/*.py "$RELEASE"/tests/*.py
 
 echo "[ 2/10] Workflow YAML static checks (job-permission split, no latest/release-* build tags)"
 python3 - "$WORKFLOW" <<'PY' || fail "workflow YAML checks failed"
+import re
 import sys
 
 import yaml
@@ -293,7 +295,10 @@ for backend in ("auth", "items", "api-gateway"):
     tags_text = tag_steps[0].get("run", "")
     if ":latest" in tags_text:
         problems.append(f"{backend} tags computation must not produce `latest` (Decision 4)")
-    if "release-" in tags_text:
+    # `release-input.sh` is sourced by the validator and contains the literal
+    # substring `release-` in its filename. Inspect actual tag positions so the
+    # job-level validator does not mistake that helper path for a release tag.
+    if re.search(r"(?<![A-Za-z0-9_/-])release-", tags_text):
         problems.append(f"{backend} build workflow must never push a release-* tag")
 
 for job in jobs.values():

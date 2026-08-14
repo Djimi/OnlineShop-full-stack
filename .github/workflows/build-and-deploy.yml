@@ -33,10 +33,7 @@ on:
 # in the consolidated verification pass once the roles exist.
 
 permissions:
-  id-token: write
   contents: read
-  pull-requests: read
-  actions: read # required to verify producer run conclusions via the GitHub API
 
 env:
   AWS_REGION: eu-north-1
@@ -49,6 +46,9 @@ env:
 jobs:
   changes:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
     outputs:
       auth: ${{ steps.resolve.outputs.auth }}
       items: ${{ steps.resolve.outputs.items }}
@@ -83,23 +83,45 @@ jobs:
 
       - name: Resolve final changes
         id: resolve
+        env:
+          RELEASE_DIR: ${{ env.RELEASE }}
+          EVENT_NAME: ${{ github.event_name }}
+          WORKFLOW_REF: ${{ github.ref }}
+          DISPATCH_SERVICE: ${{ github.event.inputs.service }}
+          FILTER_AUTH: ${{ steps.filter.outputs.auth }}
+          FILTER_ITEMS: ${{ steps.filter.outputs.items }}
+          FILTER_API_GATEWAY: ${{ steps.filter.outputs.api-gateway }}
+          FILTER_FRONTEND: ${{ steps.filter.outputs.frontend }}
         run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            SERVICE="${{ github.event.inputs.service }}"
-            [ "$SERVICE" = "all" ] || [ "$SERVICE" = "auth" ] && echo "auth=true" >> $GITHUB_OUTPUT || echo "auth=false" >> $GITHUB_OUTPUT
-            [ "$SERVICE" = "all" ] || [ "$SERVICE" = "items" ] && echo "items=true" >> $GITHUB_OUTPUT || echo "items=false" >> $GITHUB_OUTPUT
-            [ "$SERVICE" = "all" ] || [ "$SERVICE" = "api-gateway" ] && echo "api-gateway=true" >> $GITHUB_OUTPUT || echo "api-gateway=false" >> $GITHUB_OUTPUT
-            [ "$SERVICE" = "all" ] || [ "$SERVICE" = "frontend" ] && echo "frontend=true" >> $GITHUB_OUTPUT || echo "frontend=false" >> $GITHUB_OUTPUT
-          elif [ "${{ github.ref }}" = "refs/heads/main" ]; then
-            echo "auth=true" >> $GITHUB_OUTPUT
-            echo "items=true" >> $GITHUB_OUTPUT
-            echo "api-gateway=true" >> $GITHUB_OUTPUT
-            echo "frontend=true" >> $GITHUB_OUTPUT
-          else
-            echo "auth=${{ steps.filter.outputs.auth }}" >> $GITHUB_OUTPUT
-            echo "items=${{ steps.filter.outputs.items }}" >> $GITHUB_OUTPUT
-            echo "api-gateway=${{ steps.filter.outputs.api-gateway }}" >> $GITHUB_OUTPUT
-            echo "frontend=${{ steps.filter.outputs.frontend }}" >> $GITHUB_OUTPUT
+          set -euo pipefail
+          case "$EVENT_NAME" in
+            workflow_dispatch)
+              case "$DISPATCH_SERVICE" in
+                all|auth|items|api-gateway|frontend) ;;
+                *) echo "ERROR: invalid workflow dispatch service" >&2; exit 1 ;;
+              esac
+              for component in auth items api-gateway frontend; do
+                if [ "$DISPATCH_SERVICE" = all ] || [ "$DISPATCH_SERVICE" = "$component" ]; then
+                  printf '%s=true\n' "$component" >> "$GITHUB_OUTPUT"
+                else
+                  printf '%s=false\n' "$component" >> "$GITHUB_OUTPUT"
+                fi
+              done
+              ;;
+            push|pull_request)
+              ;;
+            *) echo "ERROR: unsupported event $EVENT_NAME" >&2; exit 1 ;;
+          esac
+          if [ "$EVENT_NAME" = "push" ] && [ "$WORKFLOW_REF" = "refs/heads/main" ]; then
+            echo "auth=true" >> "$GITHUB_OUTPUT"
+            echo "items=true" >> "$GITHUB_OUTPUT"
+            echo "api-gateway=true" >> "$GITHUB_OUTPUT"
+            echo "frontend=true" >> "$GITHUB_OUTPUT"
+          elif [ "$EVENT_NAME" != workflow_dispatch ]; then
+            printf 'auth=%s\n' "$FILTER_AUTH" >> "$GITHUB_OUTPUT"
+            printf 'items=%s\n' "$FILTER_ITEMS" >> "$GITHUB_OUTPUT"
+            printf 'api-gateway=%s\n' "$FILTER_API_GATEWAY" >> "$GITHUB_OUTPUT"
+            printf 'frontend=%s\n' "$FILTER_FRONTEND" >> "$GITHUB_OUTPUT"
           fi
 
   auth:
@@ -107,6 +129,10 @@ jobs:
     if: needs.changes.outputs.auth == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    permissions:
+      contents: read
+      id-token: write
+      actions: read
     steps:
       # actions/checkout@v4 (11d5960a326750d5838078e36cf38b85af677262)
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
@@ -153,34 +179,67 @@ jobs:
       - name: Compute Docker tags
         id: tags
         if: success()
+        env:
+          RELEASE_DIR: ${{ env.RELEASE }}
+          ECR_REGISTRY_VALUE: ${{ env.ECR_REGISTRY }}
+          WORKFLOW_SHA: ${{ github.sha }}
+          WORKFLOW_REF: ${{ github.ref }}
+          WORKFLOW_REF_NAME: ${{ github.ref_name }}
+          COMPONENT_REPOSITORY: onlineshop-auth
+          WORKFLOW_EVENT: ${{ github.event_name }}
         run: |
-          SHA_TAG="$ECR_REGISTRY/onlineshop-auth:sha-${{ github.sha }}"
+          set -euo pipefail
+          source "$RELEASE_DIR/bin/release-input.sh"
+          case "$WORKFLOW_EVENT" in
+            push|workflow_dispatch) rl_assert_ci_ref "$WORKFLOW_REF" || exit 1 ;;
+            pull_request) rl_assert_ci_pr_ref "$WORKFLOW_REF" || exit 1 ;;
+            *) echo "invalid workflow event" >&2; exit 1 ;;
+          esac
+          [[ "$WORKFLOW_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "invalid commit SHA" >&2; exit 1; }
+          SHA_TAG="$ECR_REGISTRY_VALUE/$COMPONENT_REPOSITORY:sha-$WORKFLOW_SHA"
           ALL_TAGS="$SHA_TAG"
-          if [[ "${{ github.ref }}" == refs/heads/feature/* ]]; then
-            BRANCH_TAG="$ECR_REGISTRY/onlineshop-auth:branch-$(echo '${{ github.ref_name }}' | sed 's/\//-/g')"
+          if [[ "$WORKFLOW_EVENT" != "pull_request" && "$WORKFLOW_REF" == refs/heads/feature/* ]]; then
+            BRANCH_NAME=$(printf '%s' "${WORKFLOW_REF#refs/heads/}" | tr '/' '-')
+            BRANCH_TAG="$ECR_REGISTRY_VALUE/$COMPONENT_REPOSITORY:branch-$BRANCH_NAME"
             ALL_TAGS="$SHA_TAG,$BRANCH_TAG"
-          elif [ "${{ github.ref }}" = "refs/heads/main" ]; then
-            ALL_TAGS="$SHA_TAG,$ECR_REGISTRY/onlineshop-auth:main-latest"
+          elif [[ "$WORKFLOW_EVENT" != "pull_request" && "$WORKFLOW_REF" = "refs/heads/main" ]]; then
+            ALL_TAGS="$SHA_TAG,$ECR_REGISTRY_VALUE/$COMPONENT_REPOSITORY:main-latest"
           fi
-          echo "tags=$ALL_TAGS" >> $GITHUB_OUTPUT
+          printf 'tags=%s\n' "$ALL_TAGS" >> "$GITHUB_OUTPUT"
 
       - name: Compute OCI labels
         id: labels
         if: success()
+        env:
+          RELEASE_DIR: ${{ env.RELEASE }}
+          WORKFLOW_SHA: ${{ github.sha }}
+          WORKFLOW_REPOSITORY: ${{ github.repository }}
+          WORKFLOW_RUN_ID: ${{ github.run_id }}
+          WORKFLOW_RUN_ATTEMPT: ${{ github.run_attempt }}
+          WORKFLOW_EVENT: ${{ github.event_name }}
+          WORKFLOW_REF: ${{ github.ref }}
         run: |
+          set -euo pipefail
+          source "$RELEASE_DIR/bin/release-input.sh"
+          case "$WORKFLOW_EVENT" in
+            push|workflow_dispatch) rl_assert_ci_ref "$WORKFLOW_REF" || exit 1 ;;
+            pull_request) rl_assert_ci_pr_ref "$WORKFLOW_REF" || exit 1 ;;
+            *) echo "invalid workflow event" >&2; exit 1 ;;
+          esac
+          [[ "$WORKFLOW_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "invalid commit SHA" >&2; exit 1; }
           CREATED=$(date -u +%Y-%m-%dT%H:%M:%SZ)
           {
             echo "labels<<GH_LABELS"
-            echo "org.opencontainers.image.revision=${{ github.sha }}"
-            echo "org.opencontainers.image.source=https://github.com/${{ github.repository }}"
+            echo "org.opencontainers.image.revision=$WORKFLOW_SHA"
+            echo "org.opencontainers.image.source=https://github.com/$WORKFLOW_REPOSITORY"
             echo "org.opencontainers.image.created=$CREATED"
             echo "org.opencontainers.image.title=OnlineShop auth service"
             echo "org.onlineshop.component=auth"
-            echo "org.onlineshop.build-run=${{ github.run_id }}-${{ github.run_attempt }}"
-            echo "org.onlineshop.producer.run-id=${{ github.run_id }}"
-            echo "org.onlineshop.producer.run-attempt=${{ github.run_attempt }}"
-            echo "org.onlineshop.producer.event=${{ github.event_name }}"
-            echo "org.onlineshop.producer.ref=${{ github.ref }}"
+            echo "org.onlineshop.build-run=$WORKFLOW_RUN_ID-$WORKFLOW_RUN_ATTEMPT"
+            echo "org.onlineshop.producer.run-id=$WORKFLOW_RUN_ID"
+            echo "org.onlineshop.producer.run-attempt=$WORKFLOW_RUN_ATTEMPT"
+            echo "org.onlineshop.producer.event=$WORKFLOW_EVENT"
+            echo "org.onlineshop.producer.ref=$WORKFLOW_REF"
             echo "GH_LABELS"
           } >> "$GITHUB_OUTPUT"
 
@@ -195,6 +254,8 @@ jobs:
         id: publish
         if: success() && github.event_name != 'pull_request'
         env:
+          RELEASE_DIR: ${{ env.RELEASE }}
+          AWS_REGION_VALUE: ${{ env.AWS_REGION }}
           ECR_REGISTRY: ${{ env.ECR_REGISTRY }}
           ECR_REPOSITORY: onlineshop-auth
           CANDIDATE_TAG: sha-${{ github.sha }}
@@ -205,7 +266,7 @@ jobs:
           GITHUB_REF: ${{ github.ref }}
           GITHUB_REPOSITORY: ${{ github.repository }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: bash "${{ env.RELEASE }}/bin/publish-candidate-image.sh" --profile dpm-profile --region ${{ env.AWS_REGION }}
+        run: bash "$RELEASE_DIR/bin/publish-candidate-image.sh" --profile dpm-profile --region "$AWS_REGION_VALUE"
 
       # docker/build-push-action@v6 (10e90e3645eae34f1e60eeb005ba3a3d33f178e8)
       - uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8
@@ -223,6 +284,10 @@ jobs:
     if: needs.changes.outputs.items == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    permissions:
+      contents: read
+      id-token: write
+      actions: read
     steps:
       # actions/checkout@v4 (11d5960a326750d5838078e36cf38b85af677262)
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
@@ -273,35 +338,68 @@ jobs:
       - name: Compute Docker tags
         id: tags
         if: success()
+        env:
+          RELEASE_DIR: ${{ env.RELEASE }}
+          ECR_REGISTRY_VALUE: ${{ env.ECR_REGISTRY }}
+          WORKFLOW_SHA: ${{ github.sha }}
+          WORKFLOW_REF: ${{ github.ref }}
+          WORKFLOW_REF_NAME: ${{ github.ref_name }}
+          COMPONENT_REPOSITORY: onlineshop-items
+          WORKFLOW_EVENT: ${{ github.event_name }}
         run: |
-          SHA_TAG="$ECR_REGISTRY/onlineshop-items:sha-${{ github.sha }}"
+          set -euo pipefail
+          source "$RELEASE_DIR/bin/release-input.sh"
+          case "$WORKFLOW_EVENT" in
+            push|workflow_dispatch) rl_assert_ci_ref "$WORKFLOW_REF" || exit 1 ;;
+            pull_request) rl_assert_ci_pr_ref "$WORKFLOW_REF" || exit 1 ;;
+            *) echo "invalid workflow event" >&2; exit 1 ;;
+          esac
+          [[ "$WORKFLOW_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "invalid commit SHA" >&2; exit 1; }
+          SHA_TAG="$ECR_REGISTRY_VALUE/$COMPONENT_REPOSITORY:sha-$WORKFLOW_SHA"
           ALL_TAGS="$SHA_TAG"
-          if [[ "${{ github.ref }}" == refs/heads/feature/* ]]; then
-            BRANCH_TAG="$ECR_REGISTRY/onlineshop-items:branch-$(echo '${{ github.ref_name }}' | sed 's/\//-/g')"
+          if [[ "$WORKFLOW_EVENT" != "pull_request" && "$WORKFLOW_REF" == refs/heads/feature/* ]]; then
+            BRANCH_NAME=$(printf '%s' "${WORKFLOW_REF#refs/heads/}" | tr '/' '-')
+            BRANCH_TAG="$ECR_REGISTRY_VALUE/$COMPONENT_REPOSITORY:branch-$BRANCH_NAME"
             ALL_TAGS="$SHA_TAG,$BRANCH_TAG"
-          elif [ "${{ github.ref }}" = "refs/heads/main" ]; then
-            ALL_TAGS="$SHA_TAG,$ECR_REGISTRY/onlineshop-items:main-latest"
+          elif [[ "$WORKFLOW_EVENT" != "pull_request" && "$WORKFLOW_REF" = "refs/heads/main" ]]; then
+            ALL_TAGS="$SHA_TAG,$ECR_REGISTRY_VALUE/$COMPONENT_REPOSITORY:main-latest"
           fi
-          echo "tags=$ALL_TAGS" >> $GITHUB_OUTPUT
+          printf 'tags=%s\n' "$ALL_TAGS" >> "$GITHUB_OUTPUT"
 
       - name: Compute OCI labels
         id: labels
         if: success()
+        env:
+          RELEASE_DIR: ${{ env.RELEASE }}
+          WORKFLOW_SHA: ${{ github.sha }}
+          WORKFLOW_REPOSITORY: ${{ github.repository }}
+          WORKFLOW_RUN_ID: ${{ github.run_id }}
+          WORKFLOW_RUN_ATTEMPT: ${{ github.run_attempt }}
+          WORKFLOW_EVENT: ${{ github.event_name }}
+          WORKFLOW_REF: ${{ github.ref }}
         run: |
+          set -euo pipefail
+          source "$RELEASE_DIR/bin/release-input.sh"
+          case "$WORKFLOW_EVENT" in
+            push|workflow_dispatch) rl_assert_ci_ref "$WORKFLOW_REF" || exit 1 ;;
+            pull_request) rl_assert_ci_pr_ref "$WORKFLOW_REF" || exit 1 ;;
+            *) echo "invalid workflow event" >&2; exit 1 ;;
+          esac
+          [[ "$WORKFLOW_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "invalid commit SHA" >&2; exit 1; }
           CREATED=$(date -u +%Y-%m-%dT%H:%M:%SZ)
           {
             echo "labels<<GH_LABELS"
-            echo "org.opencontainers.image.revision=${{ github.sha }}"
-            echo "org.opencontainers.image.source=https://github.com/${{ github.repository }}"
+            echo "org.opencontainers.image.revision=$WORKFLOW_SHA"
+            echo "org.opencontainers.image.source=https://github.com/$WORKFLOW_REPOSITORY"
             echo "org.opencontainers.image.created=$CREATED"
             echo "org.opencontainers.image.title=OnlineShop items service"
             echo "org.onlineshop.component=items"
-            echo "org.onlineshop.build-run=${{ github.run_id }}-${{ github.run_attempt }}"
-            echo "org.onlineshop.producer.run-id=${{ github.run_id }}"
-            echo "org.onlineshop.producer.run-attempt=${{ github.run_attempt }}"
-            echo "org.onlineshop.producer.event=${{ github.event_name }}"
-            echo "org.onlineshop.producer.ref=${{ github.ref }}"
-            echo "org.onlineshop.common-revision=${{ github.sha }}"
+            echo "org.onlineshop.build-run=$WORKFLOW_RUN_ID-$WORKFLOW_RUN_ATTEMPT"
+            echo "org.onlineshop.producer.run-id=$WORKFLOW_RUN_ID"
+            echo "org.onlineshop.producer.run-attempt=$WORKFLOW_RUN_ATTEMPT"
+            echo "org.onlineshop.producer.event=$WORKFLOW_EVENT"
+            echo "org.onlineshop.producer.ref=$WORKFLOW_REF"
+            echo "org.onlineshop.common-revision=$WORKFLOW_SHA"
             echo "GH_LABELS"
           } >> "$GITHUB_OUTPUT"
 
@@ -316,6 +414,8 @@ jobs:
         id: publish
         if: success() && github.event_name != 'pull_request'
         env:
+          RELEASE_DIR: ${{ env.RELEASE }}
+          AWS_REGION_VALUE: ${{ env.AWS_REGION }}
           ECR_REGISTRY: ${{ env.ECR_REGISTRY }}
           ECR_REPOSITORY: onlineshop-items
           CANDIDATE_TAG: sha-${{ github.sha }}
@@ -326,7 +426,7 @@ jobs:
           GITHUB_REF: ${{ github.ref }}
           GITHUB_REPOSITORY: ${{ github.repository }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: bash "${{ env.RELEASE }}/bin/publish-candidate-image.sh" --profile dpm-profile --region ${{ env.AWS_REGION }}
+        run: bash "$RELEASE_DIR/bin/publish-candidate-image.sh" --profile dpm-profile --region "$AWS_REGION_VALUE"
 
       # docker/build-push-action@v6 (10e90e3645eae34f1e60eeb005ba3a3d33f178e8)
       - uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8
@@ -345,6 +445,10 @@ jobs:
     if: needs.changes.outputs.api-gateway == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    permissions:
+      contents: read
+      id-token: write
+      actions: read
     steps:
       # actions/checkout@v4 (11d5960a326750d5838078e36cf38b85af677262)
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
@@ -391,34 +495,67 @@ jobs:
       - name: Compute Docker tags
         id: tags
         if: success()
+        env:
+          RELEASE_DIR: ${{ env.RELEASE }}
+          ECR_REGISTRY_VALUE: ${{ env.ECR_REGISTRY }}
+          WORKFLOW_SHA: ${{ github.sha }}
+          WORKFLOW_REF: ${{ github.ref }}
+          WORKFLOW_REF_NAME: ${{ github.ref_name }}
+          COMPONENT_REPOSITORY: onlineshop-api-gateway
+          WORKFLOW_EVENT: ${{ github.event_name }}
         run: |
-          SHA_TAG="$ECR_REGISTRY/onlineshop-api-gateway:sha-${{ github.sha }}"
+          set -euo pipefail
+          source "$RELEASE_DIR/bin/release-input.sh"
+          case "$WORKFLOW_EVENT" in
+            push|workflow_dispatch) rl_assert_ci_ref "$WORKFLOW_REF" || exit 1 ;;
+            pull_request) rl_assert_ci_pr_ref "$WORKFLOW_REF" || exit 1 ;;
+            *) echo "invalid workflow event" >&2; exit 1 ;;
+          esac
+          [[ "$WORKFLOW_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "invalid commit SHA" >&2; exit 1; }
+          SHA_TAG="$ECR_REGISTRY_VALUE/$COMPONENT_REPOSITORY:sha-$WORKFLOW_SHA"
           ALL_TAGS="$SHA_TAG"
-          if [[ "${{ github.ref }}" == refs/heads/feature/* ]]; then
-            BRANCH_TAG="$ECR_REGISTRY/onlineshop-api-gateway:branch-$(echo '${{ github.ref_name }}' | sed 's/\//-/g')"
+          if [[ "$WORKFLOW_EVENT" != "pull_request" && "$WORKFLOW_REF" == refs/heads/feature/* ]]; then
+            BRANCH_NAME=$(printf '%s' "${WORKFLOW_REF#refs/heads/}" | tr '/' '-')
+            BRANCH_TAG="$ECR_REGISTRY_VALUE/$COMPONENT_REPOSITORY:branch-$BRANCH_NAME"
             ALL_TAGS="$SHA_TAG,$BRANCH_TAG"
-          elif [ "${{ github.ref }}" = "refs/heads/main" ]; then
-            ALL_TAGS="$SHA_TAG,$ECR_REGISTRY/onlineshop-api-gateway:main-latest"
+          elif [[ "$WORKFLOW_EVENT" != "pull_request" && "$WORKFLOW_REF" = "refs/heads/main" ]]; then
+            ALL_TAGS="$SHA_TAG,$ECR_REGISTRY_VALUE/$COMPONENT_REPOSITORY:main-latest"
           fi
-          echo "tags=$ALL_TAGS" >> $GITHUB_OUTPUT
+          printf 'tags=%s\n' "$ALL_TAGS" >> "$GITHUB_OUTPUT"
 
       - name: Compute OCI labels
         id: labels
         if: success()
+        env:
+          RELEASE_DIR: ${{ env.RELEASE }}
+          WORKFLOW_SHA: ${{ github.sha }}
+          WORKFLOW_REPOSITORY: ${{ github.repository }}
+          WORKFLOW_RUN_ID: ${{ github.run_id }}
+          WORKFLOW_RUN_ATTEMPT: ${{ github.run_attempt }}
+          WORKFLOW_EVENT: ${{ github.event_name }}
+          WORKFLOW_REF: ${{ github.ref }}
         run: |
+          set -euo pipefail
+          source "$RELEASE_DIR/bin/release-input.sh"
+          case "$WORKFLOW_EVENT" in
+            push|workflow_dispatch) rl_assert_ci_ref "$WORKFLOW_REF" || exit 1 ;;
+            pull_request) rl_assert_ci_pr_ref "$WORKFLOW_REF" || exit 1 ;;
+            *) echo "invalid workflow event" >&2; exit 1 ;;
+          esac
+          [[ "$WORKFLOW_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "invalid commit SHA" >&2; exit 1; }
           CREATED=$(date -u +%Y-%m-%dT%H:%M:%SZ)
           {
             echo "labels<<GH_LABELS"
-            echo "org.opencontainers.image.revision=${{ github.sha }}"
-            echo "org.opencontainers.image.source=https://github.com/${{ github.repository }}"
+            echo "org.opencontainers.image.revision=$WORKFLOW_SHA"
+            echo "org.opencontainers.image.source=https://github.com/$WORKFLOW_REPOSITORY"
             echo "org.opencontainers.image.created=$CREATED"
             echo "org.opencontainers.image.title=OnlineShop API gateway"
             echo "org.onlineshop.component=api-gateway"
-            echo "org.onlineshop.build-run=${{ github.run_id }}-${{ github.run_attempt }}"
-            echo "org.onlineshop.producer.run-id=${{ github.run_id }}"
-            echo "org.onlineshop.producer.run-attempt=${{ github.run_attempt }}"
-            echo "org.onlineshop.producer.event=${{ github.event_name }}"
-            echo "org.onlineshop.producer.ref=${{ github.ref }}"
+            echo "org.onlineshop.build-run=$WORKFLOW_RUN_ID-$WORKFLOW_RUN_ATTEMPT"
+            echo "org.onlineshop.producer.run-id=$WORKFLOW_RUN_ID"
+            echo "org.onlineshop.producer.run-attempt=$WORKFLOW_RUN_ATTEMPT"
+            echo "org.onlineshop.producer.event=$WORKFLOW_EVENT"
+            echo "org.onlineshop.producer.ref=$WORKFLOW_REF"
             echo "GH_LABELS"
           } >> "$GITHUB_OUTPUT"
 
@@ -433,6 +570,8 @@ jobs:
         id: publish
         if: success() && github.event_name != 'pull_request'
         env:
+          RELEASE_DIR: ${{ env.RELEASE }}
+          AWS_REGION_VALUE: ${{ env.AWS_REGION }}
           ECR_REGISTRY: ${{ env.ECR_REGISTRY }}
           ECR_REPOSITORY: onlineshop-api-gateway
           CANDIDATE_TAG: sha-${{ github.sha }}
@@ -443,7 +582,7 @@ jobs:
           GITHUB_REF: ${{ github.ref }}
           GITHUB_REPOSITORY: ${{ github.repository }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: bash "${{ env.RELEASE }}/bin/publish-candidate-image.sh" --profile dpm-profile --region ${{ env.AWS_REGION }}
+        run: bash "$RELEASE_DIR/bin/publish-candidate-image.sh" --profile dpm-profile --region "$AWS_REGION_VALUE"
 
       # docker/build-push-action@v6 (10e90e3645eae34f1e60eeb005ba3a3d33f178e8)
       - uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8
@@ -535,6 +674,9 @@ jobs:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 60
+    permissions:
+      contents: read
+      id-token: write
     concurrency:
       group: ${{ github.workflow }}-staging-${{ github.ref }}
       cancel-in-progress: false
@@ -565,9 +707,13 @@ jobs:
         run: bash scripts/resume-staging.sh --on-demand --defer-services
 
       - name: Deploy to staging
+        env:
+          WORKFLOW_SHA: ${{ github.sha }}
         run: |
+          set -euo pipefail
+          [[ "$WORKFLOW_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "invalid commit SHA" >&2; exit 1; }
           chmod +x scripts/ci-deploy-staging.sh
-          bash scripts/ci-deploy-staging.sh sha-${{ github.sha }}
+          bash scripts/ci-deploy-staging.sh "sha-$WORKFLOW_SHA"
 
       # actions/setup-java@v4 (d7793b545071e98d581d3bf084a51c3213318a07)
       - uses: actions/setup-java@d7793b545071e98d581d3bf084a51c3213318a07
@@ -585,12 +731,15 @@ jobs:
             ${{ runner.os }}-maven-
 
       - name: Run E2E tests against staging
+        env:
+          STAGING_ALB_NAME: onlineshop-staging-v2-alb
         working-directory: e2e-tests
         run: |
+          set -euo pipefail
           STAGING_URL=$(aws elbv2 describe-load-balancers \
-            --names onlineshop-staging-v2-alb \
+            --names "$STAGING_ALB_NAME" \
             --profile dpm-profile \
-            --region eu-north-1 \
+            --region "$AWS_REGION" \
             --query 'LoadBalancers[0].DNSName' \
             --output text)
           echo "Testing against staging: $STAGING_URL"
@@ -633,6 +782,10 @@ jobs:
         needs.e2e-staging.result == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    permissions:
+      contents: read
+      id-token: write
+      actions: read
     env:
       BUNDLE_DIR: candidate-evidence
       ARTIFACT_NAME: candidate-evidence-${{ github.sha }}-${{ github.run_attempt }}
@@ -647,7 +800,9 @@ jobs:
           python-version: '3.x'
 
       - name: Install release-contract dependencies
-        run: python -m pip install --disable-pip-version-check -q -r "${{ env.RELEASE }}/requirements.txt"
+        env:
+          RELEASE_DIR: ${{ env.RELEASE }}
+        run: python -m pip install --disable-pip-version-check -q -r "$RELEASE_DIR/requirements.txt"
 
       # actions/setup-node@v4 (49933ea5288caeca8642d1e84afbd3f7d6820020)
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
@@ -677,32 +832,49 @@ jobs:
 
       - name: Resolve backend digests
         id: digests
+        env:
+          WORKFLOW_SHA: ${{ github.sha }}
+          RELEASE_REGION: ${{ env.AWS_REGION }}
         run: |
+          set -euo pipefail
+          [[ "$WORKFLOW_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "invalid commit SHA" >&2; exit 1; }
           for entry in "auth:AUTH_DIGEST" "items:ITEMS_DIGEST" "api-gateway:GATEWAY_DIGEST"; do
             repo="${entry%%:*}"
             var="${entry##*:}"
-            digest=$(aws ecr describe-images --profile dpm-profile --region ${{ env.AWS_REGION }} \
+            digest=$(aws ecr describe-images --profile dpm-profile --region "$RELEASE_REGION" \
               --repository-name "onlineshop-$repo" \
-              --image-ids "imageTag=sha-${{ github.sha }}" \
+              --image-ids "imageTag=sha-$WORKFLOW_SHA" \
               --query 'imageDetails[0].imageDigest' \
               --output text)
             echo "${var}=${digest}" >> "$GITHUB_ENV"
-            echo "onlineshop-$repo sha-${{ github.sha }} -> $digest"
+            echo "onlineshop-$repo sha-$WORKFLOW_SHA -> $digest"
           done
 
       - name: Verify canonical producer set
+        env:
+          RELEASE_DIR: ${{ env.RELEASE }}
+          WORKFLOW_SHA: ${{ github.sha }}
+          RELEASE_REGISTRY: ${{ env.ECR_REGISTRY }}
+          RELEASE_REGION: ${{ env.AWS_REGION }}
         run: |
-          bash "${{ env.RELEASE }}/bin/verify-producer-set.sh" \
-            --sha "${{ github.sha }}" \
-            --registry "${{ env.ECR_REGISTRY }}" \
-            --profile dpm-profile --region ${{ env.AWS_REGION }}
+          set -euo pipefail
+          bash "$RELEASE_DIR/bin/verify-producer-set.sh" \
+            --sha "$WORKFLOW_SHA" \
+            --registry "$RELEASE_REGISTRY" \
+            --profile dpm-profile --region "$RELEASE_REGION"
 
       - name: Read canonical producer identity
         id: producer
+        env:
+          RELEASE_DIR: ${{ env.RELEASE }}
+          RELEASE_REGISTRY: ${{ env.ECR_REGISTRY }}
+          WORKFLOW_SHA: ${{ github.sha }}
+          RELEASE_REGION: ${{ env.AWS_REGION }}
         run: |
-          RECORD=$(bash "${{ env.RELEASE }}/bin/image-labels.sh" \
-            --registry "${{ env.ECR_REGISTRY }}" --repository onlineshop-auth \
-            --tag "sha-${{ github.sha }}" --profile dpm-profile --region ${{ env.AWS_REGION }})
+          set -euo pipefail
+          RECORD=$(bash "$RELEASE_DIR/bin/image-labels.sh" \
+            --registry "$RELEASE_REGISTRY" --repository onlineshop-auth \
+            --tag "sha-$WORKFLOW_SHA" --profile dpm-profile --region "$RELEASE_REGION")
           echo "producer-run-id=$(printf '%s' "$RECORD" | jq -r '.labels["org.onlineshop.producer.run-id"]')" >> "$GITHUB_OUTPUT"
           echo "producer-run-attempt=$(printf '%s' "$RECORD" | jq -r '.labels["org.onlineshop.producer.run-attempt"]')" >> "$GITHUB_OUTPUT"
 
@@ -713,43 +885,82 @@ jobs:
           VITE_API_URL='' npm run build
 
       - name: Package frontend candidate archive
-        run: bash "${{ env.RELEASE }}/bin/package-frontend.sh" --dist frontend/dist --out "${{ env.BUNDLE_DIR }}"
+        env:
+          RELEASE_DIR: ${{ env.RELEASE }}
+          BUNDLE: ${{ env.BUNDLE_DIR }}
+        run: bash "$RELEASE_DIR/bin/package-frontend.sh" --dist frontend/dist --out "$BUNDLE"
 
       - name: Generate frontend SBOM
-        run: bash "${{ env.RELEASE }}/bin/generate-sbom.sh" --target "dir:frontend/dist" --output "${{ env.BUNDLE_DIR }}/frontend.spdx.json"
+        env:
+          RELEASE_DIR: ${{ env.RELEASE }}
+          BUNDLE: ${{ env.BUNDLE_DIR }}
+        run: bash "$RELEASE_DIR/bin/generate-sbom.sh" --target "dir:frontend/dist" --output "$BUNDLE/frontend.spdx.json"
 
       - name: Generate Auth SBOM
-        run: bash "${{ env.RELEASE }}/bin/generate-sbom.sh" --target "registry:${{ env.ECR_REGISTRY }}/onlineshop-auth@${{ env.AUTH_DIGEST }}" --output "${{ env.BUNDLE_DIR }}/auth.spdx.json"
+        env:
+          RELEASE_DIR: ${{ env.RELEASE }}
+          BUNDLE: ${{ env.BUNDLE_DIR }}
+          REGISTRY: ${{ env.ECR_REGISTRY }}
+          DIGEST: ${{ env.AUTH_DIGEST }}
+        run: bash "$RELEASE_DIR/bin/generate-sbom.sh" --target "registry:$REGISTRY/onlineshop-auth@$DIGEST" --output "$BUNDLE/auth.spdx.json"
 
       - name: Generate Items SBOM
-        run: bash "${{ env.RELEASE }}/bin/generate-sbom.sh" --target "registry:${{ env.ECR_REGISTRY }}/onlineshop-items@${{ env.ITEMS_DIGEST }}" --output "${{ env.BUNDLE_DIR }}/items.spdx.json"
+        env:
+          RELEASE_DIR: ${{ env.RELEASE }}
+          BUNDLE: ${{ env.BUNDLE_DIR }}
+          REGISTRY: ${{ env.ECR_REGISTRY }}
+          DIGEST: ${{ env.ITEMS_DIGEST }}
+        run: bash "$RELEASE_DIR/bin/generate-sbom.sh" --target "registry:$REGISTRY/onlineshop-items@$DIGEST" --output "$BUNDLE/items.spdx.json"
 
       - name: Generate API Gateway SBOM
-        run: bash "${{ env.RELEASE }}/bin/generate-sbom.sh" --target "registry:${{ env.ECR_REGISTRY }}/onlineshop-api-gateway@${{ env.GATEWAY_DIGEST }}" --output "${{ env.BUNDLE_DIR }}/api-gateway.spdx.json"
+        env:
+          RELEASE_DIR: ${{ env.RELEASE }}
+          BUNDLE: ${{ env.BUNDLE_DIR }}
+          REGISTRY: ${{ env.ECR_REGISTRY }}
+          DIGEST: ${{ env.GATEWAY_DIGEST }}
+        run: bash "$RELEASE_DIR/bin/generate-sbom.sh" --target "registry:$REGISTRY/onlineshop-api-gateway@$DIGEST" --output "$BUNDLE/api-gateway.spdx.json"
 
       - name: Record test conclusions
+        env:
+          AUTH_RESULT: ${{ needs.auth.result }}
+          ITEMS_RESULT: ${{ needs.items.result }}
+          API_GATEWAY_RESULT: ${{ needs.api-gateway.result }}
+          FRONTEND_RESULT: ${{ needs.frontend.result }}
+          E2E_STAGING_RESULT: ${{ needs.e2e-staging.result }}
         run: |
+          set -euo pipefail
           jq -n \
-            --arg auth "${{ needs.auth.result }}" \
-            --arg items "${{ needs.items.result }}" \
-            --arg apiGateway "${{ needs.api-gateway.result }}" \
-            --arg frontend "${{ needs.frontend.result }}" \
-            --arg e2eStaging "${{ needs.e2e-staging.result }}" \
+            --arg auth "$AUTH_RESULT" \
+            --arg items "$ITEMS_RESULT" \
+            --arg apiGateway "$API_GATEWAY_RESULT" \
+            --arg frontend "$FRONTEND_RESULT" \
+            --arg e2eStaging "$E2E_STAGING_RESULT" \
             '{auth: $auth, items: $items, apiGateway: $apiGateway, frontend: $frontend, e2eStaging: $e2eStaging}' \
             > conclusions.json
 
       - name: Emit candidate evidence bundle
+        env:
+          RELEASE_DIR: ${{ env.RELEASE }}
+          BUNDLE: ${{ env.BUNDLE_DIR }}
+          ARTIFACT: ${{ env.ARTIFACT_NAME }}
+          AUTH_IMAGE_DIGEST: ${{ env.AUTH_DIGEST }}
+          ITEMS_IMAGE_DIGEST: ${{ env.ITEMS_DIGEST }}
+          GATEWAY_IMAGE_DIGEST: ${{ env.GATEWAY_DIGEST }}
+          VALIDATED_AT: ${{ needs.e2e-staging.outputs.validatedAt }}
+          PRODUCER_RUN_ID: ${{ steps.producer.outputs.producer-run-id }}
+          PRODUCER_RUN_ATTEMPT: ${{ steps.producer.outputs.producer-run-attempt }}
         run: |
-          bash "${{ env.RELEASE }}/bin/emit-candidate-evidence.sh" \
-            --bundle-dir "${{ env.BUNDLE_DIR }}" \
-            --artifact-name "${{ env.ARTIFACT_NAME }}" \
-            --auth-digest "${{ env.AUTH_DIGEST }}" \
-            --items-digest "${{ env.ITEMS_DIGEST }}" \
-            --api-gateway-digest "${{ env.GATEWAY_DIGEST }}" \
-            --frontend-sha256 "$(jq -r '.sha256' "${{ env.BUNDLE_DIR }}/frontend-package.json")" \
-            --validated-at "${{ needs.e2e-staging.outputs.validatedAt }}" \
-            --producer-run-id "${{ steps.producer.outputs.producer-run-id }}" \
-            --producer-run-attempt "${{ steps.producer.outputs.producer-run-attempt }}" \
+          set -euo pipefail
+          bash "$RELEASE_DIR/bin/emit-candidate-evidence.sh" \
+            --bundle-dir "$BUNDLE" \
+            --artifact-name "$ARTIFACT" \
+            --auth-digest "$AUTH_IMAGE_DIGEST" \
+            --items-digest "$ITEMS_IMAGE_DIGEST" \
+            --api-gateway-digest "$GATEWAY_IMAGE_DIGEST" \
+            --frontend-sha256 "$(jq -r '.sha256' "$BUNDLE/frontend-package.json")" \
+            --validated-at "$VALIDATED_AT" \
+            --producer-run-id "$PRODUCER_RUN_ID" \
+            --producer-run-attempt "$PRODUCER_RUN_ATTEMPT" \
             --conclusions conclusions.json
 
       - name: Upload candidate evidence bundle
@@ -764,14 +975,23 @@ jobs:
           retention-days: 30
 
       - name: Record candidate evidence artifact identity
+        env:
+          RELEASE_DIR: ${{ env.RELEASE }}
+          WORKFLOW_RUN_ID: ${{ github.run_id }}
+          WORKFLOW_RUN_ATTEMPT: ${{ github.run_attempt }}
+          UPLOAD_ARTIFACT_ID: ${{ steps.upload.outputs.artifact-id }}
+          UPLOAD_ARTIFACT_URL: ${{ steps.upload.outputs.artifact-url }}
+          UPLOAD_ARTIFACT_DIGEST: ${{ steps.upload.outputs.artifact-digest }}
+          ARTIFACT: ${{ env.ARTIFACT_NAME }}
         run: |
-          bash "${{ env.RELEASE }}/bin/record-artifact.sh" \
-            --run-id "${{ github.run_id }}" \
-            --run-attempt "${{ github.run_attempt }}" \
-            --artifact-id "${{ steps.upload.outputs.artifact-id }}" \
-            --artifact-url "${{ steps.upload.outputs.artifact-url }}" \
-            --artifact-digest "${{ steps.upload.outputs.artifact-digest }}" \
-            --artifact-name "${{ env.ARTIFACT_NAME }}" \
+          set -euo pipefail
+          bash "$RELEASE_DIR/bin/record-artifact.sh" \
+            --run-id "$WORKFLOW_RUN_ID" \
+            --run-attempt "$WORKFLOW_RUN_ATTEMPT" \
+            --artifact-id "$UPLOAD_ARTIFACT_ID" \
+            --artifact-url "$UPLOAD_ARTIFACT_URL" \
+            --artifact-digest "$UPLOAD_ARTIFACT_DIGEST" \
+            --artifact-name "$ARTIFACT" \
             --output artifact-id.json
 
       - name: Upload artifact ID record

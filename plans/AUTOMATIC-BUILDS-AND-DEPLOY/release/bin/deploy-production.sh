@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Production promotion deployment (Pass 3, subphase 3.4). Registers one
-# digest-pinned task-definition revision per backend (copying the current
-# definition and replacing only the intended container image), then deploys in
+# Production promotion deployment (Pass 3R.1). Accepts a schema-valid candidate
+# manifest and a read-only production snapshot. It registers one digest-pinned
+# task-definition revision per backend (copying the current definition named by
+# the snapshot and replacing only the intended container image), then deploys in
 # the canonical order (auth + items, then api-gateway, then frontend — the
 # frontend is published by publish-frontend.sh), binding every waiter to the
 # deployment/task-definition started by this run and verifying the exact
@@ -15,7 +16,7 @@ set -euo pipefail
 # back. `--dry-run` validates and plans without mutating anything.
 #
 # Usage:
-#   deploy-production.sh --manifest <official-manifest.json>
+#   deploy-production.sh --manifest <candidate-manifest.json>
 #     --snapshot <snapshot.json> --ecr-registry <registry>
 #     [--dry-run] [--profile dpm-profile] [--region eu-north-1]
 #
@@ -74,10 +75,31 @@ TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 CLUSTER="$LC_CLUSTER"
 
-# The manifest must be the schema-valid official manifest (task definitions
-# present) before any registration.
+# The candidate manifest must be schema-valid and must not carry production
+# task-definition ARNs. Those ARNs are observed from the snapshot immediately
+# before this deployment so a candidate can never smuggle an arbitrary source
+# task definition into the mutation path.
 bash "$RELEASE/bin/validate-manifest.sh" "$MANIFEST" >/dev/null || {
-  echo "ERROR: official manifest failed validation; refusing to deploy" >&2
+  echo "ERROR: candidate manifest failed validation; refusing to deploy" >&2
+  exit 1
+}
+jq -e '
+  .release.status == "candidate" and
+  ([.components.auth, .components.items, .components.apiGateway]
+    | all(has("taskDefinitionArn") | not))
+' "$MANIFEST" >/dev/null || {
+  echo "ERROR: deploy-production.sh requires a candidate manifest without task-definition ARNs" >&2
+  exit 1
+}
+
+# Validate the snapshot before any registration/update. This is deliberately a
+# separate contract check: the snapshot is the sole source of current
+# task-definition ARNs and must contain all compensation fields.
+SNAPSHOT_ISSUES=$(PYTHONPATH="$RELEASE/src" python3 -m release_contract.promotion snapshot \
+  --snapshot "$SNAPSHOT" --manifest "$MANIFEST") || true
+printf '%s' "$SNAPSHOT_ISSUES" | jq -e '.valid == true' >/dev/null 2>&1 || {
+  echo "ERROR: production snapshot failed validation; refusing to deploy" >&2
+  printf '%s' "$SNAPSHOT_ISSUES" | jq -r '.issues[] | "  [\(.code)] \(.field): \(.message)"' >&2 || true
   exit 1
 }
 
@@ -116,7 +138,11 @@ for service in onlineshop-auth onlineshop-items onlineshop-api-gateway; do
   rl_assert_image_digest "$digest" || exit 2
   image_ref="${ECR_REGISTRY}/$(jq -r ".components.${component}.repository" "$MANIFEST")@${digest}"
 
-  TD_ARN=$(jq -r ".components.${component}.taskDefinitionArn" "$MANIFEST")
+  TD_ARN=$(jq -r --arg service "$service" '.services[$service].taskDefinitionArn // empty' "$SNAPSHOT")
+  rl_assert_task_definition_arn "$TD_ARN" || {
+    echo "ERROR: snapshot has no valid current task definition for $service" >&2
+    exit 1
+  }
   set +e
   CURRENT=$(aws ecs describe-task-definition "${AWS_ARGS[@]}" \
     --task-definition "$TD_ARN" --query 'taskDefinition' --output json 2>"$TMP/td.err")
