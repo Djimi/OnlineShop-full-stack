@@ -107,6 +107,8 @@ It writes the Auth and database host ports used by Docker Compose to the root
 `.env`. Automatic translation of those Compose values into host-run Spring
 variables is deliberately outside the worktree-creation command.
 
+Repository automation must follow [Script Guidelines](../docs/SCRIPT_GUIDELINES.md).
+
 ## AWS CLI Conventions
 
 For AWS CLI commands (infrastructure queries, deployments, etc.), see the root [AGENTS.md](../AGENTS.md) — all AWS commands MUST include `--profile dpm-profile --region eu-north-1`.

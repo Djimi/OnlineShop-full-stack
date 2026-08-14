@@ -23,6 +23,11 @@ from the repository root:
 python3 -m unittest -v tests/scripts/worktree_creation_test.py
 ```
 
+Tests for repository automation must also follow the story-oriented guidance in
+[SCRIPT_GUIDELINES.md](./SCRIPT_GUIDELINES.md): test observable command
+behavior, keep scenario setup explicit, and avoid mirroring implementation
+helpers or retaining coverage for removed modes.
+
 **Test output must show clean (zero failures).** Warnings from libraries (Mockito self-attach, Jansi, etc.) are expected and can be ignored.
 
 ## Testing Philosophy

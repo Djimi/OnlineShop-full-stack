@@ -49,6 +49,8 @@ and legacy modes rather than maintaining compatibility with them.
 - [x] Update root, service, workflow, troubleshooting, and port documentation.
 - [x] Complete independent code review and apply only comments that improve
       correctness or readability without restoring removed complexity.
+- [x] Record repository-wide script readability and review rules in
+      `docs/SCRIPT_GUIDELINES.md` and link them from agent and testing guidance.
 
 ## Issues register
 

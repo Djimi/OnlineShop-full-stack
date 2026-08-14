@@ -93,6 +93,8 @@ The containerized frontend auto-connects to the correct worktree gateway.
 The worktree command intentionally configures Compose only; it does not export
 host-run Vite variables.
 
+Repository automation must follow [Script Guidelines](../docs/SCRIPT_GUIDELINES.md).
+
 ## SPA Routing
 
 React Router handles client-side navigation. CloudFront is configured with a custom error response:

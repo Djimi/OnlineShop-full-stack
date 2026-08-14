@@ -111,6 +111,15 @@ All services, databases, Redis, Kafka, and the frontend are defined in `docker-c
 
 > **Build contexts:** Items uses the repository root as its context because it builds the `common` library first. Auth and API Gateway use their service directories. `common` is a library, not a separate deployable Compose service.
 
+## Script Development
+
+All new and changed repository automation must follow
+[docs/SCRIPT_GUIDELINES.md](./docs/SCRIPT_GUIDELINES.md). Scripts must expose a
+short top-down flow, use plain domain names, and avoid indirection or legacy
+compatibility without a current requirement. Treat growing size and shell
+complexity as signals to simplify the design or choose a more readable
+language, not as reasons to add layers.
+
 ## Dockerfile Conventions
 
 1. **Self-contained application builds** — Java service Dockerfiles use multi-stage builds and run Maven inside Docker, eliminating a host-side `./mvnw package` prerequisite. Use the repository root as the context when a service depends on another project (e.g., Items → common).

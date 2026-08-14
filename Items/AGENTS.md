@@ -95,6 +95,8 @@ The script installs `common` to the local Maven repo, then starts Items via `./m
 > of those values into host-run Spring variables is deliberately outside the
 > worktree-creation command.
 
+Repository automation must follow [Script Guidelines](../docs/SCRIPT_GUIDELINES.md).
+
 > **Note:** DevTools is auto-excluded from the fat JAR by `spring-boot-maven-plugin`, so the production Docker image is unaffected.
 
 ## Spring Boot 4.X Important Notes

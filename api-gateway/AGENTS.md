@@ -161,6 +161,8 @@ It writes `GATEWAY_PORT` for Docker Compose to the root `.env`. Automatic
 translation of that value into host-run Spring variables is deliberately
 outside the worktree-creation command.
 
+Repository automation must follow [Script Guidelines](../docs/SCRIPT_GUIDELINES.md).
+
 ## Pass 3.5 — Production hardening
 
 The production API gateway release target is **defined** by the hardening
