@@ -1,0 +1,44 @@
+{
+  "schemaVersion": "1.0",
+  "environment": "production",
+  "snapshotId": "snap-4711-1-111111111111",
+  "capturedAt": "2026-08-10T12:30:00Z",
+  "release": {
+    "status": "official",
+    "releaseId": "release-0001",
+    "manifestSha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+  },
+  "services": {
+    "auth": {
+      "deploymentId": "deploy-auth-0001",
+      "taskDefinitionArn": "arn:aws:ecs:eu-north-1:799111666795:task-definition/onlineshop-auth:12",
+      "runningDigests": [
+        "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      ],
+      "health": "healthy"
+    },
+    "items": {
+      "deploymentId": "deploy-items-0001",
+      "taskDefinitionArn": "arn:aws:ecs:eu-north-1:799111666795:task-definition/onlineshop-items:9",
+      "runningDigests": [
+        "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      ],
+      "health": "healthy"
+    },
+    "gateway": {
+      "deploymentId": "deploy-gateway-0001",
+      "taskDefinitionArn": "arn:aws:ecs:eu-north-1:799111666795:task-definition/onlineshop-api-gateway:7",
+      "runningDigests": [
+        "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+      ],
+      "health": "healthy"
+    }
+  },
+  "frontend": {
+    "immutableIdentity": "release-0001",
+    "liveMarker": "release.json",
+    "checksum": "e1a9643cedc87e8b5818ec16b22a0780522c78ec5b3fa3648a7e7c8fda331623",
+    "cloudfrontDistributionId": "E123456789ABCD"
+  },
+  "compatibilityFingerprint": "fp-main-0001"
+}

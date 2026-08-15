@@ -1,0 +1,48 @@
+{
+  "schemaVersion": "1.0",
+  "releaseId": "release-0001",
+  "candidateId": "cand-4711-1-111111111111",
+  "source": {
+    "fullSha": "1111111111111111111111111111111111111111",
+    "branch": "main"
+  },
+  "previousReleaseId": null,
+  "promotedAt": "2026-08-10T13:00:00Z",
+  "requester": "owner@example.com",
+  "approval": {
+    "evidence": "approval-4711-1",
+    "workflowUrl": "https://github.com/Djimi@8793507/OnlineShop-full-stack/actions/runs/4711"
+  },
+  "artifacts": {
+    "auth": {
+      "repository": "799111666795.dkr.ecr.eu-north-1.amazonaws.com/onlineshop-auth",
+      "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    "items": {
+      "repository": "799111666795.dkr.ecr.eu-north-1.amazonaws.com/onlineshop-items",
+      "digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    },
+    "gateway": {
+      "repository": "799111666795.dkr.ecr.eu-north-1.amazonaws.com/onlineshop-api-gateway",
+      "digest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+    },
+    "frontend": {
+      "immutableIdentity": "s3://onlineshop-frontend/_releases/v0.1.0/index.html",
+      "checksum": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+    },
+    "sbom": {
+      "assetName": "sbom-onlineshop-v0.1.0.spdx.json",
+      "sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+    }
+  },
+  "compatibilityFingerprint": "fp-main-0001",
+  "staging": {
+    "evidenceIdentity": "staging-evidence-4711-1",
+    "conclusion": "passed"
+  },
+  "productionVerification": {
+    "evidenceIdentity": "prod-verify-4711-1",
+    "conclusion": "passed"
+  },
+  "rollbackCapableAtPublication": true
+}

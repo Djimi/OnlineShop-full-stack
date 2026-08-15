@@ -1,0 +1,45 @@
+{
+  "schemaVersion": "1.0",
+  "candidateId": "cand-4711-1-111111111111",
+  "candidateClass": "main",
+  "source": {
+    "repository": "Djimi@8793507/OnlineShop-full-stack",
+    "branch": "main",
+    "ref": "refs/heads/main",
+    "fullSha": "1111111111111111111111111111111111111111"
+  },
+  "build": {
+    "workflowRunId": 4711,
+    "workflowRunAttempt": 1,
+    "workflowUrl": "https://github.com/Djimi@8793507/OnlineShop-full-stack/actions/runs/4711",
+    "createdAt": "2026-08-10T09:00:00Z",
+    "completedAt": "2026-08-10T09:12:00Z"
+  },
+  "artifacts": {
+    "auth": {
+      "repository": "799111666795.dkr.ecr.eu-north-1.amazonaws.com/onlineshop-auth",
+      "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    "items": {
+      "repository": "799111666795.dkr.ecr.eu-north-1.amazonaws.com/onlineshop-items",
+      "digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "commonSourceSha": "1111111111111111111111111111111111111111"
+    },
+    "gateway": {
+      "repository": "799111666795.dkr.ecr.eu-north-1.amazonaws.com/onlineshop-api-gateway",
+      "digest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+    },
+    "frontend": {
+      "artifactId": "frontend-4711-1",
+      "artifactDigest": "sha256:9999999999999999999999999999999999999999999999999999999999999999",
+      "contentChecksum": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+    }
+  },
+  "tests": {
+    "unit": "passed",
+    "integration": "passed",
+    "frontend": "passed",
+    "localE2E": "passed"
+  },
+  "productionEligible": true
+}

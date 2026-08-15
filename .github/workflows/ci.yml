@@ -1,0 +1,412 @@
+name: CI
+
+on:
+  # Trigger isolation (OP-CUT-01): legacy build-and-deploy.yml still owns push
+  # builds for main and feature/** — overlapping triggers would push identical
+  # sha-<fullsha> tags into the same sha-* immutable ECR repositories on the
+  # same commit and the second push would fail. The push path is exercised on
+  # greenfield/** branches during bring-up; expansion to main + feature/**
+  # happens only at cutover, after legacy triggers are disabled
+  # (DELIVERY-SYSTEM-IMPLEMENTATION-PLAN §7 / OP-CUT-02).
+  push:
+    branches:
+      - 'greenfield/**'
+  pull_request:
+    branches:
+      - main
+
+# Validation jobs get contents: read only. The publish job adds id-token for
+# OIDC and actions: read for artifact download; nothing else touches AWS.
+permissions:
+  contents: read
+
+env:
+  AWS_REGION: eu-north-1
+  ECR_REGISTRY: 799111666795.dkr.ecr.eu-north-1.amazonaws.com
+  AWS_ROLE_ARN_CANDIDATE_BUILD: arn:aws:iam::799111666795:role/github-actions-candidate-build
+
+jobs:
+  # ==================== VALIDATION (parallel) ====================
+  test-auth:
+    uses: ./.github/workflows/_java-service.yml
+    with:
+      service: auth
+      working-directory: Auth
+
+  test-items:
+    uses: ./.github/workflows/_java-service.yml
+    with:
+      service: items
+      working-directory: Items
+      needs-common: true
+
+  test-gateway:
+    uses: ./.github/workflows/_java-service.yml
+    with:
+      service: api-gateway
+      working-directory: api-gateway
+
+  test-frontend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - name: Set up Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Build
+        run: npm run build
+        # frontend/package.json defines no test script (dev/build/lint/preview
+        # only), so lint + build are the frontend validation gates.
+
+  # ==================== LOCAL E2E (no AWS anywhere) ====================
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - name: Build and start the local stack
+        run: docker compose up -d --build
+
+      - name: Wait for API gateway health
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 24); do
+            if curl -fsS --max-time 5 http://localhost:10000/actuator/health > /dev/null; then
+              echo "API gateway is healthy"
+              exit 0
+            fi
+            echo "waiting for API gateway (attempt $attempt/24)"
+            sleep 5
+          done
+          docker compose ps
+          echo "ERROR: API gateway did not become healthy within ~2 minutes" >&2
+          exit 1
+
+      - name: Set up Java
+        uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4.9.1
+        with:
+          java-version: '25'
+          distribution: temurin
+
+      - name: Run E2E tests
+        working-directory: e2e-tests
+        run: chmod +x mvnw && ./mvnw clean test
+
+      - name: Capture container diagnostics
+        if: failure()
+        run: docker compose ps && docker compose logs --no-color auth-service items-service api-gateway
+
+      - name: Stop the local stack
+        if: always()
+        run: docker compose down --volumes --remove-orphans
+
+  # ==================== CANDIDATE PUBLICATION (push only) ====================
+  publish:
+    if: github.event_name == 'push'
+    needs: [test-auth, test-items, test-gateway, test-frontend, e2e]
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    permissions:
+      contents: read
+      id-token: write
+      actions: read
+    steps:
+      # 1. Checkout
+      - name: Checkout repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      # 2. Job timestamps feed the candidate manifest build record
+      - name: Record job start time
+        id: jobmeta
+        run: echo "created_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
+
+      # 3. Delivery engine (candidate manifest producer)
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: '3.12'
+
+      - name: Install delivery package
+        run: python -m pip install --disable-pip-version-check -q ./delivery
+
+      # 4. AWS credentials: Artifact Publisher role only (never the legacy role)
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4.3.1
+        with:
+          role-to-assume: ${{ env.AWS_ROLE_ARN_CANDIDATE_BUILD }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Authenticate Docker to ECR
+        run: |
+          set -euo pipefail
+          aws ecr get-login-password --region "$AWS_REGION" \
+            | docker login --username AWS --password-stdin "$ECR_REGISTRY"
+
+      # 4. Image builds
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+
+      - name: Compute candidate image tags
+        id: tags
+        env:
+          WORKFLOW_SHA: ${{ github.sha }}
+          WORKFLOW_REF: ${{ github.ref }}
+        run: |
+          set -euo pipefail
+          [[ "$WORKFLOW_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "ERROR: invalid commit SHA" >&2; exit 1; }
+          case "$WORKFLOW_REF" in
+            refs/heads/main)
+              CANDIDATE_CLASS="main"
+              MUTABLE_TAG="main-latest"
+              ;;
+            refs/heads/feature/*|refs/heads/greenfield/*)
+              CANDIDATE_CLASS="feature"
+              BRANCH_NAME="${WORKFLOW_REF#refs/heads/}"
+              MUTABLE_TAG="branch-$(printf '%s' "$BRANCH_NAME" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9._-]/-/g; s/^[-.]+//; s/[-.]+$//')"
+              ;;
+            *) echo "ERROR: unsupported ref $WORKFLOW_REF" >&2; exit 1 ;;
+          esac
+          {
+            printf 'class=%s\n' "$CANDIDATE_CLASS"
+            printf 'sha_tag=sha-%s\n' "$WORKFLOW_SHA"
+            printf 'mutable_tag=%s\n' "$MUTABLE_TAG"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Build and push Auth image
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
+        with:
+          context: Auth
+          push: true
+          tags: ${{ env.ECR_REGISTRY }}/onlineshop-auth:${{ steps.tags.outputs.sha_tag }},${{ env.ECR_REGISTRY }}/onlineshop-auth:${{ steps.tags.outputs.mutable_tag }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build and push Items image
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
+        with:
+          context: .
+          file: Items/Dockerfile
+          push: true
+          tags: ${{ env.ECR_REGISTRY }}/onlineshop-items:${{ steps.tags.outputs.sha_tag }},${{ env.ECR_REGISTRY }}/onlineshop-items:${{ steps.tags.outputs.mutable_tag }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build and push API Gateway image
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
+        with:
+          context: api-gateway
+          push: true
+          tags: ${{ env.ECR_REGISTRY }}/onlineshop-api-gateway:${{ steps.tags.outputs.sha_tag }},${{ env.ECR_REGISTRY }}/onlineshop-api-gateway:${{ steps.tags.outputs.mutable_tag }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # 5. Service-reported ECR digests: immutable identity, never mutable tags
+      - name: Read back ECR image digests
+        id: digests
+        env:
+          WORKFLOW_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          [[ "$WORKFLOW_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "ERROR: invalid commit SHA" >&2; exit 1; }
+          for entry in "auth:onlineshop-auth" "items:onlineshop-items" "api-gateway:onlineshop-api-gateway"; do
+            component="${entry%%:*}"
+            repository="${entry##*:}"
+            digest=$(aws ecr batch-get-image \
+              --region "$AWS_REGION" \
+              --repository-name "$repository" \
+              --image-ids "imageTag=sha-$WORKFLOW_SHA" \
+              --query 'images[0].imageDigest' \
+              --output text)
+            [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "ERROR: invalid digest for $repository" >&2; exit 1; }
+            printf '%s=%s\n' "${component}_digest" "$digest" >> "$GITHUB_OUTPUT"
+            echo "$repository sha-$WORKFLOW_SHA -> $digest"
+          done
+
+      # 6. Frontend candidate archive (VITE_API_URL='' -> same-origin API in production)
+      - name: Set up Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24'
+          package-manager-cache: false
+
+      - name: Build and package frontend candidate
+        id: frontend
+        working-directory: frontend
+        run: |
+          set -euo pipefail
+          npm ci
+          VITE_API_URL='' npm run build
+          CONTENT_CHECKSUM=$(find dist -type f -print0 | sort -z | xargs -0 sha256sum | sha256sum | cut -d' ' -f1)
+          tar -C dist -cf ../frontend.tar \
+            --sort=name --owner=0 --group=0 --numeric-owner --mtime=@0 .
+          ARCHIVE_DIGEST="sha256:$(sha256sum ../frontend.tar | cut -d' ' -f1)"
+          printf 'content_checksum=%s\n' "$CONTENT_CHECKSUM" >> "$GITHUB_OUTPUT"
+          printf 'artifact_digest=%s\n' "$ARCHIVE_DIGEST" >> "$GITHUB_OUTPUT"
+
+      # 7. SBOMs from the pinned, checksum-verified Syft binary
+      - name: Download and verify Syft
+        run: |
+          set -euo pipefail
+          SYFT_VERSION=1.50.0
+          BASE_URL="https://github.com/anchore/syft/releases/download/v${SYFT_VERSION}"
+          curl -fsSL -o "syft_${SYFT_VERSION}_checksums.txt" "$BASE_URL/syft_${SYFT_VERSION}_checksums.txt"
+          curl -fsSL -o "syft_${SYFT_VERSION}_linux_amd64.tar.gz" "$BASE_URL/syft_${SYFT_VERSION}_linux_amd64.tar.gz"
+          grep "syft_${SYFT_VERSION}_linux_amd64.tar.gz" "syft_${SYFT_VERSION}_checksums.txt" > syft-checksum-expected.txt
+          sha256sum -c syft-checksum-expected.txt
+          tar -xzf "syft_${SYFT_VERSION}_linux_amd64.tar.gz" syft
+          ./syft version
+
+      - name: Generate SBOMs
+        env:
+          AUTH_DIGEST: ${{ steps.digests.outputs.auth_digest }}
+          ITEMS_DIGEST: ${{ steps.digests.outputs.items_digest }}
+          GATEWAY_DIGEST: ${{ steps.digests.outputs.api-gateway_digest }}
+        run: |
+          set -euo pipefail
+          mkdir -p sboms
+          ./syft "registry:$ECR_REGISTRY/onlineshop-auth@$AUTH_DIGEST" -o spdx-json --file sboms/auth.spdx.json
+          ./syft "registry:$ECR_REGISTRY/onlineshop-items@$ITEMS_DIGEST" -o spdx-json --file sboms/items.spdx.json
+          ./syft "registry:$ECR_REGISTRY/onlineshop-api-gateway@$GATEWAY_DIGEST" -o spdx-json --file sboms/api-gateway.spdx.json
+          ./syft "dir:frontend/dist" -o spdx-json --file sboms/frontend.spdx.json
+          ls -la sboms
+
+      # 8. Candidate manifest inputs: exact run/attempt authority
+      - name: Assemble candidate manifest inputs
+        id: inputs
+        env:
+          WORKFLOW_SHA: ${{ github.sha }}
+          WORKFLOW_REF: ${{ github.ref }}
+          WORKFLOW_REPOSITORY: ${{ github.repository }}
+          WORKFLOW_RUN_ID: ${{ github.run_id }}
+          WORKFLOW_RUN_ATTEMPT: ${{ github.run_attempt }}
+          AUTH_RESULT: ${{ needs.test-auth.result }}
+          ITEMS_RESULT: ${{ needs.test-items.result }}
+          GATEWAY_RESULT: ${{ needs.test-gateway.result }}
+          FRONTEND_RESULT: ${{ needs.test-frontend.result }}
+          E2E_RESULT: ${{ needs.e2e.result }}
+          AUTH_DIGEST: ${{ steps.digests.outputs.auth_digest }}
+          ITEMS_DIGEST: ${{ steps.digests.outputs.items_digest }}
+          GATEWAY_DIGEST: ${{ steps.digests.outputs.api-gateway_digest }}
+          FRONTEND_ARTIFACT_ID: frontend-archive-${{ github.run_id }}-${{ github.run_attempt }}
+          FRONTEND_ARTIFACT_DIGEST: ${{ steps.frontend.outputs.artifact_digest }}
+          FRONTEND_CONTENT_CHECKSUM: ${{ steps.frontend.outputs.content_checksum }}
+          CREATED_AT: ${{ steps.jobmeta.outputs.created_at }}
+        run: |
+          set -euo pipefail
+          [[ "$WORKFLOW_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "ERROR: invalid commit SHA" >&2; exit 1; }
+          [[ "$WORKFLOW_RUN_ID" =~ ^[0-9]+$ ]] || { echo "ERROR: invalid run id" >&2; exit 1; }
+          [[ "$WORKFLOW_RUN_ATTEMPT" =~ ^[0-9]+$ ]] || { echo "ERROR: invalid run attempt" >&2; exit 1; }
+          for result in "$AUTH_RESULT" "$ITEMS_RESULT" "$GATEWAY_RESULT" "$FRONTEND_RESULT" "$E2E_RESULT"; do
+            [[ "$result" == "success" ]] || { echo "ERROR: gate result '$result' is not success" >&2; exit 1; }
+          done
+          BRANCH_NAME="${WORKFLOW_REF#refs/heads/}"
+          COMPLETED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          WORKFLOW_URL="https://github.com/$WORKFLOW_REPOSITORY/actions/runs/$WORKFLOW_RUN_ID"
+          jq -n \
+            --arg repository "$WORKFLOW_REPOSITORY" \
+            --arg branch "$BRANCH_NAME" \
+            --arg ref "$WORKFLOW_REF" \
+            --arg fullSha "$WORKFLOW_SHA" \
+            --argjson runId "$WORKFLOW_RUN_ID" \
+            --argjson runAttempt "$WORKFLOW_RUN_ATTEMPT" \
+            --arg workflowUrl "$WORKFLOW_URL" \
+            --arg createdAt "$CREATED_AT" \
+            --arg completedAt "$COMPLETED_AT" \
+            --arg authRepository "onlineshop-auth" \
+            --arg authDigest "$AUTH_DIGEST" \
+            --arg itemsRepository "onlineshop-items" \
+            --arg itemsDigest "$ITEMS_DIGEST" \
+            --arg commonSourceSha "$WORKFLOW_SHA" \
+            --arg gatewayRepository "onlineshop-api-gateway" \
+            --arg gatewayDigest "$GATEWAY_DIGEST" \
+            --arg frontendArtifactId "$FRONTEND_ARTIFACT_ID" \
+            --arg frontendArtifactDigest "$FRONTEND_ARTIFACT_DIGEST" \
+            --arg frontendContentChecksum "$FRONTEND_CONTENT_CHECKSUM" \
+            '{source: {repository: $repository, branch: $branch, ref: $ref, fullSha: $fullSha},
+              build: {workflowRunId: $runId, workflowRunAttempt: $runAttempt, workflowUrl: $workflowUrl, createdAt: $createdAt, completedAt: $completedAt},
+              artifacts: {auth: {repository: $authRepository, digest: $authDigest}, items: {repository: $itemsRepository, digest: $itemsDigest, commonSourceSha: $commonSourceSha}, gateway: {repository: $gatewayRepository, digest: $gatewayDigest}, frontend: {artifactId: $frontendArtifactId, artifactDigest: $frontendArtifactDigest, contentChecksum: $frontendContentChecksum}},
+              tests: {unit: "passed", integration: "passed", frontend: "lint+build", localE2E: "passed"}}' \
+            > candidate-inputs.json
+          printf 'branch=%s\n' "$BRANCH_NAME" >> "$GITHUB_OUTPUT"
+
+      # 9. Emit + validate the candidate manifest with the delivery engine
+      - name: Emit candidate manifest
+        env:
+          CANDIDATE_CLASS: ${{ steps.tags.outputs.class }}
+        run: |
+          set -euo pipefail
+          python -m delivery.cli candidate manifest \
+            --inputs candidate-inputs.json \
+            --out candidate-manifest.json \
+            --class "$CANDIDATE_CLASS"
+
+      - name: Validate candidate manifest
+        env:
+          CANDIDATE_CLASS: ${{ steps.tags.outputs.class }}
+        run: python -m delivery.cli candidate validate --manifest candidate-manifest.json --max-age-days 30 --class "$CANDIDATE_CLASS"
+
+      # 10. Run/attempt-owned artifacts
+      # A partial artifact set (e.g. manifest without SBOMs) is safe only because the staging gate (Phase 4) enforces CT-CAND-03 full-set existence before deployment.
+      - name: Download test results
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: '*-test-results-${{ github.run_id }}-${{ github.run_attempt }}'
+          path: test-results
+          merge-multiple: true
+
+      - name: Upload candidate manifest
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: candidate-manifest-${{ github.run_id }}-${{ github.run_attempt }}
+          path: candidate-manifest.json
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload frontend archive
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: frontend-archive-${{ github.run_id }}-${{ github.run_attempt }}
+          path: frontend.tar
+          retention-days: 30
+
+      - name: Upload SBOMs
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: sboms-${{ github.run_id }}-${{ github.run_attempt }}
+          path: sboms/
+          retention-days: 30
+
+      - name: Upload test results bundle
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: test-results-${{ github.run_id }}-${{ github.run_attempt }}
+          path: test-results/
+          retention-days: 30

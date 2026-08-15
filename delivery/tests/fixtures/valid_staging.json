@@ -1,0 +1,42 @@
+{
+  "schemaVersion": "1.0",
+  "operationId": "stg-4711-1",
+  "candidate": {
+    "candidateId": "cand-4711-1-111111111111",
+    "branch": "main",
+    "fullSha": "1111111111111111111111111111111111111111",
+    "workflowRunId": 4711,
+    "workflowRunAttempt": 1
+  },
+  "owner": "owner@example.com",
+  "acquiredAt": "2026-08-10T10:00:00Z",
+  "phase": "COMPLETE",
+  "completedAt": "2026-08-10T12:00:00Z",
+  "database": {
+    "resetConclusion": "passed",
+    "seedConclusion": "passed",
+    "accessVerificationConclusion": "passed"
+  },
+  "artifactsExpected": {
+    "authDigest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "itemsDigest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "gatewayDigest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "frontendChecksum": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+  },
+  "artifactsObserved": {
+    "authDigest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "itemsDigest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "gatewayDigest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "frontendChecksum": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+  },
+  "compatibility": {
+    "conclusion": "passed",
+    "bootstrapException": false
+  },
+  "e2e": {
+    "conclusion": "passed"
+  },
+  "cleanup": {
+    "conclusion": "passed"
+  }
+}
