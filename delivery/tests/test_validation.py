@@ -207,6 +207,34 @@ def test_staging_cross_check_observed_mismatch():
     assert any("frontendChecksum" in error for error in errors)
 
 
+def test_staging_cross_check_expected_auth_digest_mismatch():
+    record = staging()
+    record.artifactsExpected.authDigest = "sha256:" + "9" * 64
+    errors = validate_staging_against_candidate(record, candidate())
+    assert any("expected authDigest" in error for error in errors)
+
+
+def test_staging_cross_check_expected_items_digest_mismatch():
+    record = staging()
+    record.artifactsExpected.itemsDigest = "sha256:" + "9" * 64
+    errors = validate_staging_against_candidate(record, candidate())
+    assert any("expected itemsDigest" in error for error in errors)
+
+
+def test_staging_cross_check_expected_gateway_digest_mismatch():
+    record = staging()
+    record.artifactsExpected.gatewayDigest = "sha256:" + "9" * 64
+    errors = validate_staging_against_candidate(record, candidate())
+    assert any("expected gatewayDigest" in error for error in errors)
+
+
+def test_staging_cross_check_expected_frontend_checksum_mismatch():
+    record = staging()
+    record.artifactsExpected.frontendChecksum = "0" * 64
+    errors = validate_staging_against_candidate(record, candidate())
+    assert any("expected frontendChecksum" in error for error in errors)
+
+
 def test_release_unsupported_schema_version():
     record = release()
     record.schemaVersion = "2.0"
@@ -237,7 +265,7 @@ def test_release_bad_full_sha():
 
 def test_release_bad_sbom_sha256():
     record = release()
-    record.artifacts.sbom.sha256 = "0" * 63
+    record.artifacts.sbom.auth.sha256 = "0" * 63
     errors = validate(record)
     assert any("sbom" in error for error in errors)
 

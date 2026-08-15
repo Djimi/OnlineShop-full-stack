@@ -1,13 +1,15 @@
-"""Staging operation record (CT-STG-01) and phase values (OP-STG-01)."""
+"""Staging operation record (CT-STG-01), phase values (OP-STG-01),
+ownership marker (D1/OP-STG-05), diagnostics, and reconcile records."""
 
 from __future__ import annotations
 
 from enum import StrEnum
-from typing import Annotated
+from typing import Annotated, Literal
 
 from pydantic import BeforeValidator, Field
 
 from .common import PositiveInt, StrictRecord, UtcDateTime
+from .evidence import FailureInfo, PhaseLog
 
 
 class Phase(StrEnum):
@@ -64,10 +66,72 @@ class CompatibilityConclusion(StrictRecord):
 
 
 class E2EConclusion(StrictRecord):
-    conclusion: str
+    """``pending`` is written by the first invocation before the cloud suite
+    runs; ``not-run`` is recorded by the continuation when the previous
+    invocation reached phase E2E but never recorded an actual suite result —
+    recording ``failed`` for a suite that never ran would be a lie.
+    """
+
+    conclusion: Literal["pending", "passed", "failed", "not-run"]
 
 
 class CleanupConclusion(StrictRecord):
+    conclusion: str
+    reason: str = ""
+
+
+class JourneyConclusion(StrictRecord):
+    name: str
+    conclusion: str
+    detail: str = ""
+
+
+class OwnershipMarker(StrictRecord):
+    """D1 ownership marker stored as a canonical-JSON RDS tag value.
+
+    The tag key is ``onlineshop:staging-owner``; the value is the canonical
+    serialization of this record. A marker is only valid while ``expiresAt``
+    is in the future; the TTL is a generous bound on one staging lifecycle
+    (3h), chosen so the 15-minute reconcile can reclaim a genuinely lost run
+    without ever stealing from a live owner.
+    """
+
+    schemaVersion: str = "1.0"
+    operationId: str
+    workflowRunId: PositiveInt
+    workflowRunAttempt: PositiveInt
+    owner: str = Field(pattern=r"^[A-Za-z0-9@._-]{1,39}$")
+    acquiredAt: UtcDateTime
+    expiresAt: UtcDateTime
+
+
+class DiagnosticsRecord(StrictRecord):
+    """Redacted pre-cleanup environment snapshot (OP-STG-04 / CT-AUDIT-02).
+
+    Only sanitized observations are kept: container ``secrets`` entries are
+    replaced by counts and the RDS ``MasterUserSecret`` object is dropped.
+    """
+
+    schemaVersion: str = "1.0"
+    capturedAt: UtcDateTime
+    environment: str
+    cluster: str
+    services: list[dict] = Field(default_factory=list)
+    dbInstance: dict = Field(default_factory=dict)
+    albTargetHealth: list[dict] = Field(default_factory=list)
+    errors: list[str] = Field(default_factory=list)
+    redacted: bool = True
+
+
+class ReconcileRecord(StrictRecord):
+    """OP-STG-05 reconcile observation and action (visibility only)."""
+
+    schemaVersion: str = "1.0"
+    observedAt: UtcDateTime
+    dbInstance: str
+    dbStatus: str
+    marker: OwnershipMarker | None = None
+    action: Literal["none", "stopped"]
     conclusion: str
 
 
@@ -75,7 +139,7 @@ class StagingOperationRecord(StrictRecord):
     schemaVersion: str = "1.0"
     operationId: str
     candidate: StagingCandidateIdentity
-    owner: str
+    owner: str = Field(pattern=r"^[A-Za-z0-9@._-]{1,39}$")
     acquiredAt: UtcDateTime
     phase: Annotated[Phase, BeforeValidator(_coerce_phase)]
     completedAt: UtcDateTime | None = None
@@ -85,3 +149,8 @@ class StagingOperationRecord(StrictRecord):
     compatibility: CompatibilityConclusion
     e2e: E2EConclusion
     cleanup: CleanupConclusion
+    phaseLog: list[PhaseLog] = Field(default_factory=list)
+    journeys: list[JourneyConclusion] = Field(default_factory=list)
+    failure: FailureInfo | None = None
+    diagnosticsPath: str | None = None
+    e2eUrl: str | None = None

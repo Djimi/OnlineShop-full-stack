@@ -31,3 +31,19 @@ class AmbiguousStateError(DeliveryError):
 
 class NotImplementedPhaseError(DeliveryError):
     code = "NOT_IMPLEMENTED"
+
+
+class StagingMarkerConflict(DeliveryError):
+    code = "STG_MARKER_CONFLICT"
+
+
+class StagingCleanupFailure(DeliveryError):
+    code = "CLEANUP_FAILED"
+
+
+class E2EFailed(DeliveryError):
+    code = "E2E_FAILED"
+
+
+class OwnerlessRdsStopped(DeliveryError):
+    code = "OWNERLESS_STOPPED"

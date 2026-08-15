@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 from typing import Any
 
@@ -11,6 +12,7 @@ from ..errors import (
     AbsentResourceError,
     MutationVerificationError,
     ReadError,
+    ValidationError,
     WaiterTimeoutError,
 )
 from .readback import absent_or_read
@@ -167,3 +169,257 @@ def running_digests(client: Any, cluster: str, service: str) -> list[str]:
                 )
             digests.append(digest)
     return sorted(digests)
+
+
+def wait_for_running_digests(
+    client: Any,
+    cluster: str,
+    service: str,
+    expected: str,
+    *,
+    timeout_seconds: float,
+    interval_seconds: float = 10,
+) -> None:
+    """Wait until every running container digest equals ``expected``.
+
+    OP-DEP-02: after the deployment-bound waiter completes, a min-100% /
+    max-200% rolling deployment can transiently overlap tasks (the new
+    PRIMARY plus an old draining task). The overlap is tolerated only while
+    it drains: the accepted end state is exactly ``{expected}`` — a digest
+    other than the expected one is never accepted, and the wait fails
+    closed when the set does not converge before the bound.
+    """
+    observed: list[str] = []
+
+    def poll() -> bool:
+        digests = running_digests(client, cluster, service)
+        observed.clear()
+        observed.extend(sorted(set(digests)))
+        return set(digests) == {expected}
+
+    try:
+        bounded_waiter(
+            poll,
+            label=f"running digests == {{{expected}}} for service {service}",
+            timeout_seconds=timeout_seconds,
+            interval_seconds=interval_seconds,
+        )
+    except WaiterTimeoutError as error:
+        raise MutationVerificationError(
+            f"service {service} running digests {observed} did not converge to "
+            f"{{{expected}}} before the bound"
+        ) from error
+
+
+def scale_service(client: Any, cluster: str, service: str, desired_count: int) -> dict:
+    """Set the desiredCount of a service and verify the read-back."""
+    if not isinstance(desired_count, int) or desired_count < 0:
+        raise ValidationError(
+            f"desired_count must be a non-negative integer, got {desired_count!r}"
+        )
+    client.update_service(cluster=cluster, service=service, desiredCount=desired_count)
+    observed = describe_services(client, cluster, [service])[service]
+    if observed.get("desiredCount") != desired_count:
+        raise MutationVerificationError(
+            f"service {service} desiredCount read-back mismatch: "
+            f"expected {desired_count}, observed {observed.get('desiredCount')!r}"
+        )
+    return observed
+
+
+def wait_for_service_running_count(
+    client: Any,
+    cluster: str,
+    service: str,
+    expected_count: int,
+    *,
+    timeout_seconds: float,
+    interval_seconds: float = 10,
+) -> bool:
+    """Wait until the service runningCount equals the expected value."""
+
+    def poll() -> bool:
+        observed = describe_services(client, cluster, [service])[service]
+        return observed.get("runningCount") == expected_count
+
+    return bounded_waiter(
+        poll,
+        label=f"runningCount {expected_count} for service {service}",
+        timeout_seconds=timeout_seconds,
+        interval_seconds=interval_seconds,
+    )
+
+
+def wait_for_tasks_stopped(
+    client: Any,
+    cluster: str,
+    task_arns: list[str],
+    *,
+    timeout_seconds: float,
+    interval_seconds: float = 10,
+) -> list[dict]:
+    """Wait until every task reports lastStatus STOPPED and return the tasks."""
+    stopped: list[dict] = []
+
+    def poll() -> bool:
+        try:
+            response = client.describe_tasks(cluster=cluster, tasks=task_arns)
+        except ClientError as error:
+            if absent_or_read(error):
+                raise AbsentResourceError(
+                    f"tasks not found while waiting: {', '.join(task_arns)}"
+                ) from error
+            raise ReadError(f"describe_tasks failed while waiting for {task_arns}") from error
+        tasks = response.get("tasks") or []
+        if len(tasks) != len(task_arns):
+            raise ReadError(
+                f"describe_tasks returned {len(tasks)} of {len(task_arns)} tasks"
+            )
+        for task in tasks:
+            if task.get("lastStatus") != "STOPPED":
+                return False
+        stopped.extend(tasks)
+        return True
+
+    bounded_waiter(
+        poll,
+        label=f"tasks stopped: {', '.join(task_arns)}",
+        timeout_seconds=timeout_seconds,
+        interval_seconds=interval_seconds,
+    )
+    return stopped
+
+
+_TD_READ_ONLY_KEYS = frozenset(
+    {
+        "taskDefinitionArn",
+        "revision",
+        "status",
+        "requiresAttributes",
+        "compatibilities",
+        "registeredAt",
+        "registeredBy",
+        "deregisteredAt",
+    }
+)
+
+
+def sanitize_task_definition(td: dict) -> dict:
+    """Return a register-able copy of an observed task definition.
+
+    Read-only describe output fields are dropped; everything else (including
+    secrets[].valueFrom references) is preserved byte for byte so the diff
+    against the observed definition proves an image-only change.
+    """
+    body = {key: value for key, value in td.items() if key not in _TD_READ_ONLY_KEYS}
+    containers = body.get("containerDefinitions")
+    if not isinstance(containers, list) or not containers:
+        raise ReadError("task definition has no containerDefinitions")
+    body["containerDefinitions"] = [
+        {
+            key: value
+            for key, value in container.items()
+            if key not in {"imageDigest", "containerArn"}
+        }
+        for container in containers
+    ]
+    return body
+
+
+def task_definition_images(td: dict) -> dict[str, str]:
+    """Map container name to image for every container of a task definition."""
+    containers = td.get("containerDefinitions") or []
+    images = {}
+    for container in containers:
+        name = container.get("name")
+        image = container.get("image")
+        if not isinstance(name, str) or not name or not isinstance(image, str) or not image:
+            raise ReadError("task definition container is missing name or image")
+        images[name] = image
+    return images
+
+
+def replace_container_images(td: dict, images: dict[str, str]) -> dict:
+    """Return a sanitized task definition with container images replaced.
+
+    Fails closed when a requested container does not exist or the resulting
+    definition differs from the original in anything but image fields.
+    """
+    if not images:
+        raise ValidationError("replace_container_images requires at least one image")
+    original = sanitize_task_definition(td)
+    replaced = json.loads(json.dumps(original))
+    for name, image in images.items():
+        found = False
+        for container in replaced["containerDefinitions"]:
+            if container.get("name") == name:
+                if container.get("image") == image:
+                    raise ValidationError(
+                        f"container {name} already runs image {image}; nothing to change"
+                    )
+                container["image"] = image
+                found = True
+                break
+        if not found:
+            raise ValidationError(f"container {name} does not exist in the task definition")
+    _assert_image_only_change(original, replaced)
+    return replaced
+
+
+def _assert_image_only_change(original: dict, replaced: dict) -> None:
+    for container_index, (before, after) in enumerate(
+        zip(original.get("containerDefinitions") or [], replaced.get("containerDefinitions") or [],
+        strict=False)
+    ):
+        if len(original.get("containerDefinitions") or []) != len(
+            replaced.get("containerDefinitions") or []
+        ):
+            raise MutationVerificationError(
+                "task definition container count changed; not an image-only change"
+            )
+        for key in set(before) | set(after):
+            if key == "image":
+                continue
+            if before.get(key) != after.get(key):
+                raise MutationVerificationError(
+                    f"task definition container {container_index} changed beyond image "
+                    f"(key {key})"
+                )
+    for key in set(original) | set(replaced):
+        if key == "containerDefinitions":
+            continue
+        if original.get(key) != replaced.get(key):
+            raise MutationVerificationError(
+                f"task definition changed beyond container images (key {key})"
+            )
+
+
+def deregister_task_definition(client: Any, task_definition_arn: str) -> None:
+    """Deregister a task definition and verify it becomes INACTIVE."""
+    client.deregister_task_definition(taskDefinition=task_definition_arn)
+    observed = describe_task_definition(client, task_definition_arn)
+    status = observed.get("taskDefinition", {}).get("status")
+    if status != "INACTIVE":
+        raise MutationVerificationError(
+            f"task definition {task_definition_arn} did not become INACTIVE "
+            f"after deregistration (observed {status!r})"
+        )
+
+
+def delete_task_definition(client: Any, task_definition_arn: str) -> None:
+    """Delete a deregistered task definition and verify it is gone."""
+    client.delete_task_definitions(taskDefinitions=[task_definition_arn])
+    try:
+        observed = client.describe_task_definition(taskDefinition=task_definition_arn)
+    except ClientError as error:
+        if absent_or_read(error):
+            return
+        raise ReadError(
+            f"describe_task_definition failed for {task_definition_arn} after deletion"
+        ) from error
+    status = observed.get("taskDefinition", {}).get("status")
+    if status != "DELETE_IN_PROGRESS":
+        raise MutationVerificationError(
+            f"task definition {task_definition_arn} not deleted "
+            f"(observed status {status!r})"
+        )

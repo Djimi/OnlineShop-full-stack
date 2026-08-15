@@ -29,7 +29,11 @@ class StrictRecord(BaseModel):
 
 
 class Source(StrictRecord):
-    repository: str
+    # ``repository`` flows into GitHub API URL construction: constrain it to
+    # owner/name where each part is URL-path-safe. ``@`` is tolerated because
+    # the existing repository fixtures use an at-separated owner segment and
+    # it is inert inside a URL path.
+    repository: str = Field(pattern=r"^[A-Za-z0-9@_.-]+/[A-Za-z0-9@_.-]+$")
     branch: str
     ref: str
     fullSha: str = Field(pattern=r"^[0-9a-f]{40}$")

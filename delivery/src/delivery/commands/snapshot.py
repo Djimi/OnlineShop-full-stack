@@ -11,7 +11,7 @@ Identifiers JSON shape (--identifiers):
   "dbInstance": "onlineshop-postgres-db",
   "frontendBucket": "onlineshop-frontend-799111666795",
   "frontendLiveMarker": "release.json",
-  "frontendReleasesPrefix": "_releases/v",
+  "frontendReleasesPrefix": "_releases/",
   "cloudfrontDistributionId": "EPS8MI3FV3B7X"
 }
 All values are non-secret identifiers. "services" lists exactly three ECS
@@ -24,13 +24,13 @@ services list or the ecrRepositories map.
 from __future__ import annotations
 
 import argparse
-import re
 from datetime import UTC, datetime
 from pathlib import Path
 from uuid import uuid4
 
 from botocore.exceptions import ClientError
 
+from .. import live_marker
 from ..aws import context as aws_context
 from ..aws import (
     describe_db_instance,
@@ -45,7 +45,6 @@ from ..models import FrontendObservation, ProductionSnapshot, ReleaseIdentity, S
 from ..serialization import canonical_json, sha256_hex
 from ..validation import validate as validate_record
 
-_RELEASE_ID = re.compile(r"^release-\d{4}$")
 _SERVICE_KEYS = ("auth", "items", "gateway")
 
 
@@ -82,6 +81,7 @@ def snapshot_production(args: argparse.Namespace) -> int:
     bucket = ids["frontendBucket"]
     marker_key = ids["frontendLiveMarker"]
     marker = _read_marker(s3_client, bucket, marker_key)
+    release_id = live_marker.marker_release_id(marker)
     frontend = FrontendObservation(
         immutableIdentity=marker,
         liveMarker=marker_key,
@@ -104,7 +104,7 @@ def snapshot_production(args: argparse.Namespace) -> int:
             }
         ).encode()
     )
-    release_id = marker if _RELEASE_ID.fullmatch(marker) else None
+    release_id = live_marker.marker_release_id(marker)
     snapshot = ProductionSnapshot(
         snapshotId=f"snap-{uuid4().hex[:16]}",
         environment=ctx.environment,

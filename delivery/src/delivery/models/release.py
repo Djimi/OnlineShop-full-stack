@@ -29,12 +29,23 @@ class SbomAsset(StrictRecord):
     sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
 
 
+class SbomSet(StrictRecord):
+    """Pinned Syft-generated SPDX JSON identity + SHA-256 per component
+    (CT-REL-01 / SPEC §4.5.5): one asset for each of auth, items, gateway,
+    and frontend."""
+
+    auth: SbomAsset
+    items: SbomAsset
+    gateway: SbomAsset
+    frontend: SbomAsset
+
+
 class ReleaseArtifacts(StrictRecord):
     auth: ArtifactRef
     items: ArtifactRef
     gateway: ArtifactRef
     frontend: ReleaseFrontend
-    sbom: SbomAsset
+    sbom: SbomSet
 
 
 class StagingEvidence(StrictRecord):

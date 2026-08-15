@@ -14,6 +14,7 @@ from delivery.aws.ecs import (
     service_deployment,
     update_service,
     wait_for_deployment,
+    wait_for_running_digests,
 )
 from delivery.errors import (
     AbsentResourceError,
@@ -411,3 +412,74 @@ def test_wait_for_deployment_times_out():
     fake = FakeEcs(services={"auth": service})
     with pytest.raises(WaiterTimeoutError):
         _wait(fake, "dep-1")
+
+
+def test_wait_for_running_digests_accepts_multiple_tasks_on_expected_digest():
+    fake = FakeEcs(
+        services={"auth": _service()},
+        tasks={
+            "auth": [
+                _task("arn:...:task/1", DIGEST_A),
+                _task("arn:...:task/2", DIGEST_A),
+            ]
+        },
+    )
+    wait_for_running_digests(
+        fake, CLUSTER, SERVICE, DIGEST_A, timeout_seconds=1, interval_seconds=0.5
+    )
+
+
+def test_wait_for_running_digests_tolerates_transient_draining_overlap():
+    """OP-DEP-02: min-100%/max-200% overlap (new PRIMARY + old draining task)
+    is tolerated only while it drains; the accepted end state is {expected}."""
+
+    class ConvergingFakeEcs(FakeEcs):
+        def __init__(self):
+            super().__init__(services={"auth": _service()})
+            self.polls = 0
+
+        def list_tasks(self, cluster, serviceName):
+            self.polls += 1
+            if self.polls <= 1:
+                return {"taskArns": ["arn:...:task/1", "arn:...:task/2"]}
+            return {"taskArns": ["arn:...:task/1"]}
+
+        def describe_tasks(self, cluster, tasks):
+            known = {
+                "arn:...:task/1": _task("arn:...:task/1", DIGEST_A),
+                "arn:...:task/2": _task("arn:...:task/2", DIGEST_B),
+            }
+            return {"tasks": [known[task_arn] for task_arn in tasks]}
+
+    fake = ConvergingFakeEcs()
+    wait_for_running_digests(
+        fake, CLUSTER, SERVICE, DIGEST_A, timeout_seconds=2, interval_seconds=0.5
+    )
+    assert fake.polls >= 2
+
+
+def test_wait_for_running_digests_unknown_digest_always_fails():
+    fake = FakeEcs(
+        services={"auth": _service()},
+        tasks={"auth": [_task("arn:...:task/1", DIGEST_B)]},
+    )
+    with pytest.raises(MutationVerificationError, match="did not converge"):
+        wait_for_running_digests(
+            fake, CLUSTER, SERVICE, DIGEST_A, timeout_seconds=1, interval_seconds=0.5
+        )
+
+
+def test_wait_for_running_digests_mixed_unknown_digest_always_fails():
+    fake = FakeEcs(
+        services={"auth": _service()},
+        tasks={
+            "auth": [
+                _task("arn:...:task/1", DIGEST_A),
+                _task("arn:...:task/2", DIGEST_B),
+            ]
+        },
+    )
+    with pytest.raises(MutationVerificationError, match="did not converge"):
+        wait_for_running_digests(
+            fake, CLUSTER, SERVICE, DIGEST_A, timeout_seconds=1, interval_seconds=0.5
+        )

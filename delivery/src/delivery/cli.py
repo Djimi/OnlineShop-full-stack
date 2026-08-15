@@ -24,6 +24,7 @@ from .commands import (
     candidate,
     deploy,
     finalize,
+    promote,
     recover,
     retention,
     rollback,
@@ -41,7 +42,7 @@ _AWS_ENVIRONMENTS = ("production", "staging")
 _SERVICE_KEYS = ("auth", "items", "gateway")
 _RELEASE_ID_PATTERN = re.compile(r"^release-\d{4}$")
 _ACCOUNT_ID_PATTERN = re.compile(r"^\d{12}$")
-_STR_IDENTIFIER_KEYS = (
+_PRODUCTION_IDENTIFIER_KEYS = (
     "cluster",
     "dbInstance",
     "frontendBucket",
@@ -49,7 +50,25 @@ _STR_IDENTIFIER_KEYS = (
     "frontendReleasesPrefix",
     "cloudfrontDistributionId",
 )
-_IDENTIFIER_KEYS = frozenset(
+_PRODUCTION_ONLY_KEYS = (
+    "frontendBucket",
+    "frontendLiveMarker",
+    "frontendReleasesPrefix",
+    "cloudfrontDistributionId",
+)
+_STAGING_REQUIRED_STRING_KEYS = (
+    "cluster",
+    "dbInstance",
+    "albName",
+    "sqlRunnerFamily",
+    "sqlLogGroup",
+    "sqlSecurityGroup",
+    "executionRoleArn",
+    "compatFrontendBucket",
+    "compatFrontendReleasesPrefix",
+)
+_STAGING_OPTIONAL_STRING_KEYS = ("e2eBaseUrl", "targetGroupArn")
+_COMMON_IDENTIFIER_KEYS = frozenset(
     {
         "environment",
         "accountId",
@@ -57,10 +76,6 @@ _IDENTIFIER_KEYS = frozenset(
         "services",
         "ecrRepositories",
         "dbInstance",
-        "frontendBucket",
-        "frontendLiveMarker",
-        "frontendReleasesPrefix",
-        "cloudfrontDistributionId",
     }
 )
 
@@ -74,6 +89,7 @@ def main(argv: list[str] | None = None) -> int:
         return int(error.code)
     try:
         _validate_snapshot_environment(args)
+        _validate_staging_arguments(args)
         return int(args.func(args))
     except DeliveryError as error:
         print(f"ERROR {error.code}: {error}", file=sys.stderr)
@@ -87,8 +103,10 @@ def _validate_snapshot_environment(args: argparse.Namespace) -> None:
     """Require snapshot-consuming commands to carry a snapshot of the target environment."""
     command = getattr(args, "command", None)
     label = None
-    if command in ("deploy", "recover"):
+    if command in ("deploy", "recover", "finalize"):
         label = command
+    elif command == "promote" and getattr(args, "subcommand", None) == "preflight":
+        label = "promote preflight"
     elif command == "rollback" and getattr(args, "subcommand", None) == "execute":
         label = "rollback execute"
     if label is None:
@@ -118,6 +136,7 @@ def build_parser() -> argparse.ArgumentParser:
     _add_candidate(subparsers)
     _add_snapshot(subparsers)
     _add_staging(subparsers)
+    _add_promote(subparsers)
     _add_deploy(subparsers)
     _add_verify(subparsers)
     _add_finalize(subparsers)
@@ -127,8 +146,42 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _validate_staging_arguments(args: argparse.Namespace) -> None:
+    """Enforce the two-invocation lifecycle split at the CLI boundary."""
+    if (
+        getattr(args, "command", None) != "staging"
+        or getattr(args, "subcommand", None) != "lifecycle"
+    ):
+        return
+    if args.continue_lifecycle:
+        if args.candidate is not None or args.frontend_archive is not None:
+            raise ValidationError(
+                "--continue cannot be combined with --candidate or --frontend-archive"
+            )
+        if args.e2e_conclusion is None:
+            raise ValidationError("--continue requires --e2e-conclusion passed|failed")
+        if args.max_age_days is not None or args.e2e_url_out is not None:
+            raise ValidationError(
+                "--continue cannot be combined with --max-age-days or --e2e-url-out"
+            )
+    else:
+        if args.e2e_conclusion is not None:
+            raise ValidationError("--e2e-conclusion is only valid together with --continue")
+        if args.candidate is None or args.frontend_archive is None:
+            raise ValidationError(
+                "the first lifecycle invocation requires --candidate and --frontend-archive"
+            )
+
+
 def build_context(args: argparse.Namespace) -> AwsContext:
-    """Load and validate the identifiers JSON and return the AwsContext."""
+    """Load and validate the identifiers JSON and return the AwsContext.
+
+    Production identifiers keep the exact original required-key validation.
+    Staging identifiers validate the staging shape instead: the four
+    frontend/CloudFront keys are production-only and are rejected in staging
+    files; staging instead requires the ECS/RDS/ALB identifiers plus the
+    read-only compatibility-frontend location and the SQL runner identifiers.
+    """
     raw = _load_identifiers(args.identifiers)
     if raw["environment"] != args.environment:
         raise ValidationError(
@@ -138,13 +191,15 @@ def build_context(args: argparse.Namespace) -> AwsContext:
     account_id = raw["accountId"]
     if not isinstance(account_id, str) or not _ACCOUNT_ID_PATTERN.fullmatch(account_id):
         raise ValidationError("identifiers accountId must be a string of exactly 12 digits")
-    for key in _STR_IDENTIFIER_KEYS:
-        value = raw[key]
-        if not isinstance(value, str) or not value:
-            raise ValidationError(f"identifiers {key} must be a non-empty string")
+    if args.environment == "production":
+        _validate_production_identifiers(raw)
+    else:
+        _validate_staging_identifiers(raw)
     services = raw["services"]
-    if not isinstance(services, list) or not services or not all(
-        isinstance(service, str) and service for service in services
+    if (
+        not isinstance(services, list)
+        or not services
+        or not all(isinstance(service, str) and service for service in services)
     ):
         raise ValidationError("identifiers services must be a non-empty list of non-empty strings")
     repositories = raw["ecrRepositories"]
@@ -162,6 +217,42 @@ def build_context(args: argparse.Namespace) -> AwsContext:
     )
 
 
+def _validate_production_identifiers(raw: dict) -> None:
+    for key in _PRODUCTION_IDENTIFIER_KEYS:
+        value = raw.get(key)
+        if not isinstance(value, str) or not value:
+            raise ValidationError(f"identifiers {key} must be a non-empty string")
+
+
+def _validate_staging_identifiers(raw: dict) -> None:
+    forbidden = [key for key in _PRODUCTION_ONLY_KEYS if key in raw]
+    if forbidden:
+        raise ValidationError(
+            f"staging identifiers must not carry production-only keys: {', '.join(forbidden)}"
+        )
+    for key in _STAGING_REQUIRED_STRING_KEYS:
+        value = raw.get(key)
+        if not isinstance(value, str) or not value:
+            raise ValidationError(f"identifiers {key} must be a non-empty string")
+    for key in _STAGING_OPTIONAL_STRING_KEYS:
+        if key in raw and not isinstance(raw[key], str):
+            raise ValidationError(f"identifiers {key} must be a string when present")
+    db_secrets = raw.get("dbSecrets")
+    if not isinstance(db_secrets, dict) or sorted(db_secrets) != ["auth", "items"]:
+        raise ValidationError("identifiers dbSecrets must map auth and items")
+    if not all(isinstance(secret, str) and secret for secret in db_secrets.values()):
+        raise ValidationError("identifiers dbSecrets values must be non-empty strings")
+    subnets = raw.get("sqlSubnets")
+    if (
+        not isinstance(subnets, list)
+        or not subnets
+        or not all(isinstance(subnet, str) and subnet for subnet in subnets)
+    ):
+        raise ValidationError(
+            "identifiers sqlSubnets must be a non-empty list of non-empty strings"
+        )
+
+
 def _load_identifiers(path: str) -> dict:
     try:
         raw = json.loads(Path(path).read_text())
@@ -171,7 +262,7 @@ def _load_identifiers(path: str) -> dict:
         raise ValidationError(f"identifiers file {path} is not valid JSON: {error}") from error
     if not isinstance(raw, dict):
         raise ValidationError("identifiers file must contain a JSON object")
-    missing = sorted(_IDENTIFIER_KEYS - raw.keys())
+    missing = sorted(_COMMON_IDENTIFIER_KEYS - raw.keys())
     if missing:
         raise ValidationError(f"identifiers file missing keys: {', '.join(missing)}")
     return raw
@@ -288,19 +379,142 @@ def _add_staging(subparsers: argparse._SubParsersAction) -> None:
     sub = parser.add_subparsers(dest="subcommand", required=True, metavar="SUBCOMMAND")
     lifecycle = sub.add_parser("lifecycle", help="run the staging lifecycle")
     lifecycle.add_argument(
+        "--candidate", metavar="FILE", help="candidate manifest JSON file (first invocation)"
+    )
+    lifecycle.add_argument(
+        "--frontend-archive",
+        metavar="FILE",
+        help="candidate frontend archive (first invocation)",
+    )
+    lifecycle.add_argument(
+        "--continue",
+        dest="continue_lifecycle",
+        action="store_true",
+        help="resume from the record written by the first invocation",
+    )
+    lifecycle.add_argument(
+        "--e2e-conclusion",
+        choices=("passed", "failed"),
+        help="cloud E2E conclusion (required with --continue)",
+    )
+    lifecycle.add_argument(
+        "--e2e-url-out",
+        metavar="FILE",
+        help="write the resolved E2E base URL to FILE",
+    )
+    lifecycle.add_argument(
+        "--owner",
+        metavar="NAME",
+        help="staging operator identity recorded in the ownership marker",
+    )
+    lifecycle.add_argument(
+        "--max-age-days",
+        type=_positive_age,
+        metavar="DAYS",
+        help="reject candidates completed more than DAYS ago",
+    )
+    lifecycle.add_argument(
         "--out", required=True, metavar="FILE", help="output staging record JSON file"
     )
+    lifecycle.add_argument(
+        "--repo-path",
+        required=True,
+        metavar="DIR",
+        help="repository checkout containing the reset SQL sources "
+        "(scripts/sql/*.sql, Auth/init-db/*.sql, Items/init-db/*.sql)",
+    )
     _add_aws_flags(lifecycle)
-    lifecycle.set_defaults(func=staging.lifecycle)
+    lifecycle.set_defaults(func=staging.lifecycle, context_builder=build_context)
     apply = sub.add_parser("apply", help="apply a candidate to the staging environment")
     apply.add_argument(
         "--candidate", required=True, metavar="FILE", help="candidate manifest JSON file"
     )
     apply.add_argument(
+        "--max-age-days",
+        type=_positive_age,
+        metavar="DAYS",
+        help="reject candidates completed more than DAYS ago",
+    )
+    apply.add_argument(
+        "--owner",
+        metavar="NAME",
+        help="staging operator identity recorded in the staging record",
+    )
+    apply.add_argument(
         "--out", required=True, metavar="FILE", help="output staging record JSON file"
     )
+    apply.add_argument(
+        "--repo-path",
+        required=True,
+        metavar="DIR",
+        help="repository checkout containing the reset SQL sources",
+    )
     _add_aws_flags(apply)
-    apply.set_defaults(func=staging.apply)
+    apply.set_defaults(func=staging.apply, context_builder=build_context)
+    reconcile = sub.add_parser(
+        "reconcile", help="detect and stop ownerless running staging RDS (OP-STG-05)"
+    )
+    reconcile.add_argument(
+        "--out", required=True, metavar="FILE", help="output reconcile record JSON file"
+    )
+    _add_aws_flags(reconcile)
+    reconcile.set_defaults(func=staging.reconcile, context_builder=build_context)
+
+
+def _add_promote(subparsers: argparse._SubParsersAction) -> None:
+    parser = subparsers.add_parser("promote", help="production promotion operations")
+    sub = parser.add_subparsers(dest="subcommand", required=True, metavar="SUBCOMMAND")
+    preflight = sub.add_parser("preflight", help="read-only production promotion preflight")
+    preflight.add_argument(
+        "--candidate", required=True, metavar="FILE", help="candidate manifest JSON file"
+    )
+    preflight.add_argument(
+        "--frontend-archive",
+        required=True,
+        metavar="FILE",
+        help="candidate frontend archive file",
+    )
+    preflight.add_argument(
+        "--sbom-dir", required=True, metavar="DIR", help="candidate SBOM artifact directory"
+    )
+    preflight.add_argument(
+        "--staging-run",
+        required=True,
+        type=int,
+        metavar="RUN_ID",
+        help="exact staging workflow run whose staging-record artifact is the gate evidence",
+    )
+    preflight.add_argument(
+        "--snapshot", required=True, metavar="FILE", help="fresh production snapshot JSON file"
+    )
+    preflight.add_argument(
+        "--repo-path",
+        required=True,
+        metavar="DIR",
+        help="repository checkout for the OP-DB migration-ownership scan",
+    )
+    preflight.add_argument(
+        "--max-age-days",
+        type=_positive_age,
+        default=30,
+        metavar="DAYS",
+        help="reject candidates completed more than DAYS ago (default 30)",
+    )
+    preflight.add_argument(
+        "--previous-report",
+        metavar="FILE",
+        help="pre-approval preflight report for post-approval drift comparison",
+    )
+    preflight.add_argument(
+        "--staging-record-out",
+        metavar="FILE",
+        help="write the validated staging record to FILE (consumed by finalize)",
+    )
+    preflight.add_argument(
+        "--out", required=True, metavar="FILE", help="output preflight report JSON file"
+    )
+    _add_aws_flags(preflight)
+    preflight.set_defaults(func=promote.preflight, context_builder=build_context)
 
 
 def _add_deploy(subparsers: argparse._SubParsersAction) -> None:
@@ -324,40 +538,98 @@ def _add_deploy(subparsers: argparse._SubParsersAction) -> None:
         component.add_argument(
             "--dry-run", action="store_true", help="resolve and plan without mutating"
         )
+        if name == "frontend":
+            component.add_argument(
+                "--frontend-archive",
+                required=True,
+                metavar="FILE",
+                help="candidate frontend archive file",
+            )
+            component.add_argument(
+                "--out",
+                required=True,
+                metavar="FILE",
+                help="output frontend publish record JSON file",
+            )
         _add_aws_flags(component)
-        component.set_defaults(func=handler)
+        component.set_defaults(func=handler, context_builder=build_context)
 
 
 def _add_verify(subparsers: argparse._SubParsersAction) -> None:
     parser = subparsers.add_parser("verify", help="verify a deployed environment")
     sub = parser.add_subparsers(dest="subcommand", required=True, metavar="SUBCOMMAND")
-    production = sub.add_parser("production", help="verify production against an official manifest")
+    production = sub.add_parser("production", help="verify production read-only (CT-PROD)")
+    group = production.add_mutually_exclusive_group(required=True)
+    group.add_argument(
+        "--manifest", metavar="FILE", help="official release manifest JSON file"
+    )
+    group.add_argument("--candidate", metavar="FILE", help="candidate manifest JSON file")
     production.add_argument(
-        "--manifest", required=True, metavar="FILE", help="official release manifest JSON file"
+        "--out", required=True, metavar="FILE", help="output verification report JSON file"
     )
     _add_aws_flags(production)
-    production.set_defaults(func=verify.production)
+    production.set_defaults(func=verify.production, context_builder=build_context)
     staging = sub.add_parser("staging", help="verify staging against a candidate")
     staging.add_argument(
         "--candidate", required=True, metavar="FILE", help="candidate manifest JSON file"
     )
     _add_aws_flags(staging)
-    staging.set_defaults(func=verify.staging)
+    staging.set_defaults(func=verify.staging, context_builder=build_context)
 
 
 def _add_finalize(subparsers: argparse._SubParsersAction) -> None:
-    parser = subparsers.add_parser("finalize", help="finalize an approved release")
+    parser = subparsers.add_parser("finalize", help="finalize an approved release (OP-FIN)")
     parser.add_argument(
-        "--manifest", required=True, metavar="FILE", help="official release manifest JSON file"
+        "--candidate", required=True, metavar="FILE", help="candidate manifest JSON file"
     )
     parser.add_argument(
-        "--evidence-dir", required=True, metavar="DIR", help="candidate evidence directory"
+        "--snapshot",
+        required=True,
+        metavar="FILE",
+        help="pre-mutation production snapshot JSON file",
     )
     parser.add_argument(
-        "--dry-run", action="store_true", help="resolve and plan without mutating"
+        "--staging-record", required=True, metavar="FILE", help="validated staging record JSON file"
     )
+    parser.add_argument(
+        "--staging-record-identity",
+        required=True,
+        metavar="ID",
+        help="staging-record artifact identity (staging-record-<run>-<attempt>)",
+    )
+    parser.add_argument(
+        "--verification-report",
+        required=True,
+        metavar="FILE",
+        help="production verification report JSON file",
+    )
+    parser.add_argument(
+        "--approval", required=True, metavar="FILE", help="approval evidence JSON file"
+    )
+    parser.add_argument(
+        "--frontend-publish",
+        required=True,
+        metavar="FILE",
+        help="frontend publish record JSON file from deploy frontend",
+    )
+    parser.add_argument(
+        "--frontend-archive", required=True, metavar="FILE", help="candidate frontend archive file"
+    )
+    parser.add_argument(
+        "--sbom-dir", required=True, metavar="DIR", help="candidate SBOM artifact directory"
+    )
+    parser.add_argument(
+        "--manifest",
+        required=True,
+        metavar="FILE",
+        help="official release manifest JSON file (output; exact-resume input)",
+    )
+    parser.add_argument(
+        "--out", required=True, metavar="FILE", help="output finalization report JSON file"
+    )
+    parser.add_argument("--dry-run", action="store_true", help="resolve and plan without mutating")
     _add_aws_flags(parser)
-    parser.set_defaults(func=finalize.finalize)
+    parser.set_defaults(func=finalize.finalize, context_builder=build_context)
 
 
 def _add_recover(subparsers: argparse._SubParsersAction) -> None:
@@ -371,9 +643,7 @@ def _add_recover(subparsers: argparse._SubParsersAction) -> None:
     parser.add_argument(
         "--changed", required=True, metavar="FILE", help="JSON array of changed component names"
     )
-    parser.add_argument(
-        "--dry-run", action="store_true", help="resolve and plan without mutating"
-    )
+    parser.add_argument("--dry-run", action="store_true", help="resolve and plan without mutating")
     _add_aws_flags(parser)
     parser.set_defaults(func=recover.recover)
 
@@ -410,9 +680,7 @@ def _add_rollback(subparsers: argparse._SubParsersAction) -> None:
         metavar="FILE",
         help="pre-rollback production snapshot JSON file",
     )
-    execute.add_argument(
-        "--dry-run", action="store_true", help="resolve and plan without mutating"
-    )
+    execute.add_argument("--dry-run", action="store_true", help="resolve and plan without mutating")
     _add_aws_flags(execute)
     execute.set_defaults(func=rollback.execute)
 

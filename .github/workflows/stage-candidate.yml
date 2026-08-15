@@ -1,0 +1,246 @@
+name: Stage Candidate
+
+# Feature staging is explicit, never push-triggered (AD-08). The only inputs
+# are the exact candidate run id and attempt (AD-05); digests, tags, ARNs, and
+# manifests are never entered by hand.
+on:
+  workflow_dispatch:
+    inputs:
+      candidate_run_id:
+        description: 'Workflow run id of the complete candidate'
+        required: true
+      candidate_run_attempt:
+        description: 'Workflow run attempt of the complete candidate'
+        required: true
+
+permissions:
+  contents: read
+
+env:
+  AWS_REGION: eu-north-1
+  AWS_ROLE_ARN_STAGING: arn:aws:iam::799111666795:role/github-actions-staging
+  MAX_AGE_DAYS: '30'
+
+jobs:
+  stage:
+    runs-on: ubuntu-latest
+    # OP-STG-03/04: 90 minutes covers the engine's worst-case bounded lifecycle
+    # (RDS start/stop, SQL reset steps, service scaling and deployments) plus
+    # headroom, so a hard kill can never strand a still-valid ownership marker
+    # (TTL 3h) with reconcile inert and RDS left running.
+    timeout-minutes: 90
+    # AD-09 / OP-GEN-01: one queued, non-canceling repository concurrency group
+    # for ALL staging mutation. Queue order is not guaranteed; fresh state is
+    # revalidated after acquisition (the ownership marker, D1).
+    concurrency:
+      group: staging
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      id-token: write
+      actions: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      # Untrusted workflow_dispatch inputs travel through step env and are
+      # regex-validated before any use; they are never interpolated raw.
+      - name: Validate dispatch inputs
+        env:
+          CANDIDATE_RUN_ID: ${{ github.event.inputs.candidate_run_id }}
+          CANDIDATE_RUN_ATTEMPT: ${{ github.event.inputs.candidate_run_attempt }}
+        run: |
+          set -euo pipefail
+          [[ "$CANDIDATE_RUN_ID" =~ ^[0-9]+$ ]] || { echo "ERROR: candidate_run_id must be digits only" >&2; exit 1; }
+          [[ "$CANDIDATE_RUN_ATTEMPT" =~ ^[0-9]+$ ]] || { echo "ERROR: candidate_run_attempt must be digits only" >&2; exit 1; }
+
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: '3.12'
+
+      - name: Install delivery package
+        run: python -m pip install --disable-pip-version-check -q ./delivery
+
+      # CT-CAND-03: the exact run/attempt owns all four artifacts; a missing
+      # artifact is a hard failure, never a silent partial candidate. Artifact
+      # names embed the run id AND attempt, so downloading by exact name is
+      # attempt-exact; the staging lifecycle additionally revalidates the
+      # exact run/attempt through the GitHub API before any mutation.
+      - name: Download candidate manifest
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: candidate-manifest-${{ github.event.inputs.candidate_run_id }}-${{ github.event.inputs.candidate_run_attempt }}
+          path: candidate
+          run-id: ${{ github.event.inputs.candidate_run_id }}
+          github-token: ${{ github.token }}
+
+      - name: Download frontend archive
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: frontend-archive-${{ github.event.inputs.candidate_run_id }}-${{ github.event.inputs.candidate_run_attempt }}
+          path: candidate
+          run-id: ${{ github.event.inputs.candidate_run_id }}
+          github-token: ${{ github.token }}
+
+      - name: Download SBOMs
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: sboms-${{ github.event.inputs.candidate_run_id }}-${{ github.event.inputs.candidate_run_attempt }}
+          path: candidate/sboms
+          run-id: ${{ github.event.inputs.candidate_run_id }}
+          github-token: ${{ github.token }}
+
+      - name: Download test results
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: test-results-${{ github.event.inputs.candidate_run_id }}-${{ github.event.inputs.candidate_run_attempt }}
+          path: candidate/test-results
+          run-id: ${{ github.event.inputs.candidate_run_id }}
+          github-token: ${{ github.token }}
+
+      - name: Validate candidate manifest
+        env:
+          MAX_AGE_DAYS: ${{ env.MAX_AGE_DAYS }}
+        run: |
+          set -euo pipefail
+          python -m delivery.cli candidate validate \
+            --manifest candidate/candidate-manifest.json \
+            --max-age-days "$MAX_AGE_DAYS"
+
+      # Byte identity of the candidate frontend: archive digest and extracted
+      # content checksum must both match the manifest (CT-CAND-01).
+      - name: Verify frontend archive identity
+        run: |
+          set -euo pipefail
+          TAR_DIGEST="sha256:$(sha256sum candidate/frontend.tar | cut -d' ' -f1)"
+          EXPECTED_DIGEST=$(jq -r '.artifacts.frontend.artifactDigest' candidate/candidate-manifest.json)
+          [[ "$TAR_DIGEST" == "$EXPECTED_DIGEST" ]] || {
+            echo "ERROR: frontend archive digest $TAR_DIGEST != manifest $EXPECTED_DIGEST" >&2
+            exit 1
+          }
+          mkdir -p candidate/frontend-dist
+          tar -xf candidate/frontend.tar -C candidate/frontend-dist
+          CONTENT_CHECKSUM=$(cd candidate/frontend-dist && find . -type f -print0 | sort -z | xargs -0 sha256sum | sha256sum | cut -d' ' -f1)
+          EXPECTED_CHECKSUM=$(jq -r '.artifacts.frontend.contentChecksum' candidate/candidate-manifest.json)
+          [[ "$CONTENT_CHECKSUM" == "$EXPECTED_CHECKSUM" ]] || {
+            echo "ERROR: frontend content checksum $CONTENT_CHECKSUM != manifest $EXPECTED_CHECKSUM" >&2
+            exit 1
+          }
+          echo "frontend archive identity verified"
+
+      # Staging Deployer role only (AD-17); never the legacy or production roles.
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4.3.1
+        with:
+          role-to-assume: ${{ env.AWS_ROLE_ARN_STAGING }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      # Invocation 1: QUEUED -> OWNED -> STARTING -> RESETTING -> DEPLOYING ->
+      # COMPATIBILITY -> E2E-prepared. The environment stays owned by this
+      # run/attempt; the record is visibility only (CT-STG-02), the RDS
+      # ownership marker (D1) is the live ownership proof.
+      - name: Stage the candidate (prepare environment)
+        env:
+          WORKFLOW_ACTOR: ${{ github.actor }}
+          GITHUB_TOKEN: ${{ github.token }}
+          MAX_AGE_DAYS: ${{ env.MAX_AGE_DAYS }}
+        run: |
+          set -euo pipefail
+          [[ "$WORKFLOW_ACTOR" =~ ^[A-Za-z0-9@._-]{1,64}$ ]] || { echo "ERROR: unsafe actor value" >&2; exit 1; }
+          python -m delivery.cli staging lifecycle \
+            --candidate candidate/candidate-manifest.json \
+            --frontend-archive candidate/frontend.tar \
+            --owner "$WORKFLOW_ACTOR" \
+            --max-age-days "$MAX_AGE_DAYS" \
+            --environment staging \
+            --repo-path "$GITHUB_WORKSPACE" \
+            --identifiers scripts/config/staging-identifiers.json \
+            --out staging-record.json \
+            --e2e-url-out e2e-url.txt
+
+      # VR-SEC-02: GITHUB_OUTPUT is written with the multiline-delimiter form;
+      # no key=value echo path exists that a hostile value could inject into.
+      - name: Read E2E base URL
+        id: e2e-url
+        run: |
+          set -euo pipefail
+          E2E_BASE_URL="$(cat e2e-url.txt)"
+          [[ "$E2E_BASE_URL" =~ ^https?:// ]] || { echo "ERROR: invalid E2E URL" >&2; exit 1; }
+          {
+            echo "base_url<<EOF"
+            echo "$E2E_BASE_URL"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      # Cloud E2E: the existing RestAssured suite against the staging ALB.
+      # Mutating E2E is staging-only (AD-12 / VR-GEN-03).
+      - name: Set up Java
+        uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4.9.1
+        with:
+          java-version: '25'
+          distribution: temurin
+
+      - name: Run cloud E2E suite
+        if: steps.e2e-url.outputs.base_url != ''
+        working-directory: e2e-tests
+        env:
+          E2E_BASE_URL: ${{ steps.e2e-url.outputs.base_url }}
+        run: chmod +x mvnw && ./mvnw clean test
+
+      # Invocation 2: record the real E2E conclusion, stop services/RDS,
+      # verify cleanup, release the marker, complete the record.
+      # A failed E2E conclusion or a failed cleanup makes the job fail; the
+      # record still carries the truthful conclusions (OP-STG-04). When the
+      # first invocation already failed, its failure path has cleaned up and
+      # written the record, so the continuation is skipped here.
+      - name: Complete the staging lifecycle
+        if: always()
+        env:
+          JOB_STATUS: ${{ job.status }}
+        run: |
+          set -euo pipefail
+          if [ ! -f staging-record.json ]; then
+            echo "staging record was not written; nothing to continue"
+            exit 0
+          fi
+          PHASE="$(jq -r '.phase // empty' staging-record.json)"
+          if [ "$PHASE" != "E2E" ]; then
+            echo "record phase is '$PHASE'; the first invocation already handled failure and cleanup"
+            exit 0
+          fi
+          if [ "$JOB_STATUS" = "success" ]; then
+            E2E_CONCLUSION="passed"
+          else
+            E2E_CONCLUSION="failed"
+          fi
+          python -m delivery.cli staging lifecycle \
+            --continue \
+            --e2e-conclusion "$E2E_CONCLUSION" \
+            --environment staging \
+            --repo-path "$GITHUB_WORKSPACE" \
+            --identifiers scripts/config/staging-identifiers.json \
+            --out staging-record.json
+
+      - name: Upload staging record and diagnostics
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: staging-record-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            staging-record.json
+            staging-record.json.diagnostics.json
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Print record conclusions
+        if: always()
+        run: |
+          set -euo pipefail
+          if [ -f staging-record.json ]; then
+            jq -e '{candidate: .candidate.candidateId, phase: .phase, compatibility: .compatibility.conclusion, e2e: .e2e.conclusion, cleanup: .cleanup.conclusion, failure: .failure}' staging-record.json
+          else
+            echo "staging record was not written"
+          fi

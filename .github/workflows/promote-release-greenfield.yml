@@ -1,0 +1,505 @@
+name: Promote Release to Production (Greenfield)
+
+# Phase 5 production promotion (OP-PRO-01). Bring-up name: this file is named
+# promote-release-greenfield.yml until cutover, when the legacy
+# promote-release.yml is removed and this file is renamed to promote-release.yml
+# (OP-CUT-02). workflow_dispatch only — production intent is never push-implied
+# (AD-10); the dispatch inputs are stable and exact: candidate run id + attempt
+# and the staging run id. Digests, tags, ARNs, manifests, and URLs are never
+# entered by hand (D2).
+#
+# Control plane (AD-10 / OP-PRO-01/02):
+#   - job A `preflight` is read-only and runs BEFORE approval: it validates the
+#     inputs, downloads the candidate artifacts of the exact run/attempt, runs
+#     the engine preflight (candidate eligibility, exact staging gate, ECR
+#     digests, production snapshot, AD-11 newer-candidate warning, OP-DB gate)
+#     and prints the approval summary with the exact SHA.
+#   - job B `promote` sits behind the protected `production` Environment
+#     (owner-only required reviewer), shares the queued non-canceling
+#     `production` concurrency group, and repeats the FULL preflight against a
+#     FRESH snapshot after approval/lock acquisition; the preflight report's
+#     approval identity must match job A's byte for byte (post-approval drift
+#     aborts before mutation). `approvedBy` is derived from the environment
+#     approval evidence (actions/runs/{run}/approvals), never github.actor.
+#
+# OP-CUT-01 bring-up guard: while the legacy promote-release.yml OR
+# rollback-release.yml still declares its production-mutating path, both jobs
+# refuse with exit 1 BEFORE any AWS credentials are used, so the legacy and
+# greenfield paths can never mutate production concurrently. The legacy
+# rollback workflow holds the `production-mutation` concurrency group, which
+# does NOT serialize with this workflow's `production` group — hence both
+# legacy files are refused. REMOVE THE GUARD STEPS AT CUTOVER together with
+# the legacy workflows. (A "disabled" workflow state is not locally
+# observable; the guard is fail-closed: remove or empty the legacy files to
+# proceed.)
+#
+# Failure honesty (D7): there is NO automatic compensation here. On a
+# post-mutation failure the promote job fails with the pre-mutation snapshot,
+# preflight reports, verification report, and finalization evidence uploaded
+# as artifacts (retention 14 days) for Phase 6 recovery/rollback to consume.
+# The database is never mutated and never reversed by this system.
+on:
+  workflow_dispatch:
+    inputs:
+      candidate_run_id:
+        description: 'Workflow run id of the complete main candidate'
+        required: true
+      candidate_run_attempt:
+        description: 'Workflow run attempt of the complete main candidate'
+        required: true
+      staging_run_id:
+        description: 'Staging workflow run id whose staging-record artifact is the gate evidence'
+        required: true
+
+permissions:
+  contents: read
+
+env:
+  AWS_REGION: eu-north-1
+  # AD-17 job-scoped role boundaries: the unapproved read-only `preflight`
+  # job must never hold the full production Deployer role, and the mutation
+  # job must never hold the read-only one.
+  # - AWS_ROLE_ARN_PRODUCTION: the full production Deployer role. Assumed
+  #   ONLY by the `promote` job (the single mutation-capable job, behind the
+  #   protected `production` Environment).
+  # - PRODUCTION_PREFLIGHT_ROLE_ARN: the read-only preflight role, assumed
+  #   ONLY by the unapproved `preflight` job. The live pass creates
+  #   github-actions-production-preflight with EXACTLY this policy scope so
+  #   it can be implemented as documented here:
+  #   read-only: ecs describe*, ecr batch-get-image/describe*, s3 get-object
+  #   on the frontend bucket, rds describe*, elb describe*, cloudfront get*;
+  #   ZERO mutation actions (no ecs update-service, no ecr put-image, no
+  #   s3 put-object, no secrets, no deploy finalization).
+  AWS_ROLE_ARN_PRODUCTION: arn:aws:iam::799111666795:role/github-actions-production
+  PRODUCTION_PREFLIGHT_ROLE_ARN: arn:aws:iam::799111666795:role/github-actions-production-preflight
+  MAX_AGE_DAYS: '30'
+
+jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    # Read-only pre-approval job: does NOT hold the production concurrency
+    # group (D5) and has no protected environment. id-token: write is used
+    # only for the read-only AWS scope (snapshot + ECR revalidation).
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      actions: read
+      id-token: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      # OP-CUT-01 / AD-18 bring-up guard (REMOVE AT CUTOVER): refuse before
+      # any AWS credentials while either legacy production-mutation workflow
+      # still exists. The legacy rollback-release.yml holds the
+      # `production-mutation` concurrency group, which does NOT serialize
+      # with this workflow's `production` group, so its mutation path is
+      # refused here too.
+      # Marker choice: each legacy workflow's mutation entry point —
+      # promote-release.yml invokes finalize-release.sh and
+      # rollback-release.yml invokes deploy-rollback.sh (the rollback analog
+      # of finalize-release.sh). `production-mutation` was deliberately NOT
+      # used as the rollback marker: it is a concurrency-group name that
+      # could be renamed without removing the mutation capability, whereas
+      # the invoked mutation script is the stable indicator of the path.
+      - name: 'Bring-up guard: refuse while a legacy production-mutation path is active'
+        run: |
+          set -euo pipefail
+          LEGACY_PROMOTE_WORKFLOW=".github/workflows/promote-release.yml"
+          LEGACY_ROLLBACK_WORKFLOW=".github/workflows/rollback-release.yml"
+          if [ -f "$LEGACY_PROMOTE_WORKFLOW" ] && grep -q -F -- 'finalize-release.sh' "$LEGACY_PROMOTE_WORKFLOW"; then
+            echo "ERROR: the legacy promote-release.yml production-mutation path is still present" >&2
+            echo "Old and new must never mutate production concurrently (OP-CUT-01)." >&2
+            echo "No AWS credentials were used; nothing was mutated." >&2
+            exit 1
+          fi
+          if [ -f "$LEGACY_ROLLBACK_WORKFLOW" ] && grep -q -F -- 'deploy-rollback.sh' "$LEGACY_ROLLBACK_WORKFLOW"; then
+            echo "ERROR: the legacy rollback-release.yml production-mutation path is still present" >&2
+            echo "Its production-mutation concurrency group does not serialize with the greenfield production group (OP-CUT-01)." >&2
+            echo "No AWS credentials were used; nothing was mutated." >&2
+            exit 1
+          fi
+          echo "legacy production-mutation paths inactive; preflight proceeds"
+
+      # Untrusted workflow_dispatch inputs travel through step env and are
+      # regex-validated before any use; they are never interpolated raw.
+      - name: Validate dispatch inputs
+        env:
+          CANDIDATE_RUN_ID: ${{ github.event.inputs.candidate_run_id }}
+          CANDIDATE_RUN_ATTEMPT: ${{ github.event.inputs.candidate_run_attempt }}
+          STAGING_RUN_ID: ${{ github.event.inputs.staging_run_id }}
+        run: |
+          set -euo pipefail
+          [[ "$CANDIDATE_RUN_ID" =~ ^[0-9]+$ ]] || { echo "ERROR: candidate_run_id must be digits only" >&2; exit 1; }
+          [[ "$CANDIDATE_RUN_ATTEMPT" =~ ^[0-9]+$ ]] || { echo "ERROR: candidate_run_attempt must be digits only" >&2; exit 1; }
+          [[ "$STAGING_RUN_ID" =~ ^[0-9]+$ ]] || { echo "ERROR: staging_run_id must be digits only" >&2; exit 1; }
+
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: '3.12'
+
+      - name: Install delivery package
+        run: python -m pip install --disable-pip-version-check -q ./delivery
+
+      # Candidate artifacts of the exact run/attempt. The engine additionally
+      # revalidates the full four-artifact set through the GitHub API
+      # (CT-CAND-03), so test-results does not need to be downloaded here.
+      - name: Download candidate manifest
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: candidate-manifest-${{ github.event.inputs.candidate_run_id }}-${{ github.event.inputs.candidate_run_attempt }}
+          path: candidate
+          run-id: ${{ github.event.inputs.candidate_run_id }}
+          github-token: ${{ github.token }}
+
+      - name: Download frontend archive
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: frontend-archive-${{ github.event.inputs.candidate_run_id }}-${{ github.event.inputs.candidate_run_attempt }}
+          path: candidate
+          run-id: ${{ github.event.inputs.candidate_run_id }}
+          github-token: ${{ github.token }}
+
+      - name: Download SBOMs
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: sboms-${{ github.event.inputs.candidate_run_id }}-${{ github.event.inputs.candidate_run_attempt }}
+          path: candidate/sboms
+          run-id: ${{ github.event.inputs.candidate_run_id }}
+          github-token: ${{ github.token }}
+
+      # AD-17: the unapproved preflight is read-only and must never hold the
+      # full production Deployer role. It assumes the dedicated read-only
+      # preflight role (see the PRODUCTION_PREFLIGHT_ROLE_ARN env comment for
+      # the exact policy scope; zero mutation actions). The promote job is
+      # the only consumer of AWS_ROLE_ARN_PRODUCTION.
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4.3.1
+        with:
+          role-to-assume: ${{ env.PRODUCTION_PREFLIGHT_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Capture the read-only production snapshot
+        run: |
+          set -euo pipefail
+          python -m delivery.cli snapshot production \
+            --environment production \
+            --identifiers scripts/config/production-identifiers.json \
+            --out production-snapshot.json
+
+      # The staging record is downloaded by the ENGINE from the exact staging
+      # run (artifact name staging-record-<run>-<attempt>; the attempt is
+      # resolved from the authoritative run object), never by hand (D2).
+      - name: Run the read-only promotion preflight
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          STAGING_RUN_ID: ${{ github.event.inputs.staging_run_id }}
+          MAX_AGE_DAYS: ${{ env.MAX_AGE_DAYS }}
+        run: |
+          set -euo pipefail
+          python -m delivery.cli promote preflight \
+            --candidate candidate/candidate-manifest.json \
+            --frontend-archive candidate/frontend.tar \
+            --sbom-dir candidate/sboms \
+            --staging-run "$STAGING_RUN_ID" \
+            --snapshot production-snapshot.json \
+            --repo-path "$GITHUB_WORKSPACE" \
+            --max-age-days "$MAX_AGE_DAYS" \
+            --environment production \
+            --identifiers scripts/config/production-identifiers.json \
+            --out preflight-report.json \
+            --staging-record-out staging-record.json
+
+      - name: Print the approval summary
+        run: jq -r '.approvalSummary' preflight-report.json
+
+      - name: Upload preflight report and staging record
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: preflight-report-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            preflight-report.json
+            production-snapshot.json
+            staging-record.json
+          if-no-files-found: warn
+          retention-days: 14
+
+  promote:
+    needs: preflight
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    # AD-10 / OP-GEN-01: one queued, non-canceling production mutation group.
+    # The preflight job does NOT hold it; only this job mutates production.
+    concurrency:
+      group: production
+      cancel-in-progress: false
+    # AD-10: the protected `production` Environment requires owner approval.
+    environment:
+      name: production
+    permissions:
+      contents: write
+      actions: read
+      deployments: read
+      id-token: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      # OP-CUT-01 / AD-18 bring-up guard (REMOVE AT CUTOVER): same refusal as
+      # the preflight job (promotion AND legacy rollback mutation paths,
+      # `finalize-release.sh` and `deploy-rollback.sh` markers — see the
+      # preflight job comment for the marker choice), re-checked under the
+      # lock.
+      - name: 'Bring-up guard: refuse while a legacy production-mutation path is active'
+        run: |
+          set -euo pipefail
+          LEGACY_PROMOTE_WORKFLOW=".github/workflows/promote-release.yml"
+          LEGACY_ROLLBACK_WORKFLOW=".github/workflows/rollback-release.yml"
+          if [ -f "$LEGACY_PROMOTE_WORKFLOW" ] && grep -q -F -- 'finalize-release.sh' "$LEGACY_PROMOTE_WORKFLOW"; then
+            echo "ERROR: the legacy promote-release.yml production-mutation path is still present" >&2
+            echo "Old and new must never mutate production concurrently (OP-CUT-01)." >&2
+            echo "No AWS credentials were used; nothing was mutated." >&2
+            exit 1
+          fi
+          if [ -f "$LEGACY_ROLLBACK_WORKFLOW" ] && grep -q -F -- 'deploy-rollback.sh' "$LEGACY_ROLLBACK_WORKFLOW"; then
+            echo "ERROR: the legacy rollback-release.yml production-mutation path is still present" >&2
+            echo "Its production-mutation concurrency group does not serialize with the greenfield production group (OP-CUT-01)." >&2
+            echo "No AWS credentials were used; nothing was mutated." >&2
+            exit 1
+          fi
+          echo "legacy production-mutation paths inactive; promote proceeds"
+
+      - name: Validate dispatch inputs
+        env:
+          CANDIDATE_RUN_ID: ${{ github.event.inputs.candidate_run_id }}
+          CANDIDATE_RUN_ATTEMPT: ${{ github.event.inputs.candidate_run_attempt }}
+          STAGING_RUN_ID: ${{ github.event.inputs.staging_run_id }}
+        run: |
+          set -euo pipefail
+          [[ "$CANDIDATE_RUN_ID" =~ ^[0-9]+$ ]] || { echo "ERROR: candidate_run_id must be digits only" >&2; exit 1; }
+          [[ "$CANDIDATE_RUN_ATTEMPT" =~ ^[0-9]+$ ]] || { echo "ERROR: candidate_run_attempt must be digits only" >&2; exit 1; }
+          [[ "$STAGING_RUN_ID" =~ ^[0-9]+$ ]] || { echo "ERROR: staging_run_id must be digits only" >&2; exit 1; }
+
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: '3.12'
+
+      - name: Install delivery package
+        run: python -m pip install --disable-pip-version-check -q ./delivery
+
+      - name: Download candidate manifest
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: candidate-manifest-${{ github.event.inputs.candidate_run_id }}-${{ github.event.inputs.candidate_run_attempt }}
+          path: candidate
+          run-id: ${{ github.event.inputs.candidate_run_id }}
+          github-token: ${{ github.token }}
+
+      - name: Download frontend archive
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: frontend-archive-${{ github.event.inputs.candidate_run_id }}-${{ github.event.inputs.candidate_run_attempt }}
+          path: candidate
+          run-id: ${{ github.event.inputs.candidate_run_id }}
+          github-token: ${{ github.token }}
+
+      - name: Download SBOMs
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: sboms-${{ github.event.inputs.candidate_run_id }}-${{ github.event.inputs.candidate_run_attempt }}
+          path: candidate/sboms
+          run-id: ${{ github.event.inputs.candidate_run_id }}
+          github-token: ${{ github.token }}
+
+      - name: Download the pre-approval preflight report
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: preflight-report-${{ github.run_id }}-${{ github.run_attempt }}
+          path: preflight
+          run-id: ${{ github.run_id }}
+          github-token: ${{ github.token }}
+
+      # AD-17: the approved mutation job is the only consumer of the full
+      # production Deployer role (AWS_ROLE_ARN_PRODUCTION); it never uses
+      # the read-only preflight role.
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4.3.1
+        with:
+          role-to-assume: ${{ env.AWS_ROLE_ARN_PRODUCTION }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      # OP-PRO-02/03: fresh snapshot under the lock, then the FULL preflight
+      # against fresh state. --previous-report proves the approved state did
+      # not drift; any change aborts before mutation.
+      - name: Capture the pre-mutation production snapshot
+        run: |
+          set -euo pipefail
+          python -m delivery.cli snapshot production \
+            --environment production \
+            --identifiers scripts/config/production-identifiers.json \
+            --out production-snapshot.json
+
+      - name: Repeat the full preflight after approval and lock
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          STAGING_RUN_ID: ${{ github.event.inputs.staging_run_id }}
+          MAX_AGE_DAYS: ${{ env.MAX_AGE_DAYS }}
+        run: |
+          set -euo pipefail
+          python -m delivery.cli promote preflight \
+            --candidate candidate/candidate-manifest.json \
+            --frontend-archive candidate/frontend.tar \
+            --sbom-dir candidate/sboms \
+            --staging-run "$STAGING_RUN_ID" \
+            --snapshot production-snapshot.json \
+            --repo-path "$GITHUB_WORKSPACE" \
+            --max-age-days "$MAX_AGE_DAYS" \
+            --previous-report preflight/preflight-report.json \
+            --environment production \
+            --identifiers scripts/config/production-identifiers.json \
+            --out preflight-report.json \
+            --staging-record-out staging-record.json
+
+      # OP-DEP-01: Auth + Items first (both register/update before either
+      # waits), then the gateway, then the frontend last.
+      - name: Deploy backends (Auth + Items)
+        run: |
+          set -euo pipefail
+          python -m delivery.cli deploy backends \
+            --candidate candidate/candidate-manifest.json \
+            --snapshot production-snapshot.json \
+            --environment production \
+            --identifiers scripts/config/production-identifiers.json
+
+      - name: Deploy API Gateway
+        run: |
+          set -euo pipefail
+          python -m delivery.cli deploy gateway \
+            --candidate candidate/candidate-manifest.json \
+            --snapshot production-snapshot.json \
+            --environment production \
+            --identifiers scripts/config/production-identifiers.json
+
+      # OP-DEP-03: immutable prefix first, checksum proven BEFORE the live
+      # switch, live marker names the CANDIDATE (not an unfinalized release).
+      - name: Deploy frontend (immutable prefix + live switch)
+        run: |
+          set -euo pipefail
+          python -m delivery.cli deploy frontend \
+            --candidate candidate/candidate-manifest.json \
+            --snapshot production-snapshot.json \
+            --frontend-archive candidate/frontend.tar \
+            --environment production \
+            --identifiers scripts/config/production-identifiers.json \
+            --out frontend-publish.json
+
+      # OP-DEP-04 / CT-PROD-01..04: read-only observed verification before
+      # official finalization (AD-06). No business-data mutation exists here.
+      - name: Verify production read-only
+        run: |
+          set -euo pipefail
+          python -m delivery.cli verify production \
+            --candidate candidate/candidate-manifest.json \
+            --environment production \
+            --identifiers scripts/config/production-identifiers.json \
+            --out verification-report.json
+
+      # approvedBy AND approvedAt are derived from the environment-approval
+      # evidence (actions/runs/{run}/approvals), never from github.actor or
+      # user input, and approvedAt is never the runner clock (AD-10 /
+      # CT-AUDIT-01). The matching approved production review carries the
+      # approval timestamp as approved_at (falling back to created_at when
+      # approved_at is absent from the API answer); both logins and the
+      # timestamp are strictly validated before the JSON is written, and the
+      # step fails closed when the API answer carries no non-empty ISO-8601
+      # timestamp. `date` is never called here.
+      - name: Resolve the environment approver and approval timestamp
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          RUN_ACTOR: ${{ github.actor }}
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          [[ "$RUN_ACTOR" =~ ^[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?$ ]] || { echo "ERROR: invalid actor login" >&2; exit 1; }
+          APPROVAL_EVENT=$(gh api "repos/$REPOSITORY/actions/runs/$RUN_ID/approvals" \
+            --jq '[.[] | select(.state == "approved") | select((.environments // []) | any(.name == "production"))] | if length == 0 then error("no approved production environment review") else .[0] end')
+          APPROVED_BY=$(printf '%s' "$APPROVAL_EVENT" | jq -r '.user.login // empty')
+          [[ "$APPROVED_BY" =~ ^[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?$ ]] || { echo "ERROR: invalid approver login" >&2; exit 1; }
+          APPROVED_AT=$(printf '%s' "$APPROVAL_EVENT" | jq -r '.approved_at // .created_at // empty')
+          [[ "$APPROVED_AT" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$ ]] || {
+            echo "ERROR: the approved production review carries no valid ISO-8601 approval timestamp" >&2
+            exit 1
+          }
+          jq -n \
+            --arg approver "$APPROVED_BY" \
+            --arg requester "$RUN_ACTOR" \
+            --arg workflowUrl "https://github.com/$REPOSITORY/actions/runs/$RUN_ID" \
+            --arg approvedAt "$APPROVED_AT" \
+            '{schemaVersion: "1.0", approver: $approver, requester: $requester, workflowUrl: $workflowUrl, approvedAt: $approvedAt}' \
+            > approval-evidence.json
+          jq -e '.approver != "" and .requester != "" and .approvedAt != ""' approval-evidence.json >/dev/null
+
+      # OP-FIN-01: allocate release-NNNN, mint ECR release tags from recorded
+      # bytes, protect the immutable frontend, prepare the CT-REL manifest,
+      # switch to the official marker, publish the GitHub Release with the
+      # manifest + 4 pinned SBOMs, audit the rollback window. Exact-match
+      # resume for partial finalization (OP-FIN-02); a mismatch fails closed.
+      - name: Finalize the official release
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          STAGING_IDENTITY=$(jq -r '.stagingGate.evidenceIdentity' preflight-report.json)
+          python -m delivery.cli finalize \
+            --candidate candidate/candidate-manifest.json \
+            --snapshot production-snapshot.json \
+            --staging-record staging-record.json \
+            --staging-record-identity "$STAGING_IDENTITY" \
+            --verification-report verification-report.json \
+            --approval approval-evidence.json \
+            --frontend-publish frontend-publish.json \
+            --frontend-archive candidate/frontend.tar \
+            --sbom-dir candidate/sboms \
+            --manifest release-manifest.json \
+            --environment production \
+            --identifiers scripts/config/production-identifiers.json \
+            --out finalize-report.json
+
+      # D7 failure honesty: on any failure the pre-mutation snapshot and every
+      # evidence file are preserved (>= 14 days) for Phase 6 recovery/rollback.
+      # There is NO automatic compensation in Phase 5 — a post-mutation
+      # failure fails the job honestly and waits for the operator/Phase 6.
+      - name: Upload promotion evidence (snapshot + reports)
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: promotion-evidence-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            production-snapshot.json
+            preflight-report.json
+            staging-record.json
+            frontend-publish.json
+            verification-report.json
+            approval-evidence.json
+            release-manifest.json
+            finalize-report.json
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Print finalization conclusions
+        if: always()
+        run: |
+          set -euo pipefail
+          if [ -f finalize-report.json ]; then
+            jq -e '{releaseId: .releaseId, resumed: .resumed, rollbackCapableAtPublication: .rollbackCapableAtPublication, window: .window}' finalize-report.json
+          else
+            echo "finalize report was not written; evidence artifacts above are preserved for recovery"
+          fi

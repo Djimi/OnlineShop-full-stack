@@ -31,8 +31,22 @@
       "checksum": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
     },
     "sbom": {
-      "assetName": "sbom-onlineshop-v0.1.0.spdx.json",
-      "sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+      "auth": {
+        "assetName": "auth.spdx.json",
+        "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "items": {
+        "assetName": "items.spdx.json",
+        "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      },
+      "gateway": {
+        "assetName": "api-gateway.spdx.json",
+        "sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+      },
+      "frontend": {
+        "assetName": "frontend.spdx.json",
+        "sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+      }
     }
   },
   "compatibilityFingerprint": "fp-main-0001",

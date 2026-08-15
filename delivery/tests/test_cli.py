@@ -99,23 +99,7 @@ MISSING_ARGS_CASES = [
 ]
 
 NOT_IMPLEMENTED_CASES = [
-    (["staging", "lifecycle"], ["--out", "record.json"]),
-    (["staging", "apply"], ["--candidate", "cand.json", "--out", "record.json"]),
-    (
-        ["deploy", "backends"],
-        ["--candidate", "cand.json", "--snapshot", str(FIXTURES / "valid_snapshot.json")],
-    ),
-    (
-        ["deploy", "gateway"],
-        ["--candidate", "cand.json", "--snapshot", str(FIXTURES / "valid_snapshot.json")],
-    ),
-    (
-        ["deploy", "frontend"],
-        ["--candidate", "cand.json", "--snapshot", str(FIXTURES / "valid_snapshot.json")],
-    ),
-    (["verify", "production"], ["--manifest", "rel.json"]),
     (["verify", "staging"], ["--candidate", "cand.json"]),
-    (["finalize"], ["--manifest", "rel.json", "--evidence-dir", "evidence"]),
     (
         ["recover"],
         ["--snapshot", str(FIXTURES / "valid_snapshot.json"), "--changed", "changed.json"],

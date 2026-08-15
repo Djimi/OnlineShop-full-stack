@@ -7,6 +7,7 @@ from datetime import UTC, datetime, timedelta
 
 from .models.candidate import CandidateManifest
 from .models.evidence import EvidenceRecord
+from .models.promotion import PreflightReport, VerificationReport
 from .models.release import ReleaseManifest
 from .models.rollback import RollbackResult
 from .models.snapshot import ProductionSnapshot
@@ -48,7 +49,29 @@ def validate(record) -> list[str]:
         return _validate_rollback(record)
     if isinstance(record, EvidenceRecord):
         return _validate_evidence(record)
+    if isinstance(record, PreflightReport):
+        return _validate_preflight(record)
+    if isinstance(record, VerificationReport):
+        return _validate_verification(record)
     return [f"unsupported record type: {type(record).__name__}"]
+
+
+def _validate_preflight(record: PreflightReport) -> list[str]:
+    errors = _schema_version_error(record, "preflight report")
+    if record.candidate.candidateClass != "main":
+        errors.append("preflight candidate class must be main")
+    if record.candidate.branch != "main":
+        errors.append("preflight candidate branch must be main")
+    return errors
+
+
+def _validate_verification(record: VerificationReport) -> list[str]:
+    errors = _schema_version_error(record, "verification report")
+    if record.environment != "production":
+        errors.append("verification report environment must be production")
+    if record.conclusion not in ("passed", "failed"):
+        errors.append("verification report conclusion must be passed or failed")
+    return errors
 
 
 def _validate_candidate(record: CandidateManifest) -> list[str]:
@@ -122,6 +145,17 @@ def validate_staging_against_candidate(
         errors.append("staging candidate workflowRunId does not match the provided candidate")
     if identity.workflowRunAttempt != candidate.build.workflowRunAttempt:
         errors.append("staging candidate workflowRunAttempt does not match the provided candidate")
+    expected = record.artifactsExpected
+    for key in ("authDigest", "itemsDigest", "gatewayDigest"):
+        component = key.removesuffix("Digest")
+        if getattr(expected, key) != getattr(candidate.artifacts, component).digest:
+            errors.append(
+                f"staging expected {key} does not match the provided candidate digest"
+            )
+    if expected.frontendChecksum != candidate.artifacts.frontend.contentChecksum:
+        errors.append(
+            "staging expected frontendChecksum does not match the provided candidate checksum"
+        )
     return errors
 
 
@@ -138,8 +172,12 @@ def _validate_release(record: ReleaseManifest) -> list[str]:
             errors.append(f"release artifacts.{name}.digest must match sha256:<64 hex>")
     if not _HEX64.fullmatch(record.artifacts.frontend.checksum):
         errors.append("release frontend checksum must be 64 lowercase hex characters")
-    if not _HEX64.fullmatch(record.artifacts.sbom.sha256):
-        errors.append("release sbom sha256 must be 64 lowercase hex characters")
+    for component in ("auth", "items", "gateway", "frontend"):
+        sbom = getattr(record.artifacts.sbom, component, None)
+        if sbom is None:
+            errors.append(f"release sbom.{component} is missing")
+        elif not _HEX64.fullmatch(sbom.sha256):
+            errors.append(f"release sbom.{component} sha256 must be 64 lowercase hex characters")
     return errors
 
 
