@@ -5,14 +5,19 @@
 Run the single supported creation command from any checkout in the clone:
 
 ```bash
-scripts/create-worktree.py payments -b feature/payments
+scripts/create-worktree.py feature/payments
 ```
 
-A bare name is placed under the main checkout's sibling
-`<repository>-worktrees/` directory. An explicit path and base ref also work:
+The worktree directory defaults to the branch name. A relative name resolves
+against the main checkout's sibling `<repository>-worktrees/` directory, so
+`--name ../shared` creates a sibling of that directory; an absolute path is
+used as-is. A branch name containing `/` nests the directory the same way.
+Override the base ref (commit or branch name, default `main`) and the
+directory when needed:
 
 ```bash
-scripts/create-worktree.py ../review-123 -b review/123 origin/main
+scripts/create-worktree.py feature/payments --base origin/main
+scripts/create-worktree.py feature/payments --name payments
 ```
 
 The selected base must contain `docker-compose.yml` with the project and ten
@@ -32,7 +37,7 @@ The command performs these steps in order:
 It does not start containers or create volumes. After it succeeds:
 
 ```bash
-cd ../OnlineShop-full-stack-worktrees/payments
+cd ../OnlineShop-full-stack-worktrees/feature/payments
 docker compose up -d --build
 ```
 
@@ -60,9 +65,9 @@ services can use them safely.
 | 8 | Kafka host listener | 9092 | gateway + 8 |
 | 9 | Kafka UI | 8080 | gateway + 9 |
 
-The worktree name hashes to the first candidate. Under a clone-wide file lock,
-the command reads claims from every registered worktree's `.env`, checks all
-20 candidate ports, and advances until it finds a free block. The lock prevents
+The worktree directory name hashes to the first candidate. Under a clone-wide
+file lock, the command reads claims from every registered worktree's `.env`,
+checks all 20 candidate ports, and advances until it finds a free block. The lock prevents
 concurrent creators from choosing the same slot. A stopped stack keeps its
 claim until its worktree is removed. Each existing claim must contain the
 expected Compose project and ten ports for its slot; inconsistent claims stop
@@ -88,7 +93,7 @@ another. The allocator is intentionally Linux-only because it uses Python's
 
 ```bash
 docker compose down -v
-git worktree remove ../OnlineShop-full-stack-worktrees/payments
+git worktree remove ../OnlineShop-full-stack-worktrees/feature/payments
 ```
 
 Removing the worktree removes its gitignored `.env` and releases the claim.

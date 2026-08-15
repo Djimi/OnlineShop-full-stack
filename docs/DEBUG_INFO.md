@@ -15,7 +15,7 @@
 New worktrees must be created with the atomic creation command:
 
 ```bash
-scripts/create-worktree.py <path-or-name> -b <new-branch> [base-ref]
+scripts/create-worktree.py <branch> [--base <ref>] [--name <path>]
 ```
 
 If an external application takes a port after allocation and `docker compose

@@ -3,7 +3,7 @@
 ## Normal path
 
 ```bash
-scripts/create-worktree.py payments -b feature/payments
+scripts/create-worktree.py feature/payments
 ```
 
 The command's control flow mirrors the code:
@@ -32,7 +32,7 @@ print the ports and Docker Compose command
 After success:
 
 ```bash
-cd ../OnlineShop-full-stack-worktrees/payments
+cd ../OnlineShop-full-stack-worktrees/feature/payments
 docker compose up -d --build
 ```
 

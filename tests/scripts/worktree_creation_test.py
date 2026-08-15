@@ -151,11 +151,68 @@ class WorktreeCreationTest(unittest.TestCase):
         self.assertIn("base ref has no docker-compose.yml", failed.stderr)
         self.assertIn("worktree remove", failed.stderr)
 
+    def test_directory_defaults_to_branch_name(self) -> None:
+        result = self.invoke("feature/plain")
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue(self.target("feature/plain").is_dir())
+
+    def test_name_override_stays_inside_the_worktrees_directory(self) -> None:
+        result = self.invoke("feature/nested", "--name", "sub/tree")
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue(self.target("sub/tree").is_dir())
+        self.assertFalse(self.target("feature/nested").exists())
+
+    def test_relative_name_resolves_against_the_worktrees_directory(self) -> None:
+        result = self.invoke("feature/beside", "--name", "../beside")
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        sibling = self.repository.parent / "beside"
+        self.assertTrue(sibling.is_dir())
+        self.assertTrue((sibling / ".env").exists())
+
+    def test_absolute_name_is_used_as_is(self) -> None:
+        absolute = Path(self.temporary_directory.name) / "absolute-tree"
+
+        result = self.invoke("feature/absolute", "--name", str(absolute))
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue(absolute.is_dir())
+        self.assertTrue((absolute / ".env").exists())
+
+    def test_base_ref_can_be_a_commit_sha(self) -> None:
+        base_commit = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=self.repository,
+            text=True,
+            capture_output=True,
+            check=True,
+        ).stdout.strip()
+
+        result = self.invoke("feature/from-sha", "--base", base_commit)
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        head = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=self.target("feature/from-sha"),
+            text=True,
+            capture_output=True,
+            check=True,
+        ).stdout.strip()
+        self.assertEqual(head, base_commit)
+
     def create(
         self, name: str, branch: str, base_ref: str = "main"
     ) -> subprocess.CompletedProcess[str]:
+        arguments = [branch, "--name", name]
+        if base_ref != "main":
+            arguments += ["--base", base_ref]
+        return self.invoke(*arguments)
+
+    def invoke(self, *arguments: str) -> subprocess.CompletedProcess[str]:
         return subprocess.run(
-            ["python3", str(SCRIPT), name, "-b", branch, base_ref],
+            ["python3", str(SCRIPT), *arguments],
             cwd=self.repository,
             text=True,
             capture_output=True,
@@ -164,7 +221,7 @@ class WorktreeCreationTest(unittest.TestCase):
 
     def start_create(self, name: str, branch: str) -> subprocess.Popen[str]:
         return subprocess.Popen(
-            ["python3", str(SCRIPT), name, "-b", branch, "main"],
+            ["python3", str(SCRIPT), branch, "--name", name],
             cwd=self.repository,
             text=True,
             stdout=subprocess.PIPE,
