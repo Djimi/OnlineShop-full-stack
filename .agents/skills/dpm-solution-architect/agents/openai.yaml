@@ -1,0 +1,4 @@
+interface:
+  display_name: "DPM Solution Architect"
+  short_description: "Create decision-complete architecture specifications"
+  default_prompt: "Act as the solution architect: pressure-test the idea, confirm the outcome and boundaries, and create or refine a readable, decision-complete architecture specification package without prescribing implementation internals or duplicating normative rules."
