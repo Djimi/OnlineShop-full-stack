@@ -3,9 +3,13 @@
 
 Contract
 --------
-The command creates a new branch and worktree, then configures that worktree;
-it never starts or stops services. The selected base commit must contain a
-``docker-compose.yml`` that consumes the generated project and port variables.
+The command creates a new branch and a worktree directory of the same name
+(unless ``--name`` is given), then configures that worktree; it never starts
+or stops services. A relative directory name resolves against the main
+checkout's sibling ``<repository>-worktrees/`` directory; an absolute path is
+used as-is. The base ref may be a commit or a branch name. The selected base
+commit must contain a ``docker-compose.yml`` that consumes the generated
+project and port variables.
 
 Port allocation is serialized by a lock in Git's common directory. While the
 lock is held, the command validates managed claims in every registered
@@ -59,18 +63,19 @@ def main() -> int:
     """Run the creation workflow in its user-visible order."""
 
     args = parse_arguments()
+    directory_name = args.name or args.branch
 
     repository = find_repository()
-    base_commit = resolve_base_commit(repository, args.base_ref)
-    target = resolve_target(repository, args.target)
+    base_commit = resolve_base_commit(repository, args.base)
     validate_new_branch(repository, args.branch)
+    target = resolve_target(repository, directory_name)
     ensure_target_is_available(target)
 
     create_worktree(repository, target, args.branch, base_commit)
 
     try:
         validate_compose_contract(target)
-        slot = allocate_ports(repository, target)
+        slot = allocate_ports(repository, target, directory_name)
     except (
         OSError,
         RuntimeError,
@@ -89,21 +94,32 @@ def main() -> int:
 
 
 def parse_arguments() -> argparse.Namespace:
-    """Parse the target, new branch, and optional base ref."""
+    """Parse the new branch, optional base ref, and worktree directory name."""
 
     parser = argparse.ArgumentParser(
         description=(
-            "Create a branch and worktree, reserve a unique 20-port block, "
-            "and write its Docker Compose values to .env."
+            "Create a branch and a worktree directory of the same name "
+            "(relative to the main checkout's sibling worktrees directory), "
+            "reserve a unique 20-port block, and write its Docker Compose "
+            "values to .env."
         )
     )
     parser.add_argument(
-        "target",
-        help="target path, or a name placed in the repository's sibling worktrees directory",
+        "branch",
+        help="new branch name; the worktree directory defaults to this name",
     )
-    parser.add_argument("-b", "--branch", required=True, help="new branch name")
     parser.add_argument(
-        "base_ref", nargs="?", default="main", help="base ref (default: main)"
+        "--base",
+        metavar="REF",
+        default="main",
+        help="base commit or branch to branch from (default: main)",
+    )
+    parser.add_argument(
+        "--name",
+        metavar="PATH",
+        help="worktree directory path; relative paths resolve against the "
+        "sibling worktrees directory, absolute paths are used as-is "
+        "(default: the branch name)",
     )
     return parser.parse_args()
 
@@ -147,15 +163,12 @@ def validate_new_branch(repository: Path, branch: str) -> None:
         raise SystemExit(f"ERROR: invalid branch name: {branch}")
 
 
-def resolve_target(repository: Path, requested: str) -> Path:
-    """Resolve a path directly or place a bare name beside the main worktree."""
-
-    if os.sep in requested:
-        return Path(requested).expanduser().resolve()
+def resolve_target(repository: Path, directory_name: str) -> Path:
+    """Resolve the request against the worktrees directory; absolute paths pass through."""
 
     main_worktree = list_worktrees(repository)[0]
     worktrees_directory = main_worktree.parent / f"{main_worktree.name}-worktrees"
-    return worktrees_directory / requested
+    return worktrees_directory / directory_name
 
 
 def ensure_target_is_available(target: Path) -> None:
@@ -203,7 +216,7 @@ def validate_compose_contract(target: Path) -> None:
 # Port allocation -----------------------------------------------------------
 
 
-def allocate_ports(repository: Path, target: Path) -> int:
+def allocate_ports(repository: Path, target: Path, directory_name: str) -> int:
     """Select and persist one slot while holding the clone-wide lock."""
 
     git_common_directory = Path(
@@ -216,7 +229,7 @@ def allocate_ports(repository: Path, target: Path) -> int:
     with lock_path.open("w") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
         claimed_slots = read_claimed_slots(repository, target)
-        slot = find_available_slot(target.name, claimed_slots)
+        slot = find_available_slot(directory_name, claimed_slots)
         write_environment(target / ".env", slot)
 
     return slot
