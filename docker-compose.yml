@@ -77,7 +77,9 @@ services:
     image: apache/kafka:4.1.1
     hostname: kafka
     ports:
-      - "127.0.0.1:${KAFKA_HOST_PORT:-29092}:29092"
+      # Main exposes the standard host port 9092; the dedicated container-side
+      # host listener remains 29092 so it stays separate from in-cluster Kafka.
+      - "127.0.0.1:${KAFKA_HOST_PORT:-9092}:29092"
     environment:
       # KRaft mode configuration (no Zookeeper needed)
       KAFKA_NODE_ID: 1
@@ -86,7 +88,7 @@ services:
       KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
       # Listener configuration
       KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093,PLAINTEXT_HOST://0.0.0.0:29092
-      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:${KAFKA_HOST_PORT:-29092}
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:${KAFKA_HOST_PORT:-9092}
       KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,CONTROLLER:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
       KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
       # Cluster settings

@@ -165,14 +165,14 @@ Repository pause/resume scripts log UTC timestamped steps, typical durations,
 resource-level AWS progress, and actual total runtime. Treat duration values as
 operational estimates, not timeout guarantees.
 
-## Host-Run Dev Mode (Multi-Worktree)
+## Multi-Worktree Ports
 
-In a non-main worktree, run the gateway on the host with `--exports` to pick up worktree-specific ports:
+Create non-main worktrees with the root `scripts/create-worktree.py` command.
+It writes `GATEWAY_PORT` for Docker Compose to the root `.env`. Automatic
+translation of that value into host-run Spring variables is deliberately
+outside the worktree-creation command.
 
-```bash
-source <(scripts/dev-env.sh --exports)
-./mvnw spring-boot:run
-```
+Repository automation must follow [Script Guidelines](../docs/SCRIPT_GUIDELINES.md).
 
 ## Pass 3.5 — Production hardening
 

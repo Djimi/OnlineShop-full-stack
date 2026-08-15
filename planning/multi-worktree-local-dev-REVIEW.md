@@ -1,5 +1,10 @@
 # Multi-Worktree Local Dev — REVIEW (3-agent ruthless comparison)
 
+> Historical review: the Bash design discussed below has been replaced by
+> `scripts/create-worktree.py`. See
+> [simplify-worktree-creation-PLAN.md](./simplify-worktree-creation-PLAN.md) for
+> the current implementation.
+
 **Date:** 2026-08-02
 **Subject of review:** `multi-worktree-local-dev-PLAN.md` (Plan B) vs `local-worktree-port-isolation-PLAN.md` (Plan A, in worktree `/home/dpm/CodingProjects/OnlineShop-port-isolation`)
 **Method:** 3 independent subagent reviews — (1) technical soundness, (2) DX/simplicity, (3) devil's advocate. All claims verified against the actual code and compose files.

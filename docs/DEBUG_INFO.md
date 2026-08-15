@@ -12,19 +12,20 @@
 
 ## Multi-Worktree Port Conflicts
 
-If `docker compose up` fails with a bind error (port already in use):
+New worktrees must be created with the atomic creation command:
 
 ```bash
-# Check which worktree's ports you have
-scripts/dev-env.sh
-
-# Regenerate with a new slot (downs old stack first)
-scripts/dev-env.sh --regenerate
-docker compose up -d --build
-
-# To also drop DB volumes when regenerating:
-scripts/dev-env.sh --regenerate --volumes
+scripts/create-worktree.py <branch> [--base <ref>] [--name <path>]
 ```
+
+If an external application takes a port after allocation and `docker compose
+up` reports a bind error, stop that application and retry Compose. The
+creation command checks all 20 ports while allocating but cannot prevent a
+later process from binding one.
+
+If the selected base ref predates the Compose port variables, creation stops
+after checkout and prints exact commands for removing the incomplete worktree
+and branch.
 
 **Manual debug:** find what's using a port:
 ```bash
@@ -32,7 +33,9 @@ ss -tlnH "sport = :<port>"    # shows the process listening on <port>
 docker ps --filter publish=<port>  # shows the container
 ```
 
-**Forgot to run dev-env.sh?** A bare `docker compose up` in a non-main worktree without running `scripts/dev-env.sh` will use main's ports — colliding with the main checkout if it's running. Run `scripts/dev-env.sh` first.
+**Missing `.env` claim?** The worktree was not created through the supported
+Python command, or allocation failed after Git created it. Inspect and remove
+the incomplete worktree, then recreate it with `scripts/create-worktree.py`.
 
 See [docs/MULTI_WORKTREE.md](./MULTI_WORKTREE.md) for full multi-worktree guide.
 

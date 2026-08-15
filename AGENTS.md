@@ -99,21 +99,29 @@ When using Maven commands you MUST use the Maven wrapper (`./mvnw`) inside the s
 
 ## Starting Services Locally
 
-### First time in a worktree (required before `docker compose up`)
+### Create a worktree
 
 ```bash
-scripts/dev-env.sh --check  # Agent pre-up guard — exits 1 if you forgot dev-env.sh
+scripts/create-worktree.py <branch> [--base <ref>] [--name <dir-name>]
 ```
 
-### First-time setup (run once):
-
-```bash
-scripts/dev-env.sh           # Assigns unique ports, writes .env
-```
+This is the only supported creation path. In order, it validates the request,
+creates the branch and worktree directory, verifies that the selected base uses
+the worktree Compose variables, atomically writes a managed `.env` block with
+the Compose project, slot, and ten unique host ports, then prints the start
+command. The worktree directory defaults to the branch name; a relative
+`--name` resolves against the main checkout's sibling
+`<repository>-worktrees/` directory and an absolute path is used as-is.
+`--base` accepts a commit or branch name (default: `main`). The allocator
+checks the slot's complete 20-port block, so ten additional offsets remain
+reserved for future services. It does not start containers or create volumes.
+Do not create development worktrees with a bare `git worktree add`; that
+bypasses port allocation.
 
 ### Multi-worktree guide
 
-See [docs/MULTI_WORKTREE.md](./docs/MULTI_WORKTREE.md) for full port isolation details, collision recovery, host-run dev mode, and Postman setup.
+See [docs/MULTI_WORKTREE.md](./docs/MULTI_WORKTREE.md) for port isolation,
+failure recovery, and teardown.
 
 ### Build and start
 
@@ -129,6 +137,15 @@ All services, databases, Redis, Kafka, and the frontend are defined in `docker-c
 `--build` uses Docker's cache for unchanged layers and rebuilds layers affected by source changes. It is not a test command; run the service Maven or npm tests separately when needed. For a simple stop/restart without changes, use `docker compose down` / `docker compose up -d`.
 
 > **Build contexts:** Items uses the repository root as its context because it builds the `common` library first. Auth and API Gateway use their service directories. `common` is a library, not a separate deployable Compose service.
+
+## Script Development
+
+All new and changed repository automation must follow
+[docs/SCRIPT_GUIDELINES.md](./docs/SCRIPT_GUIDELINES.md). Scripts must expose a
+short top-down flow, use plain domain names, and avoid indirection or legacy
+compatibility without a current requirement. Treat growing size and shell
+complexity as signals to simplify the design or choose a more readable
+language, not as reasons to add layers.
 
 ## Dockerfile Conventions
 

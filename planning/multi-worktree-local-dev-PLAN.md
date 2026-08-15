@@ -1,6 +1,18 @@
 # Multi-Worktree Local Dev Without Port Collisions — PLAN (revised)
 
+> Historical plan: its Bash commands and maintenance modes have been replaced
+> by the completed Python design in
+> [simplify-worktree-creation-PLAN.md](./simplify-worktree-creation-PLAN.md).
+> The only supported creation command is now `scripts/create-worktree.py`.
+
 > Rationale for every decision: `planning/multi-worktree-local-dev-REVIEW.md` (3-agent review, fixes F1–F10). This file is self-contained.
+
+> **Historical implementation record:** the slot count, bind-only allocation,
+> and manual first-time workflow below describe the original implementation.
+> [simplify-worktree-creation-PLAN.md](./simplify-worktree-creation-PLAN.md) is
+> the current contract and supersedes those parts of this plan. In particular,
+> main Kafka now uses host port `9092`, and every worktree reserves and checks
+> its complete 20-port block rather than only assigned offsets 0–9.
 
 ## Goal
 
@@ -90,7 +102,12 @@ After the block scheme, the only remaining collision class is **same-slot**. Exa
 - 9 worktrees → **5.6%**
 - 20 worktrees → **26.6%**
 
-Accepted, because detection + recovery exist:
+> **Superseded:** The race acceptance below records the original implementation.
+> [simplify-worktree-creation-PLAN.md](./simplify-worktree-creation-PLAN.md)
+> replaces it with registered claims and a clone-wide allocation lock. These
+> three failure modes are no longer accepted behavior.
+
+Originally accepted because detection + recovery existed:
 
 1. **Same-slot collision** — caught at generation time by the bind check IF the twin stack is running; otherwise surfaces as a bind error at `docker compose up`. Recovery: `scripts/dev-env.sh --regenerate`.
 2. **Bind-check blind spot** — the check only sees *currently listening* ports. Two worktrees generated at different times with the same slot while both were down → late bind error at `up` time. Accepted; recoverable via `--regenerate` (down-first, no orphans).
@@ -100,7 +117,9 @@ All three are loud failures with a one-command recovery — no silent data-plane
 
 ## Working with worktrees (day-to-day)
 
-- **First-time setup in a new worktree (single command):** `scripts/dev-env.sh` → writes the managed block, prints your URL table. Do this BEFORE the first `docker compose up` (mandated in AGENTS.md + `docs/MULTI_WORKTREE.md`).
+- **Current first-time setup (supersedes this plan's original flow):**
+  `scripts/create-worktree.sh <path-or-name> -b <new-branch> [base-ref]` creates
+  the worktree and its port claim as one operation.
 - **Daily work — plain compose, no wrapper:** `docker compose up -d --build`, `docker compose down`, `docker compose logs -f items-service`, `docker compose ps`. The `.env` does all the work.
 - **URL/port discovery:** `scripts/dev-env.sh` re-run prints the table (idempotent — reuses `DEV_ENV_SLOT`); or read the managed block in `.env`; or `docker compose ps`.
 - **Collision at `up` (bind error):** `scripts/dev-env.sh --regenerate` → **first runs `docker compose down` using the OLD `.env`** (the old project name/ports are still on disk, so the old stack is reachable; add `--volumes` to also `down -v`), **then** bumps to the next free slot, rewrites the block, prints the new table. Never rewrite `.env` before the old project is down — that orphans its containers/volumes under the old project name (F3).
@@ -252,9 +271,14 @@ Bash, `set -euo pipefail`, runnable from any directory inside the repo. No state
 - [x] ✅ Slot 0 keyed on exact basename (a second clone named `OnlineShop-full-stack` silently collided with main) — fixed: main detection via `git rev-parse --git-common-dir` realpath cross-checked with `git worktree list --porcelain`; fails loudly on ambiguity. Verified on 2026-08-02: main `realpath(.../.git)` = `/home/dpm/CodingProjects/OnlineShop-full-stack/.git`; worktree `realpath(.../.git)` = `/home/dpm/CodingProjects/OnlineShop-full-stack/.git` ≠ `$root/.git`.
 - [x] ✅ Kafka `PLAINTEXT_HOST://localhost:29092` was never published — fixed: it is now the single published Kafka port (`${KAFKA_HOST_PORT:-29092}`).
 - [x] ✅ Same-slot hash collision: was 45.3% @ 8 worktrees with 49 slots; now **4.4%** @ 8 worktrees with 619 slots (20-port blocks). — fixed: increased from 49→619 slots, tightened block size from 100→20.
-- [ ] Bind-check blind spot: only sees currently listening ports; staggered generation can surface as a late bind error at `up` — open; accepted, recover via `--regenerate`.
-- [ ] TOCTOU race on concurrent `.env` generation in two same-slot worktrees — open; accepted, loser recovers via `--regenerate`.
-- [ ] Existing demo worktrees have no `.env` — by design; ports are assigned on first `scripts/dev-env.sh` run there. No migration needed. (`--check` exists to catch forgetting.)
+- [x] ✅ Bind-check blind spot for stopped worktrees — superseded by
+      [simplify-worktree-creation-PLAN.md](./simplify-worktree-creation-PLAN.md):
+      registered `.env` claims are checked even when stacks are stopped.
+- [x] ✅ Concurrent-generation TOCTOU race — superseded by the clone-wide
+      `flock` + validate + atomic-write allocator.
+- [x] ✅ Fresh worktrees missing `.env` — superseded by the single
+      `scripts/create-worktree.py` creation command; creation and allocation are
+      now one fail-closed operation.
 - [x] ✅ `.env` is gitignored — the generator manages only the marked block and never clobbers existing secret lines (e.g., `POSTGRES_AWS_*`) — verified by fixture test.
 - [ ] Perf stack collides with main even today (fixed 5433/9001 + `perf-*` names ×3) — open; follow-up Task 6.
 - [ ] Devcontainer host-global name `onlineshop-workspace` — open; follow-up Task 6.
