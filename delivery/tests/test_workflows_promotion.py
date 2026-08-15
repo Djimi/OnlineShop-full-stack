@@ -371,17 +371,212 @@ def test_evidence_artifacts_uploaded_with_14_day_retention_on_failure() -> None:
         assert evidence in path_block
 
 
-def test_no_automatic_compensation_job_in_phase_5() -> None:
+def test_promotion_compensation_is_a_dedicated_job() -> None:
+    # Phase 6: compensation is a dedicated job; the promote/preflight jobs
+    # never run the recover CLI themselves (they only preserve evidence).
     workflow = _load(PROMOTE_WORKFLOW)
-    assert set(workflow["jobs"]) == {"preflight", "promote"}
-    text = PROMOTE_WORKFLOW.read_text()
-    stripped = (
-        text.lower()
-        .replace("compensation", "")
-        .replace("no automatic compensation", "")
-        .replace("automatic compensation in", "")
+    assert set(workflow["jobs"]) == {"preflight", "promote", "compensate"}
+    for job_name in ("preflight", "promote"):
+        for step in _steps(workflow["jobs"][job_name]):
+            name = str(step.get("name", "")).lower()
+            assert "compensat" not in name, job_name
+            assert re.search(r"\brecover\b", name) is None, job_name
+            run = str(step.get("run", "")).lower()
+            assert "delivery.cli recover" not in run, job_name
+
+
+# ---------------------------------------------------------------------------
+# Phase 6 automatic recovery (AD-13 / OP-REC-01/02)
+# ---------------------------------------------------------------------------
+
+
+def test_compensate_job_exists_and_is_gated_on_post_mutation_failure() -> None:
+    workflow = _load(PROMOTE_WORKFLOW)
+    compensate = workflow["jobs"]["compensate"]
+    assert compensate["needs"] == "promote"
+    condition = compensate["if"]
+    assert "failure()" in condition
+    assert "needs.promote.outputs.backends == 'success'" in condition
+    assert "needs.promote.outputs.gateway == 'success'" in condition
+    assert "needs.promote.outputs.frontend == 'success'" in condition
+
+
+def test_promote_job_publishes_mutation_step_completion_outputs() -> None:
+    workflow = _load(PROMOTE_WORKFLOW)
+    promote = workflow["jobs"]["promote"]
+    assert promote["outputs"] == {
+        "backends": "${{ steps.deploy-backends.outputs.outcome }}",
+        "gateway": "${{ steps.deploy-gateway.outputs.outcome }}",
+        "frontend": "${{ steps.deploy-frontend.outputs.outcome }}",
+    }
+    for step_name, step_id in (
+        ("Deploy backends (Auth + Items)", "deploy-backends"),
+        ("Deploy API Gateway", "deploy-gateway"),
+        ("Deploy frontend (immutable prefix + live switch)", "deploy-frontend"),
+    ):
+        step = next(step for step in _steps(promote) if step.get("name") == step_name)
+        assert step["id"] == step_id
+        assert 'echo "outcome=success" >> "$GITHUB_OUTPUT"' in step["run"]
+        # the output is set AFTER the mutation command, never before it
+        run = step["run"]
+        assert run.index("outcome=success") > run.index("python -m delivery.cli")
+
+
+def test_compensate_requires_no_environment_approval() -> None:
+    workflow = _load(PROMOTE_WORKFLOW)
+    compensate = workflow["jobs"]["compensate"]
+    assert "environment" not in compensate
+
+
+def test_compensate_holds_non_canceling_production_concurrency_group() -> None:
+    workflow = _load(PROMOTE_WORKFLOW)
+    compensate = workflow["jobs"]["compensate"]
+    assert compensate["concurrency"] == {"group": "production", "cancel-in-progress": "false"}
+
+
+def test_compensate_uses_only_the_production_role() -> None:
+    workflow = _load(PROMOTE_WORKFLOW)
+    compensate = workflow["jobs"]["compensate"]
+    aws_steps = [
+        step
+        for step in _steps(compensate)
+        if "configure-aws-credentials" in str(step.get("uses", ""))
+    ]
+    assert len(aws_steps) == 1
+    assert aws_steps[0]["with"]["role-to-assume"] == "${{ env.AWS_ROLE_ARN_PRODUCTION }}"
+    compensate_yaml = yaml.dump(compensate)
+    assert "PRODUCTION_PREFLIGHT_ROLE_ARN" not in compensate_yaml
+
+
+def test_compensate_downloads_the_snapshot_uploaded_before_mutation() -> None:
+    workflow = _load(PROMOTE_WORKFLOW)
+    promote = workflow["jobs"]["promote"]
+    names = [step.get("name") for step in _steps(promote)]
+    capture = names.index("Capture the pre-mutation production snapshot")
+    snapshot_upload = names.index(
+        "Upload the pre-mutation snapshot for automatic recovery"
     )
-    assert "compensate" not in stripped
+    first_mutation = names.index("Deploy backends (Auth + Items)")
+    assert capture < snapshot_upload < first_mutation
+    assert _steps(promote)[snapshot_upload]["with"] == {
+        "name": "promotion-snapshot-${{ github.run_id }}-${{ github.run_attempt }}",
+        "path": "production-snapshot.json",
+        "if-no-files-found": "warn",
+        "retention-days": "14",
+    }
+    compensate = workflow["jobs"]["compensate"]
+    download = next(
+        step
+        for step in _steps(compensate)
+        if "promotion-snapshot-" in str(step.get("with", {}).get("name", ""))
+    )
+    assert download["with"]["name"] == (
+        "promotion-snapshot-${{ github.run_id }}-${{ github.run_attempt }}"
+    )
+    assert download["with"]["run-id"] == "${{ github.run_id }}"
+
+
+def test_promote_job_records_failure_context_before_evidence_upload() -> None:
+    workflow = _load(PROMOTE_WORKFLOW)
+    promote = workflow["jobs"]["promote"]
+    context = next(
+        step
+        for step in _steps(promote)
+        if step.get("name") == "Record the promotion failure context"
+    )
+    assert context["if"] == "failure()"
+    assert "conclusion" in context["run"]
+    assert '"failed"' in context["run"]
+    upload = next(
+        step
+        for step in _steps(promote)
+        if step.get("name") == "Upload promotion evidence (snapshot + reports)"
+    )
+    assert "promotion-failure-context.json" in upload["with"]["path"]
+    assert _steps(promote).index(context) < _steps(promote).index(upload)
+
+
+def test_compensate_builds_changed_array_only_from_completed_steps() -> None:
+    workflow = _load(PROMOTE_WORKFLOW)
+    compensate = workflow["jobs"]["compensate"]
+    step = next(
+        step
+        for step in _steps(compensate)
+        if step.get("name") == "Build the changed component array from completed mutation steps"
+    )
+    assert step["env"] == {
+        "BACKENDS": "${{ needs.promote.outputs.backends }}",
+        "GATEWAY": "${{ needs.promote.outputs.gateway }}",
+        "FRONTEND": "${{ needs.promote.outputs.frontend }}",
+    }
+    run = step["run"]
+    assert 'CHANGED=$(jq -c \'. + ["auth", "items"]\' <<<"$CHANGED")' in run
+    assert 'CHANGED=$(jq -c \'. + ["gateway"]\' <<<"$CHANGED")' in run
+    assert 'CHANGED=$(jq -c \'. + ["frontend"]\' <<<"$CHANGED")' in run
+    assert 'jq -e \'length > 0\' <<<"$CHANGED"' in run
+    assert "printf '%s\\n' \"$CHANGED\" > changed.json" in run
+
+
+def test_compensate_runs_recover_with_snapshot_and_out() -> None:
+    workflow = _load(PROMOTE_WORKFLOW)
+    compensate = workflow["jobs"]["compensate"]
+    step = next(
+        step
+        for step in _steps(compensate)
+        if step.get("name") == "Restore the pre-mutation snapshot (automatic recovery)"
+    )
+    run = step["run"]
+    assert "python -m delivery.cli recover" in run
+    assert "--snapshot promotion-snapshot/production-snapshot.json" in run
+    assert "--changed changed.json" in run
+    assert "--out recovery-result.json" in run
+    assert '--original-failure "$ORIGINAL_FAILURE"' in run
+    assert "--environment production" in run
+    assert "scripts/config/production-identifiers.json" in run
+    assert 'jq -e \'.conclusion == "failed"\'' in run
+
+
+def test_compensate_uploads_recovery_result_with_14_day_retention() -> None:
+    workflow = _load(PROMOTE_WORKFLOW)
+    compensate = workflow["jobs"]["compensate"]
+    upload = next(
+        step
+        for step in _steps(compensate)
+        if step.get("name") == "Upload the recovery result"
+    )
+    assert upload.get("if") == "always()"
+    assert upload["with"]["retention-days"] == "14"
+    assert upload["with"]["name"] == (
+        "recovery-result-${{ github.run_id }}-${{ github.run_attempt }}"
+    )
+
+
+def test_compensate_reports_both_outcomes_and_fails_on_recovery_failure() -> None:
+    workflow = _load(PROMOTE_WORKFLOW)
+    compensate = workflow["jobs"]["compensate"]
+    step = next(
+        step
+        for step in _steps(compensate)
+        if step.get("name") == "Report the original failure and the recovery outcome"
+    )
+    assert step.get("if") == "always()"
+    run = step["run"]
+    assert "ORIGINAL FAILURE" in run
+    assert "needs.promote.result" in run
+    assert "RECOVERY OUTCOME" in run or "recovery-result.json" in run
+    assert "the original failure is UNRESOLVED" in run
+    assert run.count("exit 1") == 2
+
+
+def test_compensate_job_permissions_are_job_scoped() -> None:
+    workflow = _load(PROMOTE_WORKFLOW)
+    compensate = workflow["jobs"]["compensate"]
+    assert compensate["permissions"] == {
+        "contents": "read",
+        "actions": "read",
+        "id-token": "write",
+    }
+    assert "environment" not in compensate
 
 
 def test_promote_job_timeout_covers_worst_case() -> None:

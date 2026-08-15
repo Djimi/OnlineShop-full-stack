@@ -15,7 +15,8 @@ identity, and no secrets in records.
 - `src/delivery/github.py` — exact workflow run/attempt authority, artifact/asset download, run listing, commit comparison, release publication
 - `src/delivery/frontend.py` — shared candidate-frontend archive verification
 - `src/delivery/live_marker.py` — production frontend live-marker model and identity rules
-- `src/delivery/models/` — pydantic v2 records (candidate, staging, snapshot, release, promotion, rollback, evidence)
+- `src/delivery/models/` — pydantic v2 records (candidate, staging, snapshot, release, promotion, rollback, recovery, retention, evidence)
+- `src/delivery/retention/` — desired ECR lifecycle policy asset (`ecr-lifecycle-policy.json`), fail-closed policy validator, and the first-match-wins expiration model used by `retention preview|apply`
 - `src/delivery/validation.py` — schema and cross-identity validation rules
 - `tests/` — unit test suite and JSON fixtures
 
@@ -53,9 +54,11 @@ CLI exit code (see below).
 - `promote preflight` — read-only OP-PRO-02 preflight: candidate eligibility (AD-03/05), exact staging gate (AD-09), ECR digests, fresh production snapshot, AD-11 newer-candidate reachability + warning, OP-DB migration-ownership gate, post-approval drift comparison (`--previous-report`)
 - `finalize` — OP-FIN-01: allocate the next never-reused `release-NNNN`, mint ECR `release-*` tags from recorded manifest bytes, protect the immutable frontend prefix, prepare the CT-REL manifest (per-component SBOM hashes), switch the live marker to the official identity with public verification, publish the GitHub Release with manifest + 4 SBOM assets, and audit the rollback window; exact-match resume for partial finalization (OP-FIN-02)
 - `verify staging` — verify staging against a candidate (planned)
-- `recover --snapshot <file> --changed <file>` — compensate changed components (planned)
+- `recover --snapshot <file> --changed <file> [--out <file>] [--original-failure TEXT] [--dry-run]` — automatic compensation (AD-13, OP-REC-02): restore the changed components (`auth`, `items`, `gateway`, `frontend`) from the pre-mutation production snapshot only — re-register the snapshot's exact digest-pinned task-definition revision (image-only diff, secrets stay full-ARN `secrets[].valueFrom`), update the service, bound the deployment waiter, verify observed running digests equal the snapshot digests; for the frontend, rewrite the live marker from the snapshot frontend identity (checksum proven before the write), invalidate CloudFront, and read back. Ambiguous or inconsistent snapshot internals and AWS read errors stop with evidence and never guess; the database is never touched or reversed (OP-DB-02). Writes a recovery result recording the original failure and the recovery outcome separately; a failed recovery is reported as failed, never success.
 - `rollback preflight --release-id <release-NNNN>|execute` — owner-approved rollback (planned)
-- `retention audit|preview|apply` — ECR lifecycle retention (planned)
+- `retention audit --snapshot <file> [--repository OWNER/NAME] [--human]` — read-only four-release rollback-window audit (AD-16, OP-RET-01): lists official GitHub Releases newest-first (draft/prerelease filtered), takes the currently running release from the live production snapshot, and verifies the current + up to three previous complete releases against their official manifests — every backend ECR `release-<NNNN>` tag resolves to the manifest's exact digest (tags are retention/operator anchors, never deployment inputs), the immutable frontend prefix marker exists in production S3, and each release's `compatibilityFingerprint` matches the current runtime fingerprint from the snapshot. Missing/mismatched/read-error state fails closed with distinct per-entry failure kinds (never silent drift); incomplete older sets are historical, listed but not audited, and never counted in the window. Prints a machine-readable JSON report (`--human` appends a view); exit 0 only when the window is complete and consistent.
+- `retention preview --snapshot <file> [--policy FILE] [--reference-date ISO] [--repository OWNER/NAME]` — read-only lifecycle policy preview (OP-RET-03): after a successful window audit, per backend repository either compares ECR's live lifecycle preview (start + get, bounded waiter) against the local first-match-wins model — disagreement fails closed (`PREVIEW_DISAGREEMENT`) — or, when no policy is applied yet (or the applied policy differs from the resolved one), evaluates the resolved policy locally and labels the result honestly as a modeled preview. Any protected image expiring — a window release tag or any `release-*` tag inside the newest-10 keep margin — fails closed (`PROTECTED_IMAGE_EXPIRING`). The modeled path is validation only, never a replacement for a live preview at apply time.
+- `retention apply --apply|--dry-run --snapshot <file> [--policy FILE] [--reference-date ISO] [--repository OWNER/NAME]` — apply the desired ECR lifecycle policy to the three backend repositories (OP-RET-02/03). `--apply` is refused without `DELIVERY_RETENTION_LIVE_APPLY=1` (set explicitly by the consolidated live pass; `--dry-run` runs the full preview path only). The audit + preview must pass first, then each repository policy is put with an immediate byte-for-byte `get-lifecycle-policy` read-back (fail-closed drift); an already identical policy is left unchanged. A post-apply window audit is recorded in the report. Retention never deletes images itself: ECR lifecycle handles delayed expiration (up to 24 hours), we only configure. Frontend `_releases/` prefix retention (S3 lifecycle configuration) is a live-pass item and is not applied by this CLI.
 
 All staging commands take `--environment staging --identifiers
 scripts/config/staging-identifiers.json` (plus optional `--profile`/`--region`);
@@ -75,8 +78,55 @@ mutation phase is wired in.
 - `1` — any delivery failure, printed to stderr as `ERROR <code>: <message>`
   (codes: `VALIDATION`, `READ_ERROR`, `NOT_FOUND`, `MUTATION_VERIFY`,
   `WAITER_TIMEOUT`, `AMBIGUOUS`, `NOT_IMPLEMENTED`, `STG_MARKER_CONFLICT`,
-  `CLEANUP_FAILED`, `E2E_FAILED`, `OWNERLESS_STOPPED`)
+  `CLEANUP_FAILED`, `E2E_FAILED`, `OWNERLESS_STOPPED`,
+  `WINDOW_INCOMPLETE`, `PROTECTED_IMAGE_EXPIRING`, `PREVIEW_DISAGREEMENT`,
+  `LIVE_APPLY_REFUSED`, `POLICY_INVALID`, `POLICY_TAGPREFIX_MULTI`)
 - `2` — argparse usage errors
 
 Raw `botocore.exceptions.ClientError` raised by a handler is mapped to
 `ERROR READ_ERROR` (exit 1), never a traceback.
+
+## Retention
+
+The desired ECR lifecycle policy
+(`src/delivery/retention/ecr-lifecycle-policy.json`) keeps the newest 10
+`release-*` images per backend repository (rule 1, HIGHEST priority — the
+immediate rollback window), expires the `sha-*`, `main-latest`, and
+`branch-*` candidate families after 30 days (rules 2-4, one single-prefix
+rule each), and expires untagged images after 14 days (rule 5). The
+first-match-wins model treats an image whose tags match a higher-priority
+rule's selection as claimed by that rule: a multi-tag release image
+(`sha-*` + `release-*`) inside the newest 10 is retained by rule 1 and the
+candidate rules never apply to it. ECR documents that a multi-entry
+`tagPrefixList` selects only images carrying ALL listed tags, so merged
+prefix lists would silently select nothing — the validator rejects them
+(`POLICY_TAGPREFIX_MULTI`) and every tagged rule carries exactly one
+explicit prefix.
+
+Design decisions worth knowing:
+
+- **Current release comes from the live snapshot.** `retention` takes a
+  fresh production snapshot (`delivery snapshot production`) so the current
+  release identity and the runtime configuration fingerprint are observed
+  state, never assumed from GitHub order. A snapshot without an official
+  release identity fails closed (`VALIDATION`).
+- **Honest minimal fingerprint check.** Re-deriving a release's
+  compatibility fingerprint offline is not feasible (it covers historical
+  task-definition/schema state), so the audit compares each window
+  release's recorded `compatibilityFingerprint` against the current runtime
+  fingerprint from the snapshot and records both; a mismatch is
+  `FINGERPRINT_MISMATCH` and the release is not rollback-capable.
+- **Young systems.** When fewer than three previous official releases
+  exist, all existing previous releases must be complete; the window is
+  current + up to three previous. Releases outside the window are listed
+  but never audited and never errors.
+- **Reference date.** `--reference-date` controls the local model
+  evaluation only; ECR's live preview always evaluates at "now", so a
+  stale reference date against an applied policy surfaces
+  `PREVIEW_DISAGREEMENT` (fail-closed) near age boundaries.
+- **Boundary-day drift.** The local model expires an image once the full
+  age threshold has elapsed; ECR's evaluator may round differently at
+  boundary instants. A disagreement near a boundary is resolved by
+  re-running the preview — never by guessing.
+- **Repository resolution.** `--repository OWNER/NAME` defaults to
+  `$GITHUB_REPOSITORY`; GitHub reads additionally require `GITHUB_TOKEN`.

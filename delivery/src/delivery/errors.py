@@ -47,3 +47,27 @@ class E2EFailed(DeliveryError):
 
 class OwnerlessRdsStopped(DeliveryError):
     code = "OWNERLESS_STOPPED"
+
+
+class WindowIncompleteError(DeliveryError):
+    code = "WINDOW_INCOMPLETE"
+
+
+class ProtectedImageExpiring(DeliveryError):
+    code = "PROTECTED_IMAGE_EXPIRING"
+
+
+class PreviewDisagreement(DeliveryError):
+    code = "PREVIEW_DISAGREEMENT"
+
+
+class LiveApplyRefused(DeliveryError):
+    code = "LIVE_APPLY_REFUSED"
+
+
+class PolicyValidationError(ValidationError):
+    code = "POLICY_INVALID"
+
+
+class PolicyTagPrefixMulti(PolicyValidationError):
+    code = "POLICY_TAGPREFIX_MULTI"

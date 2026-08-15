@@ -374,3 +374,216 @@ def test_approval_evidence_rejects_hostile_actor_logins(tmp_path: Path) -> None:
     assert result.returncode == 1
     assert not (tmp_path / "marker").exists()
     assert not (tmp_path / "approval-evidence.json").exists()
+
+
+# ---------------------------------------------------------------------------
+# Phase 6: compensate job inline scripts (AD-13 / OP-REC-01/02)
+# ---------------------------------------------------------------------------
+
+CHANGED_BUILDER = _named_step(
+    WORKFLOW,
+    "Build the changed component array from completed mutation steps",
+    job_name="compensate",
+)["run"]
+
+RESTORE_SCRIPT = _named_step(
+    WORKFLOW,
+    "Restore the pre-mutation snapshot (automatic recovery)",
+    job_name="compensate",
+)["run"]
+
+# the report script embeds GitHub template expressions; substitute trusted
+# values before executing it locally (the expressions are resolved by GitHub,
+# never by the shell)
+REPORT_SCRIPT = (
+    _named_step(
+        WORKFLOW,
+        "Report the original failure and the recovery outcome",
+        job_name="compensate",
+    )["run"]
+    .replace("${{ needs.promote.result }}", "failure")
+    .replace("${{ github.run_id }}", "4711")
+)
+
+
+def _changed_builder(
+    tmp_path: Path,
+    backends: str = "",
+    gateway: str = "",
+    frontend: str = "",
+) -> subprocess.CompletedProcess[str]:
+    return _bash(
+        CHANGED_BUILDER,
+        {"BACKENDS": backends, "GATEWAY": gateway, "FRONTEND": frontend},
+        cwd=tmp_path,
+    )
+
+
+def test_changed_builder_maps_all_completed_steps(tmp_path: Path) -> None:
+    result = _changed_builder(tmp_path, "success", "success", "success")
+    assert result.returncode == 0, result.stdout + result.stderr
+    changed = json.loads((tmp_path / "changed.json").read_text())
+    assert changed == ["auth", "items", "gateway", "frontend"]
+
+
+def test_changed_builder_maps_only_completed_steps(tmp_path: Path) -> None:
+    result = _changed_builder(tmp_path, "success", "", "success")
+    assert result.returncode == 0
+    changed = json.loads((tmp_path / "changed.json").read_text())
+    assert changed == ["auth", "items", "frontend"]
+
+
+def test_changed_builder_frontend_only(tmp_path: Path) -> None:
+    result = _changed_builder(tmp_path, "", "", "success")
+    assert result.returncode == 0
+    changed = json.loads((tmp_path / "changed.json").read_text())
+    assert changed == ["frontend"]
+
+
+def test_changed_builder_fails_closed_without_completed_steps(tmp_path: Path) -> None:
+    result = _changed_builder(tmp_path)
+    assert result.returncode == 1
+    assert "no completed mutation step" in result.stderr
+    assert not (tmp_path / "changed.json").exists()
+
+
+def test_changed_builder_rejects_hostile_step_outputs(tmp_path: Path) -> None:
+    marker = tmp_path / "marker"
+    hostile = (
+        "$(touch marker)",
+        "`touch marker`",
+        "'; touch marker; #",
+        "success\n$(touch marker)",
+        "${PATH}",
+        "success; touch marker",
+    )
+    for value in hostile:
+        result = _changed_builder(tmp_path, value, "success", "")
+        assert result.returncode == 0, (value, result.stderr)
+        assert not marker.exists(), value
+        changed = json.loads((tmp_path / "changed.json").read_text())
+        assert changed == ["gateway"], value
+
+
+def test_restore_step_passes_quoted_original_failure_to_recover(tmp_path: Path) -> None:
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    argv_file = tmp_path / "python-argv.txt"
+    shim = bin_dir / "python"
+    shim.write_text(
+        "#!/usr/bin/env bash\n"
+        "set -euo pipefail\n"
+        'printf "%s\\n" "$@" > "$SHIM_ARGS"\n'
+        'cat > recovery-result.json <<\'JSON\'\n'
+        '{"outcome": "completed"}\n'
+        "JSON\n"
+    )
+    shim.chmod(0o755)
+    marker = tmp_path / "marker"
+    result = _bash(
+        RESTORE_SCRIPT,
+        {
+            "PATH": f"{bin_dir}:{os.environ['PATH']}",
+            "ORIGINAL_RESULT": "$(touch marker)",
+            "SHIM_ARGS": str(argv_file),
+        },
+        cwd=tmp_path,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert not marker.exists()
+    argv = argv_file.read_text().splitlines()
+    assert "--original-failure" in argv
+    assert argv[argv.index("--original-failure") + 1] == (
+        "promotion job result: $(touch marker)"
+    )
+    assert "--snapshot" in argv and "--changed" in argv and "--out" in argv
+
+
+def test_restore_step_prefers_the_failure_context(tmp_path: Path) -> None:
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    argv_file = tmp_path / "python-argv.txt"
+    shim = bin_dir / "python"
+    shim.write_text(
+        "#!/usr/bin/env bash\n"
+        "set -euo pipefail\n"
+        'printf "%s\\n" "$@" > "$SHIM_ARGS"\n'
+        'cat > recovery-result.json <<\'JSON\'\n'
+        '{"outcome": "completed"}\n'
+        "JSON\n"
+    )
+    shim.chmod(0o755)
+    evidence = tmp_path / "promotion-evidence"
+    evidence.mkdir()
+    (evidence / "promotion-failure-context.json").write_text(
+        json.dumps(
+            {
+                "schemaVersion": "1.0",
+                "workflowRunId": 4711,
+                "workflowRunAttempt": 1,
+                "workflowUrl": "https://github.com/x/y/actions/runs/4711",
+                "conclusion": "failed",
+            }
+        )
+    )
+    result = _bash(
+        RESTORE_SCRIPT,
+        {
+            "PATH": f"{bin_dir}:{os.environ['PATH']}",
+            "ORIGINAL_RESULT": "failure",
+            "SHIM_ARGS": str(argv_file),
+        },
+        cwd=tmp_path,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    argv = argv_file.read_text().splitlines()
+    assert argv[argv.index("--original-failure") + 1] == (
+        "promotion failed (run 4711, attempt 1)"
+    )
+
+
+def test_restore_step_fails_closed_on_malformed_failure_context(tmp_path: Path) -> None:
+    evidence = tmp_path / "promotion-evidence"
+    evidence.mkdir()
+    (evidence / "promotion-failure-context.json").write_text("{not json")
+    result = _bash(
+        RESTORE_SCRIPT,
+        {"ORIGINAL_RESULT": "failure"},
+        cwd=tmp_path,
+    )
+    assert result.returncode != 0
+    assert not (tmp_path / "recovery-result.json").exists()
+
+
+def test_report_step_prints_both_outcomes_on_success(tmp_path: Path) -> None:
+    (tmp_path / "recovery-result.json").write_text(
+        json.dumps({"outcome": "completed", "components": [], "originalFailure": "x"})
+    )
+    result = _bash(REPORT_SCRIPT, cwd=tmp_path)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "ORIGINAL FAILURE" in result.stdout
+    assert "RECOVERY OUTCOME" in result.stdout
+
+
+def test_report_step_fails_when_recovery_failed(tmp_path: Path) -> None:
+    (tmp_path / "recovery-result.json").write_text(
+        json.dumps(
+            {
+                "outcome": "failed",
+                "components": [],
+                "originalFailure": "promotion failed",
+                "failureDetail": "READ_ERROR: boom",
+            }
+        )
+    )
+    result = _bash(REPORT_SCRIPT, cwd=tmp_path)
+    assert result.returncode == 1
+    assert "ORIGINAL FAILURE" in result.stdout
+    assert "UNRESOLVED" in result.stderr
+    assert "READ_ERROR: boom" in result.stderr
+
+
+def test_report_step_fails_when_no_result_exists(tmp_path: Path) -> None:
+    result = _bash(REPORT_SCRIPT, cwd=tmp_path)
+    assert result.returncode == 1
+    assert "UNRESOLVED" in result.stderr

@@ -643,9 +643,19 @@ def _add_recover(subparsers: argparse._SubParsersAction) -> None:
     parser.add_argument(
         "--changed", required=True, metavar="FILE", help="JSON array of changed component names"
     )
+    parser.add_argument(
+        "--out",
+        metavar="FILE",
+        help="output recovery result JSON file (original + recovery outcomes)",
+    )
+    parser.add_argument(
+        "--original-failure",
+        metavar="TEXT",
+        help="description of the original failure (recorded in the recovery result)",
+    )
     parser.add_argument("--dry-run", action="store_true", help="resolve and plan without mutating")
     _add_aws_flags(parser)
-    parser.set_defaults(func=recover.recover)
+    parser.set_defaults(func=recover.recover, context_builder=build_context)
 
 
 def _add_rollback(subparsers: argparse._SubParsersAction) -> None:
@@ -688,17 +698,39 @@ def _add_rollback(subparsers: argparse._SubParsersAction) -> None:
 def _add_retention(subparsers: argparse._SubParsersAction) -> None:
     parser = subparsers.add_parser("retention", help="ECR lifecycle retention operations")
     sub = parser.add_subparsers(dest="subcommand", required=True, metavar="SUBCOMMAND")
-    audit = sub.add_parser("audit", help="audit the 10-release rollback window")
+    audit = sub.add_parser("audit", help="audit the four-release rollback window")
     audit.add_argument("--human", action="store_true", help="add a concise human view")
+    audit.add_argument(
+        "--snapshot",
+        required=True,
+        metavar="FILE",
+        help="fresh production snapshot JSON file (from `delivery snapshot production`)",
+    )
+    audit.add_argument(
+        "--repository",
+        metavar="OWNER/NAME",
+        help="GitHub repository (default: $GITHUB_REPOSITORY)",
+    )
     _add_aws_flags(audit)
-    audit.set_defaults(func=retention.audit)
+    audit.set_defaults(func=retention.audit, context_builder=build_context)
     preview = sub.add_parser("preview", help="preview a lifecycle policy effect")
     preview.add_argument("--policy", metavar="FILE", help="lifecycle policy JSON file")
     preview.add_argument(
         "--reference-date", type=_iso_datetime, metavar="ISO", help="evaluation reference date"
     )
+    preview.add_argument(
+        "--snapshot",
+        required=True,
+        metavar="FILE",
+        help="fresh production snapshot JSON file (from `delivery snapshot production`)",
+    )
+    preview.add_argument(
+        "--repository",
+        metavar="OWNER/NAME",
+        help="GitHub repository (default: $GITHUB_REPOSITORY)",
+    )
     _add_aws_flags(preview)
-    preview.set_defaults(func=retention.preview)
+    preview.set_defaults(func=retention.preview, context_builder=build_context)
     apply = sub.add_parser("apply", help="apply a lifecycle policy")
     mode = apply.add_mutually_exclusive_group(required=True)
     mode.add_argument("--dry-run", action="store_true", help="preview without applying")
@@ -707,8 +739,19 @@ def _add_retention(subparsers: argparse._SubParsersAction) -> None:
     apply.add_argument(
         "--reference-date", type=_iso_datetime, metavar="ISO", help="evaluation reference date"
     )
+    apply.add_argument(
+        "--snapshot",
+        required=True,
+        metavar="FILE",
+        help="fresh production snapshot JSON file (from `delivery snapshot production`)",
+    )
+    apply.add_argument(
+        "--repository",
+        metavar="OWNER/NAME",
+        help="GitHub repository (default: $GITHUB_REPOSITORY)",
+    )
     _add_aws_flags(apply)
-    apply.set_defaults(func=retention.apply)
+    apply.set_defaults(func=retention.apply, context_builder=build_context)
 
 
 if __name__ == "__main__":

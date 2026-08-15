@@ -8,6 +8,7 @@ from datetime import UTC, datetime, timedelta
 from .models.candidate import CandidateManifest
 from .models.evidence import EvidenceRecord
 from .models.promotion import PreflightReport, VerificationReport
+from .models.recovery import RecoveryResult
 from .models.release import ReleaseManifest
 from .models.rollback import RollbackResult
 from .models.snapshot import ProductionSnapshot
@@ -53,6 +54,8 @@ def validate(record) -> list[str]:
         return _validate_preflight(record)
     if isinstance(record, VerificationReport):
         return _validate_verification(record)
+    if isinstance(record, RecoveryResult):
+        return _validate_recovery(record)
     return [f"unsupported record type: {type(record).__name__}"]
 
 
@@ -71,6 +74,28 @@ def _validate_verification(record: VerificationReport) -> list[str]:
         errors.append("verification report environment must be production")
     if record.conclusion not in ("passed", "failed"):
         errors.append("verification report conclusion must be passed or failed")
+    return errors
+
+
+def _validate_recovery(record: RecoveryResult) -> list[str]:
+    errors = _schema_version_error(record, "recovery result")
+    if record.environment != "production":
+        errors.append("recovery result environment must be production")
+    if record.completedAt is None:
+        errors.append("recovery result completedAt must be set")
+    if record.outcome == "completed":
+        if record.failureDetail is not None:
+            errors.append("recovery result failureDetail must be absent when outcome is completed")
+    elif record.outcome == "failed":
+        if not record.failureDetail:
+            errors.append("recovery result failureDetail must be non-empty when outcome is failed")
+    else:
+        errors.append("recovery result outcome must be completed or failed")
+    for component in record.components:
+        if component.conclusion == "failed" and not component.detail:
+            errors.append(
+                f"recovery component {component.component} must carry a detail when failed"
+            )
     return errors
 
 

@@ -22,7 +22,6 @@ from __future__ import annotations
 
 import argparse
 import re
-import time
 from pathlib import Path
 
 from .. import frontend as frontend_utils
@@ -40,7 +39,6 @@ from ..aws import (
     update_service,
     wait_for_deployment,
 )
-from ..aws.ecs import wait_for_running_digests
 from ..errors import (
     AbsentResourceError,
     MutationVerificationError,
@@ -51,16 +49,24 @@ from ..github import GitHubApi
 from ..models import FrontendPublishRecord, ProductionSnapshot
 from ..records import load_candidate, load_snapshot, read_s3_text, write_json
 from ..serialization import sha256_hex
+from .deploy_support import (
+    DEPLOYMENT_TIMEOUT,
+    DEPLOYMENT_VISIBILITY_DELAY,
+    DEPLOYMENT_VISIBILITY_RETRIES,
+    DIGEST_VERIFY_INTERVAL,
+    DIGEST_VERIFY_TIMEOUT,
+    assert_full_arn_secrets,
+    deployment_for_revision,
+    verify_running_digests,
+)
 
 _SERVICE_KEYS = ("auth", "items", "gateway")
-_DEPLOYMENT_TIMEOUT = 600
-_DIGEST_VERIFY_TIMEOUT = 120.0
-_DIGEST_VERIFY_INTERVAL = 10.0
-_DEPLOYMENT_VISIBILITY_RETRIES = 3
-_DEPLOYMENT_VISIBILITY_DELAY = 1.0
-_FULL_SECRET_ARN = re.compile(
-    r"^arn:aws:secretsmanager:[a-z0-9-]+:\d{12}:secret:[A-Za-z0-9/_+=.@:-]+$"
-)
+# Historical module-level names: deploy's tests and callers monkeypatch these.
+_DIGEST_VERIFY_TIMEOUT = DIGEST_VERIFY_TIMEOUT
+_DIGEST_VERIFY_INTERVAL = DIGEST_VERIFY_INTERVAL
+_DEPLOYMENT_VISIBILITY_RETRIES = DEPLOYMENT_VISIBILITY_RETRIES
+_DEPLOYMENT_VISIBILITY_DELAY = DEPLOYMENT_VISIBILITY_DELAY
+_DEPLOYMENT_TIMEOUT = DEPLOYMENT_TIMEOUT
 _FRONTEND_BUNDLE = "frontend.tar.gz"
 _PREFIX_MARKER = "release.json"
 
@@ -186,37 +192,22 @@ def _assert_observed_td_unchanged(
 
 def _assert_full_arn_secrets(revision_arn: str, ecs_client) -> None:
     """Secrets must stay full-ARN ``secrets[].valueFrom`` references (never plaintext)."""
-    observed = describe_task_definition(ecs_client, revision_arn)["taskDefinition"]
-    for container in observed.get("containerDefinitions") or []:
-        for secret in container.get("secrets") or []:
-            value_from = secret.get("valueFrom")
-            if not isinstance(value_from, str) or not _FULL_SECRET_ARN.fullmatch(value_from):
-                raise MutationVerificationError(
-                    f"task definition {revision_arn} container {container.get('name')} "
-                    f"carries a non-full-ARN secrets[].valueFrom: {value_from!r}"
-                )
+    assert_full_arn_secrets(ecs_client, revision_arn)
 
 
 def _deployment_for_revision(ecs_client, cluster: str, service: str, revision_arn: str) -> str:
-    for attempt in range(1, _DEPLOYMENT_VISIBILITY_RETRIES + 1):
-        observed = describe_services(ecs_client, cluster, [service])[service]
-        for deployment in observed.get("deployments") or []:
-            if deployment.get("taskDefinition") == revision_arn:
-                deployment_id = deployment.get("id")
-                if not deployment_id:
-                    raise ReadError(f"deployment for {revision_arn} of {service} has no id")
-                return deployment_id
-        if attempt < _DEPLOYMENT_VISIBILITY_RETRIES:
-            time.sleep(_DEPLOYMENT_VISIBILITY_DELAY)
-    raise ReadError(
-        f"service {service} has no deployment for the just-registered revision "
-        f"{revision_arn} after {_DEPLOYMENT_VISIBILITY_RETRIES} attempts; "
-        "deployment visibility did not converge"
+    return deployment_for_revision(
+        ecs_client,
+        cluster,
+        service,
+        revision_arn,
+        retries=_DEPLOYMENT_VISIBILITY_RETRIES,
+        delay_seconds=_DEPLOYMENT_VISIBILITY_DELAY,
     )
 
 
 def _verify_running_digests(ecs_client, ids: dict, service: str, expected: str) -> None:
-    wait_for_running_digests(
+    verify_running_digests(
         ecs_client,
         ids["cluster"],
         service,

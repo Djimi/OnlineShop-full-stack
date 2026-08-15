@@ -80,6 +80,36 @@ def get_lifecycle_policy(client: Any, repository: str) -> str:
     return policy
 
 
+def list_images(client: Any, repository: str) -> list[dict]:
+    """List image details (digest, tags, pushedAt) with pagination, fail-closed on shape."""
+    images: list[dict] = []
+    token: str | None = None
+    while True:
+        kwargs: dict[str, Any] = {"repositoryName": repository}
+        if token:
+            kwargs["nextToken"] = token
+        try:
+            response = client.describe_images(**kwargs)
+        except ClientError as error:
+            raise ReadError(f"describe_images failed for {repository}") from error
+        for image in response.get("imageDetails") or []:
+            if not isinstance(image, dict):
+                raise ReadError(f"describe_images returned a malformed entry for {repository}")
+            digest = image.get("imageDigest")
+            pushed = image.get("imagePushedAt")
+            if not isinstance(digest, str) or not digest:
+                raise ReadError(f"describe_images entry without imageDigest for {repository}")
+            if pushed is None:
+                raise ReadError(f"describe_images entry without imagePushedAt for {repository}")
+            tags = image.get("imageTags") or []
+            if not all(isinstance(tag, str) and tag for tag in tags):
+                raise ReadError(f"describe_images entry with malformed imageTags for {repository}")
+            images.append({"digest": digest, "tags": list(tags), "pushedAt": pushed})
+        token = response.get("nextToken")
+        if not token:
+            return images
+
+
 def put_lifecycle_policy(client: Any, repository: str, policy_json: str) -> str:
     """Apply a lifecycle policy and verify the read-back matches byte for byte."""
     return mutate_and_read_back(

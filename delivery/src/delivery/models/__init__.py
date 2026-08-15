@@ -22,6 +22,7 @@ from .promotion import (
     VerificationJourney,
     VerificationReport,
 )
+from .recovery import ComponentRecovery, RecoveryResult
 from .release import (
     ApprovalEvidence,
     ProductionVerification,
@@ -32,6 +33,15 @@ from .release import (
     SbomAsset,
     SbomSet,
     StagingEvidence,
+)
+from .retention import (
+    RetentionApplyRepo,
+    RetentionApplyReport,
+    RetentionAuditEntry,
+    RetentionAuditFailure,
+    RetentionAuditReport,
+    RetentionPreviewRepo,
+    RetentionPreviewReport,
 )
 from .rollback import RollbackResult
 from .snapshot import FrontendObservation, ProductionSnapshot, ReleaseIdentity, ServiceObservation
@@ -61,6 +71,7 @@ __all__ = [
     "CandidateTests",
     "CleanupConclusion",
     "CompatibilityConclusion",
+    "ComponentRecovery",
     "DatabaseConclusions",
     "DiagnosticsRecord",
     "E2EConclusion",
@@ -87,11 +98,19 @@ __all__ = [
     "ProductionSnapshot",
     "ProductionVerification",
     "ReconcileRecord",
+    "RecoveryResult",
     "ReleaseArtifacts",
     "ReleaseFrontend",
     "ReleaseIdentity",
     "ReleaseManifest",
     "ReleaseSource",
+    "RetentionApplyRepo",
+    "RetentionApplyReport",
+    "RetentionAuditEntry",
+    "RetentionAuditFailure",
+    "RetentionAuditReport",
+    "RetentionPreviewRepo",
+    "RetentionPreviewReport",
     "RollbackResult",
     "RollbackWindowEntry",
     "SbomAsset",

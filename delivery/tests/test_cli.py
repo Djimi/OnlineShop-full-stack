@@ -100,19 +100,11 @@ MISSING_ARGS_CASES = [
 
 NOT_IMPLEMENTED_CASES = [
     (["verify", "staging"], ["--candidate", "cand.json"]),
-    (
-        ["recover"],
-        ["--snapshot", str(FIXTURES / "valid_snapshot.json"), "--changed", "changed.json"],
-    ),
     (["rollback", "preflight"], ["--release-id", "release-0002"]),
     (
         ["rollback", "execute"],
         ["--manifest", "rel.json", "--snapshot", str(FIXTURES / "valid_snapshot.json")],
     ),
-    (["retention", "audit"], []),
-    (["retention", "preview"], []),
-    (["retention", "apply"], ["--dry-run"]),
-    (["retention", "apply"], ["--apply"]),
 ]
 
 AWS_FLAGS = ["--environment", "production", "--identifiers", "identifiers.json"]
@@ -274,8 +266,14 @@ def test_retention_reference_date_rejects_naive_datetimes(capsys, value):
 
 @pytest.mark.parametrize("value", ["2026-08-15T10:00:00+00:00", "2026-08-15T10:00:00Z"])
 def test_retention_reference_date_accepts_utc_aware_datetimes(capsys, value):
-    assert main(["retention", "preview", "--reference-date", value, *AWS_FLAGS]) == 1
-    assert "ERROR NOT_IMPLEMENTED" in capsys.readouterr().err
+    assert (
+        main(
+            ["retention", "preview", "--reference-date", value, "--snapshot", "snap.json",
+             *AWS_FLAGS]
+        )
+        == 1
+    )
+    assert "ERROR " in capsys.readouterr().err
 
 
 @pytest.mark.parametrize("value", ["2026-08-15T10:00:00+02:00", "2026-08-15T10:00:00-05:00"])

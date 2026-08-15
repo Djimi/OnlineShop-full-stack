@@ -410,6 +410,13 @@ class FakeEcr:
         self.digests = digests or DIGESTS
         self.tags = tags or {}
         self.put_calls = []
+        self.lifecycle_policies: dict[str, str] = {}
+        self.lifecycle_put_calls: list[str] = []
+        self.lifecycle_drift: str | None = None
+        self.image_details: dict[str, list[dict]] = {}
+        self.preview_results: dict[str, list[dict]] = {}
+        self.preview_statuses: list[str] = []
+        self.preview_started: list[str] = []
 
     def _key(self, repository):
         return next(
@@ -446,6 +453,32 @@ class FakeEcr:
         digest = json.loads(imageManifest.decode())["config"]
         self.tags[(key, imageTag)] = digest
         return {}
+
+    def get_lifecycle_policy(self, repositoryName):
+        if self.lifecycle_drift is not None and repositoryName in self.lifecycle_policies:
+            return {"lifecyclePolicyText": self.lifecycle_drift}
+        if repositoryName not in self.lifecycle_policies:
+            raise client_error("LifecyclePolicyNotFoundException")
+        return {"lifecyclePolicyText": self.lifecycle_policies[repositoryName]}
+
+    def put_lifecycle_policy(self, repositoryName, lifecyclePolicyText):
+        self.lifecycle_put_calls.append(repositoryName)
+        self.lifecycle_policies[repositoryName] = lifecyclePolicyText
+        return {}
+
+    def describe_images(self, repositoryName, **kwargs):
+        return {"imageDetails": list(self.image_details.get(repositoryName, []))}
+
+    def start_lifecycle_policy_preview(self, repositoryName):
+        self.preview_started.append(repositoryName)
+        return {"lifecyclePolicyPreviewId": f"preview-{repositoryName}"}
+
+    def get_lifecycle_policy_preview(self, repositoryName, lifecyclePolicyPreviewId):
+        status = self.preview_statuses.pop(0) if self.preview_statuses else "COMPLETE"
+        return {
+            "status": status,
+            "previewResults": list(self.preview_results.get(repositoryName, [])),
+        }
 
 
 class FakeS3:
