@@ -717,18 +717,35 @@ jobs:
             --environment production \
             --identifiers scripts/config/production-identifiers.json
 
+      # OP-REC-02 repeats OP-DEP-04: after recovery the restored production
+      # state is re-verified read-only against the SAME pre-mutation snapshot
+      # recover consumed (running digests, live marker + checksum,
+      # CloudFront-visible identity, read-only journeys). A verification
+      # failure fails this job and is reported in the outcome report below.
+      - name: Verify the restored production state read-only
+        run: |
+          set -euo pipefail
+          python -m delivery.cli verify production \
+            --snapshot promotion-snapshot/production-snapshot.json \
+            --environment production \
+            --identifiers scripts/config/production-identifiers.json \
+            --out recovery-verification.json
+
       - name: Upload the recovery result
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: recovery-result-${{ github.run_id }}-${{ github.run_attempt }}
-          path: recovery-result.json
+          path: |
+            recovery-result.json
+            recovery-verification.json
           if-no-files-found: warn
           retention-days: 14
 
       # OP-REC-01: report BOTH the original failure and the recovery outcome;
-      # the job fails when recovery failed, and never claims success for a
-      # failed recovery.
+      # the job fails when recovery failed or when the post-recovery
+      # read-only verification did not confirm the restored state, and never
+      # claims success for a failed recovery.
       - name: Report the original failure and the recovery outcome
         if: always()
         run: |
@@ -742,6 +759,16 @@ jobs:
           OUTCOME=$(jq -r '.outcome' recovery-result.json)
           if [ "$OUTCOME" = "failed" ]; then
             echo "ERROR: automatic recovery FAILED ($(jq -r '.failureDetail // "no detail"' recovery-result.json)); the original failure is UNRESOLVED" >&2
+            exit 1
+          fi
+          if [ ! -f recovery-verification.json ]; then
+            echo "ERROR: post-recovery verification produced no report; the restored state is NOT confirmed" >&2
+            exit 1
+          fi
+          VERIFICATION=$(jq -r '.conclusion' recovery-verification.json)
+          echo "VERIFICATION OUTCOME: $VERIFICATION (read-only production verification against the restored snapshot)"
+          if [ "$VERIFICATION" != "passed" ]; then
+            echo "ERROR: post-recovery verification FAILED; the restored production state is NOT confirmed" >&2
             exit 1
           fi
           echo "RECOVERY OUTCOME: completed - the pre-mutation snapshot was restored"

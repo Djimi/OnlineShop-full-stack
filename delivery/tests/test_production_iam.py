@@ -181,6 +181,11 @@ def test_describe_tasks_is_granted_on_the_task_arn():
 def test_s3_scoped_to_frontend_bucket_only():
     policy = load_policy()
     statement = next(s for s in policy["Statement"] if s["Sid"] == "FrontendBucketAccess")
+    assert set(statement["Action"]) == {
+        "s3:PutObject",
+        "s3:GetObject",
+        "s3:ListBucket",
+    }
     assert set(statement["Resource"]) == {
         "arn:aws:s3:::onlineshop-frontend-799111666795",
         "arn:aws:s3:::onlineshop-frontend-799111666795/*",
