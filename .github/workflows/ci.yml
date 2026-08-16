@@ -364,7 +364,8 @@ jobs:
             --arg frontendContentChecksum "$FRONTEND_CONTENT_CHECKSUM" \
             '{source: {repository: $repository, branch: $branch, ref: $ref, fullSha: $fullSha},
               build: {workflowRunId: $runId, workflowRunAttempt: $runAttempt, workflowUrl: $workflowUrl, createdAt: $createdAt, completedAt: $completedAt},
-              artifacts: {auth: {repository: $authRepository, digest: $authDigest}, items: {repository: $itemsRepository, digest: $itemsDigest, commonSourceSha: $commonSourceSha}, gateway: {repository: $gatewayRepository, digest: $gatewayDigest}, frontend: {artifactId: $frontendArtifactId, artifactDigest: $frontendArtifactDigest, contentChecksum: $frontendContentChecksum}},
+              artifacts: {auth: {repository: $authRepository, digest: $authDigest}, items: {repository: $itemsRepository, digest: $itemsDigest, commonSourceSha: $commonSourceSha}, gateway: {repository: $gatewayRepository, digest: $gatewayDigest}},
+              frontend: {artifactId: $frontendArtifactId, artifactDigest: $frontendArtifactDigest, contentChecksum: $frontendContentChecksum},
               tests: {unit: "passed", integration: "passed", frontend: "lint+build", localE2E: "passed"}}' \
             > candidate-inputs.json
           printf 'branch=%s\n' "$BRANCH_NAME" >> "$GITHUB_OUTPUT"

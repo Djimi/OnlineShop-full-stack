@@ -4,6 +4,7 @@ Static YAML assertions run unconditionally; actionlint and zizmor runs are
 skipped when the binaries are not installed.
 """
 
+import json
 import os
 import re
 import shutil
@@ -12,6 +13,8 @@ from pathlib import Path
 
 import pytest
 import yaml
+
+from delivery.commands.candidate import _REQUIRED_INPUT_KEYS
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 WORKFLOWS_DIR = REPO_ROOT / ".github" / "workflows"
@@ -354,6 +357,29 @@ def test_manifest_records_what_the_frontend_gate_actually_ran() -> None:
         step for step in _steps(ci["jobs"]["publish"]) if step.get("id") == "inputs"
     )
     assert 'frontend: "lint+build"' in inputs["run"]
+
+
+def test_candidate_inputs_jq_payload_matches_engine_required_keys() -> None:
+    # The engine (candidate._REQUIRED_INPUT_KEYS) requires top-level
+    # source/build/artifacts/frontend/tests and injects the top-level
+    # frontend object into artifacts.frontend itself, so the workflow must
+    # not nest frontend inside artifacts.
+    ci = _load(CI_WORKFLOW)
+    inputs = next(
+        step for step in _steps(ci["jobs"]["publish"]) if step.get("id") == "inputs"
+    )
+    lines = inputs["run"].splitlines()
+    start = next(i for i, line in enumerate(lines) if "'{source:" in line)
+    end = next(i for i in range(start, len(lines)) if "}}'" in lines[i])
+    body = " ".join(lines[i].strip().rstrip("\\").strip() for i in range(start, end + 1))
+    # jq object constructors are not valid JSON: quote the $var references
+    # and the unquoted keys before parsing.
+    values = re.sub(r"\$\w+", '"<var>"', body[1:-1])
+    keys = re.sub(r"(?<=[{,])\s*([A-Za-z_][A-Za-z0-9_]*)\s*:", r'"\1":', values)
+    payload = json.loads(keys)
+    assert set(payload) == set(_REQUIRED_INPUT_KEYS)
+    assert set(payload["artifacts"]) == {"auth", "items", "gateway"}
+    assert set(payload["frontend"]) == {"artifactId", "artifactDigest", "contentChecksum"}
 
 
 def test_emit_step_derives_class_from_tags_output() -> None:
