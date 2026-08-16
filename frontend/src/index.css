@@ -1,12 +1,14 @@
 @import "tailwindcss";
 
-:root {
-  --paper: #f4f1ea;
-  --paper-deep: #ede8dc;
-  --ink: #1f1a14;
-  --soft: #5b524a;
-  --hair: #dcd5c7;
-  --accent: #7a3b2c;
+@theme {
+  --color-paper: #f4f1ea;
+  --color-paper-deep: #ede8dc;
+  --color-ink: #1f1a14;
+  --color-soft: #5b524a;
+  --color-hair: #dcd5c7;
+  --color-accent: #7a3b2c;
+  --color-parchment: #e8e1d3;
+  --color-parchment-deep: #dcd2bf;
 }
 
 @layer base {
@@ -22,8 +24,8 @@
 
   body {
     margin: 0;
-    background-color: var(--paper);
-    color: var(--ink);
+    background-color: var(--color-paper);
+    color: var(--color-ink);
     font-family: 'Inter', system-ui, -apple-system, sans-serif;
     font-weight: 300;
     -webkit-font-smoothing: antialiased;
@@ -39,12 +41,16 @@
   button:focus-visible,
   a:focus-visible,
   input:focus-visible {
-    outline: 2px solid var(--accent);
+    outline: 2px solid var(--color-accent);
     outline-offset: 3px;
   }
 }
 
 @layer components {
+  .page-min {
+    min-height: calc(100dvh - 120px);
+  }
+
   .font-display {
     font-family: 'Cormorant Garamond', 'Times New Roman', serif;
   }
@@ -53,21 +59,21 @@
     font-size: 11px;
     letter-spacing: 0.22em;
     text-transform: uppercase;
-    color: var(--accent);
+    color: var(--color-accent);
   }
 
   .nav-link {
     font-size: 12px;
     letter-spacing: 0.16em;
     text-transform: uppercase;
-    color: var(--soft);
+    color: var(--color-soft);
     font-weight: 400;
     transition: color 200ms;
   }
 
   .nav-link:hover,
   .nav-link.is-current {
-    color: var(--ink);
+    color: var(--color-ink);
   }
 
   /* Quiet button system — replaces the legacy .btn-* classes */
@@ -77,7 +83,6 @@
     justify-content: center;
     gap: 0.5rem;
     font-family: 'Inter', sans-serif;
-    font-size: 12px;
     font-weight: 400;
     letter-spacing: 0.18em;
     text-transform: uppercase;
@@ -89,18 +94,13 @@
 
   .btn-primary {
     background-color: transparent;
-    color: var(--ink);
-    border: 1px solid var(--ink);
+    color: var(--color-ink);
+    border: 1px solid var(--color-ink);
   }
 
   .btn-primary:hover {
-    background-color: var(--ink);
-    color: var(--paper);
-  }
-
-  .btn-primary:disabled {
-    opacity: 0.4;
-    cursor: not-allowed;
+    background-color: var(--color-ink);
+    color: var(--color-paper);
   }
 
   .btn:disabled {
@@ -114,28 +114,34 @@
 
   .btn-secondary {
     background-color: transparent;
-    color: var(--accent);
+    color: var(--color-accent);
     border: none;
-    border-bottom: 1px solid var(--accent);
+    border-bottom: 1px solid var(--color-accent);
     padding-left: 0;
     padding-right: 0;
     border-radius: 0;
   }
 
   .btn-secondary:hover {
-    color: var(--ink);
-    border-bottom-color: var(--ink);
+    color: var(--color-ink);
+    border-bottom-color: var(--color-ink);
+  }
+
+  .btn-secondary[aria-pressed='true'] {
+    color: var(--color-ink);
+    border-bottom-width: 2px;
+    border-bottom-color: var(--color-ink);
   }
 
   .btn-danger {
     background-color: transparent;
-    color: var(--accent);
-    border: 1px solid var(--accent);
+    color: var(--color-accent);
+    border: 1px solid var(--color-accent);
   }
 
   .btn-danger:hover {
-    background-color: var(--accent);
-    color: var(--paper);
+    background-color: var(--color-accent);
+    color: var(--color-paper);
   }
 
   .input-field {
@@ -143,8 +149,8 @@
     padding: 0.75rem 0;
     background-color: transparent;
     border: none;
-    border-bottom: 1px solid var(--hair);
-    color: var(--ink);
+    border-bottom: 1px solid var(--color-hair);
+    color: var(--color-ink);
     font-family: 'Inter', sans-serif;
     font-size: 15px;
     font-weight: 300;
@@ -153,42 +159,36 @@
   }
 
   .input-field::placeholder {
-    color: var(--soft);
-    opacity: 0.7;
+    color: var(--color-soft);
   }
 
   .input-field:focus {
     outline: none;
-    border-bottom-color: var(--ink);
+    border-bottom-color: var(--color-ink);
   }
 
   .input-field:focus-visible {
-    outline: 2px solid var(--accent);
+    outline: 2px solid var(--color-accent);
     outline-offset: 3px;
   }
 
   .card {
-    background-color: var(--paper);
-    border: 1px solid var(--hair);
+    background-color: var(--color-paper);
+    border: 1px solid var(--color-hair);
     border-radius: 0;
-    transition: border-color 250ms, transform 350ms ease;
-  }
-
-  .card:hover {
-    border-color: var(--ink);
   }
 
   .form-error {
-    color: var(--accent);
-    font-size: 0.825rem;
-    font-style: italic;
+    color: var(--color-accent);
+    font-size: 0.875rem;
+    font-weight: 400;
     margin-top: 0.35rem;
-    font-family: 'Cormorant Garamond', serif;
+    font-family: 'Inter', sans-serif;
   }
 
   .form-label {
     display: block;
-    color: var(--soft);
+    color: var(--color-soft);
     font-size: 11px;
     font-weight: 400;
     letter-spacing: 0.18em;

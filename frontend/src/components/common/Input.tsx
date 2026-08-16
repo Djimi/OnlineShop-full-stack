@@ -30,7 +30,7 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(
           id={inputId}
           className={clsx(
             'input-field',
-            error && 'border-b-[#7a3b2c] focus:border-b-[#7a3b2c]',
+            error && 'border-b-accent focus:border-b-accent',
             className
           )}
           aria-invalid={error ? true : undefined}
@@ -38,7 +38,7 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(
           {...rest}
         />
         {error && <p id={`${inputId}-error`} role="alert" className="form-error">{error}</p>}
-        {helpText && !error && <p id={`${inputId}-help`} className="text-[#5b524a] text-sm mt-1">{helpText}</p>}
+        {helpText && !error && <p id={`${inputId}-help`} className="text-soft text-sm mt-1">{helpText}</p>}
       </div>
     );
   }

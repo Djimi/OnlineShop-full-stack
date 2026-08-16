@@ -17,7 +17,7 @@ export function ItemCard({ item }: ItemCardProps) {
   };
 
   return (
-    <Card hoverable className="flex flex-col h-full">
+    <Card className="flex flex-col h-full">
       <div className="flex-1">
         {/* Item Header */}
         <div className="mb-3">
@@ -29,20 +29,20 @@ export function ItemCard({ item }: ItemCardProps) {
         {/* Stock Status */}
         <div className="mb-3">
           {isOutOfStock ? (
-            <div className="flex items-center gap-2 text-[#7a3b2c] border-y border-[#dcd5c7] px-1 py-2">
+            <div className="flex items-center gap-2 text-accent border-y border-hair px-1 py-2">
               <AlertCircle aria-hidden="true" className="w-4 h-4" />
               <span className="text-sm font-medium">Out of Stock</span>
             </div>
           ) : (
-            <div className="text-sm text-[#5b524a] font-light">
+            <div className="text-sm text-soft font-light">
               <span>Available: </span>
-              <span className="font-medium text-[#1f1a14]">{item.quantity} units</span>
+              <span className="font-medium text-ink">{item.quantity} units</span>
             </div>
           )}
         </div>
 
         {/* Description */}
-        <p className="text-[#5b524a] text-sm font-light leading-relaxed line-clamp-2 mb-4">
+        <p className="text-soft text-sm font-light leading-relaxed line-clamp-2 mb-4">
           {item.description}
         </p>
       </div>

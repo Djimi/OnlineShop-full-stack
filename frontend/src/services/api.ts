@@ -65,7 +65,7 @@ api.interceptors.response.use(
     }
 
     // Log error details
-    console.error('API Error:', error.response?.data || error.message);
+    console.warn('API Error:', error.response?.data || error.message);
 
     return Promise.reject(error);
   }

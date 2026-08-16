@@ -57,43 +57,43 @@ export default function ItemDetail() {
   const isOutOfStock = item ? item.quantity <= 0 : false;
 
   return (
-    <main className="min-h-[calc(100vh-100px)]">
+    <main className="page-min">
       <div className="max-w-5xl mx-auto px-6 md:px-16 py-12 md:py-20">
         {/* Back Button */}
         <button
           type="button"
           onClick={() => navigate('/items')}
-          className="nav-link flex items-center gap-2 hover:text-[#7a3b2c] mb-10"
+          className="nav-link flex items-center gap-2 hover:text-accent py-2 mb-10"
         >
           <ArrowLeft aria-hidden="true" className="w-4 h-4" />
           <span>Back to Catalog</span>
         </button>
 
         {/* Breadcrumbs */}
-        <div className="text-xs tracking-[0.12em] uppercase text-[#5b524a] mb-8">
-          <Link to="/items" className="hover:text-[#7a3b2c]">Catalog</Link>
+        <div className="text-xs tracking-[0.12em] uppercase text-soft mb-8">
+          <Link to="/items" className="hover:text-accent">Catalog</Link>
           <span className="mx-2" aria-hidden="true">/</span>
-          <span className="text-[#1f1a14]">
+          <span className="text-ink">
             {item?.name || 'Loading...'}
           </span>
         </div>
 
         {/* Loading State */}
         {isLoading && (
-          <div role="status" className="border border-[#dcd5c7] p-12 text-center">
-            <div aria-hidden="true" className="animate-spin rounded-full h-10 w-10 border-2 border-[#dcd5c7] border-t-[#7a3b2c] mx-auto mb-4"></div>
-            <p className="text-[#5b524a] font-light">Loading item details...</p>
+          <div role="status" className="border border-hair p-12 text-center">
+            <div aria-hidden="true" className="animate-spin rounded-full h-10 w-10 border-2 border-hair border-t-accent mx-auto mb-4"></div>
+            <p className="text-soft font-light">Loading item details...</p>
           </div>
         )}
 
         {/* Error State */}
         {error && !isLoading && (
-          <div role="alert" className="border border-[#dcd5c7] p-8 text-center">
-            <AlertCircle aria-hidden="true" className="w-12 h-12 text-[#7a3b2c] mx-auto mb-4" />
+          <div role="alert" className="border border-hair p-8 text-center">
+            <AlertCircle aria-hidden="true" className="w-12 h-12 text-accent mx-auto mb-4" />
             <h2 className="font-display text-4xl mb-2">
               Oops! Something went wrong
             </h2>
-            <p className="text-[#5b524a] font-light mb-6">{error}</p>
+            <p className="text-soft font-light mb-6">{error}</p>
             <Button
               variant="primary"
               onClick={() => navigate('/items')}
@@ -105,12 +105,12 @@ export default function ItemDetail() {
 
         {/* Item Details */}
         {item && !isLoading && (
-          <div className="border border-[#dcd5c7] overflow-hidden">
+          <div className="border border-hair overflow-hidden">
             <div className="grid md:grid-cols-2 gap-10 p-6 md:p-10">
               {/* Left Column - Product Image Placeholder */}
               <div className="flex items-center justify-center">
-                <div className="w-full aspect-square bg-gradient-to-br from-[#e8e1d3] to-[#dcd2bf] flex items-center justify-center">
-                  <Package aria-hidden="true" className="w-32 h-32 text-[#7a3b2c]/50" />
+                <div className="w-full aspect-square bg-gradient-to-br from-parchment to-parchment-deep flex items-center justify-center">
+                  <Package aria-hidden="true" className="w-32 h-32 text-accent/50" />
                 </div>
               </div>
 
@@ -125,13 +125,13 @@ export default function ItemDetail() {
                   {/* Stock Status */}
                   <div className="mb-6">
                     {isOutOfStock ? (
-                      <div className="flex items-center gap-2 text-[#7a3b2c] border-y border-[#dcd5c7] px-1 py-3">
+                      <div className="flex items-center gap-2 text-accent border-y border-hair px-1 py-3">
                         <AlertCircle aria-hidden="true" className="w-5 h-5" />
                         <span className="font-medium">Out of Stock</span>
                       </div>
                     ) : (
-                      <div className="flex items-center gap-2 text-[#5b524a] border-y border-[#dcd5c7] px-1 py-3">
-                        <CheckCircle aria-hidden="true" className="w-5 h-5 text-[#7a3b2c]" />
+                      <div className="flex items-center gap-2 text-soft border-y border-hair px-1 py-3">
+                        <CheckCircle aria-hidden="true" className="w-5 h-5 text-accent" />
                         <span className="font-medium">
                           In Stock ({item.quantity} available)
                         </span>
@@ -144,26 +144,26 @@ export default function ItemDetail() {
                     <h2 className="font-display text-3xl mb-2">
                       Description
                     </h2>
-                    <p className="text-[#5b524a] leading-relaxed font-light">
+                    <p className="text-soft leading-relaxed font-light">
                       {item.description}
                     </p>
                   </div>
 
                   {/* Specifications */}
-                  <div className="bg-[#ede8dc] p-5 mb-8">
+                  <div className="bg-paper-deep p-5 mb-8">
                     <h2 className="font-display text-3xl mb-4">
                       Specifications
                     </h2>
                     <div className="space-y-3">
                       <div className="flex items-start justify-between gap-4">
-                        <span className="text-[#5b524a] shrink-0">Product ID:</span>
-                        <span className="font-medium text-[#1f1a14] text-right break-all">
+                        <span className="text-soft shrink-0">Product ID:</span>
+                        <span className="font-medium text-ink text-right break-all">
                           #{item.id}
                         </span>
                       </div>
                       <div className="flex items-start justify-between gap-4">
-                        <span className="text-[#5b524a]">Available Quantity:</span>
-                        <span className={`font-medium ${isOutOfStock ? 'text-[#7a3b2c]' : 'text-[#1f1a14]'}`}>
+                        <span className="text-soft">Available Quantity:</span>
+                        <span className={`font-medium ${isOutOfStock ? 'text-accent' : 'text-ink'}`}>
                           {item.quantity} units
                         </span>
                       </div>
@@ -173,14 +173,11 @@ export default function ItemDetail() {
 
                 {/* Action Buttons */}
                 <div className="space-y-3">
-                  <Button
-                    variant="secondary"
-                    size="lg"
-                    fullWidth
-                    disabled
-                  >
-                    {isOutOfStock ? 'Out of Stock' : 'Cart coming soon'}
-                  </Button>
+                  {!isOutOfStock && (
+                    <p className="text-[11px] tracking-[0.18em] uppercase text-soft text-center py-3 border border-hair">
+                      Cart coming soon
+                    </p>
+                  )}
                   <Button
                     variant="secondary"
                     size="lg"

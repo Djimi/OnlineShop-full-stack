@@ -1,4 +1,5 @@
 import { BrowserRouter, useLocation } from 'react-router';
+import { useEffect, useRef } from 'react';
 import { Navbar } from './components/layout/Navbar';
 import { AppRoutes } from './routes';
 import { Toaster } from 'react-hot-toast';
@@ -21,7 +22,41 @@ if (useAuthStore.getState().isAuthenticated) {
     });
 }
 
+function useScrollRestoration() {
+  const location = useLocation();
+  const scrollPositions = useRef(new Map<string, number>());
+  const isPopState = useRef(false);
+
+  useEffect(() => {
+    const onPopState = () => {
+      isPopState.current = true;
+    };
+    window.addEventListener('popstate', onPopState);
+    return () => window.removeEventListener('popstate', onPopState);
+  }, []);
+
+  useEffect(() => {
+    const pathname = location.pathname;
+    const onScroll = () => {
+      scrollPositions.current.set(pathname, window.scrollY);
+    };
+    window.addEventListener('scroll', onScroll, { passive: true });
+    return () => window.removeEventListener('scroll', onScroll);
+  }, [location.pathname]);
+
+  useEffect(() => {
+    if (isPopState.current) {
+      isPopState.current = false;
+      const saved = scrollPositions.current.get(location.pathname) ?? 0;
+      requestAnimationFrame(() => window.scrollTo(0, saved));
+    } else {
+      window.scrollTo(0, 0);
+    }
+  }, [location.pathname]);
+}
+
 function RouteErrorBoundary() {
+  useScrollRestoration();
   const location = useLocation();
   return (
     <ErrorBoundary key={location.pathname}>
@@ -34,16 +69,17 @@ function App() {
 
   return (
     <BrowserRouter>
-      <div className="min-h-screen bg-[#f4f1ea] text-[#1f1a14]">
+      <div className="min-h-screen bg-paper text-ink">
         <Navbar />
         <RouteErrorBoundary />
         <Toaster
           position="top-right"
           toastOptions={{
+            duration: 5000,
             style: {
-              background: '#f4f1ea',
-              color: '#1f1a14',
-              border: '1px solid #dcd5c7',
+              background: 'var(--color-paper)',
+              color: 'var(--color-ink)',
+              border: '1px solid var(--color-hair)',
               borderRadius: 0,
               fontSize: '13px',
               letterSpacing: '0.02em',

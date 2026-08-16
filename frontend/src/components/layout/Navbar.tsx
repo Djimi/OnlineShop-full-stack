@@ -1,5 +1,6 @@
 import { Link, useNavigate } from 'react-router';
 import { useAuthStore } from '../../store/authStore';
+import { Button } from '../common/Button';
 
 export function Navbar() {
   const navigate = useNavigate();
@@ -11,10 +12,13 @@ export function Navbar() {
   };
 
   return (
-    <nav aria-label="Primary" className="flex items-center gap-4 px-6 md:px-16 py-6 md:py-8 border-b border-[#dcd5c7] md:grid md:grid-cols-[1fr_auto_1fr]">
-      <Link to="/" className="shrink-0 md:justify-self-start">
+    <nav aria-label="Primary" className="flex items-center gap-4 px-6 md:px-16 py-6 md:py-8 border-b border-hair md:grid md:grid-cols-[1fr_auto_1fr]">
+      <Link
+        to="/"
+        className="shrink-0 md:justify-self-start transition-opacity duration-200 hover:opacity-70"
+      >
         <span className="font-display text-2xl tracking-[0.01em]">
-          Online<em className="italic text-[#7a3b2c]">shop</em>
+          Online<em className="italic text-accent">shop</em>
         </span>
       </Link>
 
@@ -25,22 +29,22 @@ export function Navbar() {
       <div className="flex gap-2 sm:gap-6 items-center ml-auto md:justify-self-end md:ml-0">
         {isAuthenticated ? (
           <>
-            <span className="hidden sm:inline font-display italic text-[#5b524a] text-base">
-              Welcome,&nbsp;<span className="text-[#1f1a14]">{username}</span>
+            <span className="hidden sm:inline font-display italic text-soft text-base">
+              Welcome,&nbsp;<span className="text-ink">{username}</span>
             </span>
-            <button type="button" onClick={handleLogout} className="nav-link hover:text-[#7a3b2c]">
+            <button type="button" onClick={handleLogout} className="nav-link hover:text-accent py-2">
               Sign&nbsp;out
             </button>
           </>
         ) : (
           <>
-            <Link to="/login" className="btn btn-primary px-3 py-2 sm:px-5 sm:py-3">
+            <Button href="/login" size="md">
               Sign in
-            </Link>
-            <Link to="/register" aria-label="Create account" className="btn btn-primary px-3 py-2 sm:px-5 sm:py-3">
+            </Button>
+            <Button href="/register" size="md" aria-label="Create account">
               <span className="sm:hidden">Join</span>
               <span className="hidden sm:inline">Create account</span>
-            </Link>
+            </Button>
           </>
         )}
       </div>
