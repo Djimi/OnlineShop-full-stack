@@ -194,12 +194,6 @@ class GitHubApi:
                     f"artifact {artifact_id} belongs to run {observed_run_id}, "
                     f"not the requested run {run_id}"
                 )
-            observed_run_attempt = _positive_int(run.get("run_attempt"), "artifact run attempt")
-            if observed_run_attempt != run_attempt:
-                raise ValidationError(
-                    f"artifact {artifact_id} belongs to run attempt "
-                    f"{observed_run_attempt}, not the requested attempt {run_attempt}"
-                )
             if name in selected:
                 raise ValidationError(
                     f"duplicate artifact {name!r} for run {run_id} attempt {run_attempt}"
@@ -279,9 +273,9 @@ class GitHubApi:
 
         Unlike ``list_run_artifacts`` this does not require the current
         attempt to equal any specific attempt: a run may have been re-run
-        after the candidate's producing attempt. Callers that consume the
-        attempt-scoped artifacts must compare against the per-artifact
-        ``run_attempt`` values.
+        after the candidate's producing attempt. Artifact consumers bind the
+        authoritative attempt to exact deterministic names because artifact
+        entries do not include a run-attempt field.
         """
         run_id = _positive_int(run_id, "run id")
         response = self._request(f"/repos/{self.repository}/actions/runs/{run_id}")
@@ -335,12 +329,6 @@ class GitHubApi:
                     f"artifact {artifact_id} belongs to run {observed_run_id}, "
                     f"not the requested run {run_id}"
                 )
-            observed_attempt = _positive_int(run_ref.get("run_attempt"), "artifact run attempt")
-            if observed_attempt != run_attempt:
-                raise ValidationError(
-                    f"artifact {artifact_id} belongs to run attempt {observed_attempt}, "
-                    f"not the requested attempt {run_attempt}"
-                )
             archive_url = artifact.get("archive_download_url")
             if not isinstance(archive_url, str) or not archive_url.startswith("https://"):
                 raise ReadError(f"artifact {artifact_id} has no https archive_download_url")
@@ -351,7 +339,6 @@ class GitHubApi:
             selected[name] = {
                 "id": artifact_id,
                 "name": name,
-                "run_attempt": observed_attempt,
                 "archive_download_url": archive_url,
             }
         self._require_expected_artifacts(selected, expected_names, run_id, run_attempt)

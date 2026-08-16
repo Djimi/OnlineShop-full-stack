@@ -660,7 +660,6 @@ class FakeGithub:
                     {
                         "id": 2000 + len(artifacts),
                         "name": name,
-                        "run_attempt": attempt,
                         "archive_download_url": f"https://example.com/artifacts/{name}",
                     }
                 )

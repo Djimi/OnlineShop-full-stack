@@ -11,6 +11,10 @@ identity, and no secrets in records.
 Artifact discovery selects only exact deterministic names for the validated
 run/attempt. Unrelated GitHub artifacts are ignored without parsing their
 fields; every selected record must be unique, non-expired, and fully valid.
+Attempt authority comes from the validated workflow-run response plus exact
+artifact names containing that run/attempt; artifact entries do not carry an
+attempt field. Candidate-manifest validation binds the same identity again
+after download.
 
 ## Layout
 
