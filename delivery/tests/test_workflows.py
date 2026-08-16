@@ -335,6 +335,11 @@ def test_ecr_digest_read_back_step_present() -> None:
     step = readbacks[0]
     assert step["env"]["WORKFLOW_SHA"] == "${{ github.sha }}"
     assert "imageTag=sha-$WORKFLOW_SHA" in step["run"]
+    # A freshly pushed multi-arch index can lag batch-get-image visibility, so
+    # the read-back must re-query bounded instead of failing on the first miss.
+    assert "for attempt in 1 2 3 4 5 6" in step["run"]
+    assert "sleep 5" in step["run"]
+    assert "not visible" in step["run"]
 
 
 def test_manifest_records_what_the_frontend_gate_actually_ran() -> None:

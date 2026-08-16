@@ -69,15 +69,45 @@ class DriftingFakeEcr(FakeEcr):
         return {"repositoryName": repositoryName}
 
 
+class EventuallyVisibleFakeEcr(FakeEcr):
+    """Returns empty images for the first N calls, then behaves normally."""
+
+    def __init__(self, empty_attempts, images=None):
+        super().__init__(images=images)
+        self.calls = 0
+        self.empty_attempts = empty_attempts
+
+    def batch_get_image(self, repositoryName, imageIds):
+        self._maybe_fail()
+        self.calls += 1
+        if self.calls <= self.empty_attempts:
+            return {"images": []}
+        return super().batch_get_image(repositoryName, imageIds)
+
+
 def test_repository_digest_found():
     fake = FakeEcr(images={"main-latest": DIGEST_A})
     assert repository_digest(fake, REPOSITORY, "main-latest") == DIGEST_A
 
 
-def test_repository_digest_missing_tag_is_absent():
+def test_repository_digest_retries_until_visible():
+    fake = EventuallyVisibleFakeEcr(empty_attempts=2, images={"main-latest": DIGEST_A})
+    assert repository_digest(fake, REPOSITORY, "main-latest") == DIGEST_A
+    assert fake.calls == 3
+
+
+def test_repository_digest_missing_tag_not_visible_is_read_error():
     fake = FakeEcr(images={})
-    with pytest.raises(AbsentResourceError):
+    with pytest.raises(ReadError) as excinfo:
         repository_digest(fake, REPOSITORY, "main-latest")
+    assert "not visible" in str(excinfo.value)
+
+
+def test_repository_digest_retries_exhausted_is_read_error():
+    fake = EventuallyVisibleFakeEcr(empty_attempts=100, images={"main-latest": DIGEST_A})
+    with pytest.raises(ReadError):
+        repository_digest(fake, REPOSITORY, "main-latest")
+    assert fake.calls == 6
 
 
 def test_repository_digest_absent_error_is_absent():
@@ -102,9 +132,25 @@ def test_batch_get_image_digests_returns_all_requested_tags():
     }
 
 
+def test_batch_get_image_digests_retries_until_visible():
+    fake = EventuallyVisibleFakeEcr(empty_attempts=3, images={"v1": DIGEST_A, "v2": DIGEST_B})
+    assert batch_get_image_digests(fake, REPOSITORY, ["v1", "v2"]) == {
+        "v1": DIGEST_A,
+        "v2": DIGEST_B,
+    }
+    assert fake.calls == 4
+
+
+def test_batch_get_image_digests_retries_exhausted_is_read_error():
+    fake = EventuallyVisibleFakeEcr(empty_attempts=100, images={"v1": DIGEST_A, "v2": DIGEST_B})
+    with pytest.raises(ReadError):
+        batch_get_image_digests(fake, REPOSITORY, ["v1", "v2"])
+    assert fake.calls == 6
+
+
 def test_batch_get_image_digests_missing_tag_fails_closed():
     fake = FakeEcr(images={"v1": DIGEST_A})
-    with pytest.raises(AbsentResourceError) as excinfo:
+    with pytest.raises(ReadError) as excinfo:
         batch_get_image_digests(fake, REPOSITORY, ["v1", "v3"])
     assert "v3" in str(excinfo.value)
 

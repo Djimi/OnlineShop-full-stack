@@ -376,7 +376,9 @@ def test_audit_missing_ecr_tag_fails_closed(env, capsys):
     report = json.loads(output.out)
     entry = next(e for e in report["releases"] if e["releaseId"] == "release-0003")
     assert entry["complete"] is False
-    assert [failure["kind"] for failure in entry["failures"]] == ["ECR_TAG_NOT_FOUND"] * 3
+    # a missing tag is now a ReadError: bounded retries exhausted (absence
+    # after a push is not provable), not a definitive ECR_TAG_NOT_FOUND
+    assert [failure["kind"] for failure in entry["failures"]] == ["READ_ERROR"] * 3
 
 
 def test_audit_digest_mismatch_fails_closed(env, capsys):

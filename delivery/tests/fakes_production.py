@@ -445,7 +445,7 @@ class FakeEcr:
         if self.tags.get((key, tag)) is None:
             return {"images": []}
         digest = self.tags[(key, tag)]
-        return {"images": [{"imageDigest": digest}]}
+        return {"images": [{"imageTag": tag, "imageDigest": digest}]}
 
     def put_image(self, repositoryName, imageTag, imageManifest):
         self.put_calls.append((repositoryName, imageTag))

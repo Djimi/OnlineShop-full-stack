@@ -239,13 +239,22 @@ jobs:
           for entry in "auth:onlineshop-auth" "items:onlineshop-items" "api-gateway:onlineshop-api-gateway"; do
             component="${entry%%:*}"
             repository="${entry##*:}"
-            digest=$(aws ecr batch-get-image \
-              --region "$AWS_REGION" \
-              --repository-name "$repository" \
-              --image-ids "imageTag=sha-$WORKFLOW_SHA" \
-              --query 'images[0].imageDigest' \
-              --output text)
-            [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "ERROR: invalid digest for $repository" >&2; exit 1; }
+            digest=""
+            for attempt in 1 2 3 4 5 6; do
+              digest=$(aws ecr batch-get-image \
+                --region "$AWS_REGION" \
+                --repository-name "$repository" \
+                --image-ids "imageTag=sha-$WORKFLOW_SHA" \
+                --query 'images[0].imageDigest' \
+                --output text)
+              [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]] && break
+              if [[ "$attempt" -eq 6 ]]; then
+                echo "ERROR: image sha-$WORKFLOW_SHA for $repository not visible after $attempt attempts (ECR propagation delay?)" >&2
+                exit 1
+              fi
+              echo "$repository sha-$WORKFLOW_SHA not visible yet (attempt $attempt); retrying in 5s"
+              sleep 5
+            done
             printf '%s=%s\n' "${component}_digest" "$digest" >> "$GITHUB_OUTPUT"
             echo "$repository sha-$WORKFLOW_SHA -> $digest"
           done

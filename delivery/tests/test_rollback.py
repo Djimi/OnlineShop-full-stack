@@ -552,8 +552,9 @@ def test_preflight_rejects_missing_ecr_tag(env, capsys):
     code = main(env.preflight_argv())
     assert code == 1
     err = capsys.readouterr().err
-    assert "ERROR VALIDATION" in err
-    assert "ECR_TAG_NOT_FOUND" in err
+    # a missing tag is now a ReadError: bounded retries exhausted (absence
+    # after a push is not provable), not a definitive ECR_TAG_NOT_FOUND
+    assert "ERROR READ_ERROR" in err
 
 
 def test_preflight_rejects_missing_frontend_prefix_marker(env, capsys):
