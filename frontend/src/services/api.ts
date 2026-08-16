@@ -32,7 +32,10 @@ api.interceptors.response.use(
   },
   (error: AxiosError) => {
     // Handle 401 Unauthorized - redirect to login
-    if (error.response?.status === 401) {
+    const requestUrl = error.config?.url ?? '';
+    const isPublicAuthRequest = /^\/auth\/(login|register)$/.test(requestUrl);
+
+    if (error.response?.status === 401 && !isPublicAuthRequest) {
       useAuthStore.getState().logout();
       window.location.href = '/login';
       // Page is about to unload; suppress downstream error handling

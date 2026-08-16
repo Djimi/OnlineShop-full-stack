@@ -100,6 +100,21 @@ Optional threshold overrides:
 --auth.troubleshooting.datasource.acquire-slow-threshold-ms=2
 ```
 
+### Local Compose Connection Capacity
+
+The default `application.yml` Hikari settings currently reserve 100 Auth
+connections (`minimum-idle` and `maximum-pool-size`). The local PostgreSQL
+container may therefore reject administrative `psql` connections while
+`auth-service` is running. For a local database inspection or cleanup:
+
+```text
+stop auth-service → run the narrowly scoped psql query → read back the result
+                  → start auth-service → verify its health endpoint
+```
+
+This is an operational constraint, not a recommendation for production pool
+sizing. Any pool-size change needs a separate capacity and deployment review.
+
 ## Multi-Worktree Ports
 
 Create non-main worktrees with the root `scripts/create-worktree.py` command.

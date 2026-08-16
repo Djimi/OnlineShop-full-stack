@@ -130,7 +130,7 @@ http://localhost:5173
 ## Features & Pages
 
 ### 🏠 Home Page (`/`)
-- Hero section with call-to-action buttons
+- Hero section with navigation call-to-actions
 - Feature highlights
 - Links to Register and Login
 - Fully responsive design
@@ -152,8 +152,8 @@ http://localhost:5173
 ### 📦 Items Catalog (`/items`)
 - Protected route (requires authentication)
 - Displays all products in a responsive grid
-- Search bar UI (functionality placeholder)
-- Filter button UI (functionality placeholder)
+- Client-side search across product names and descriptions
+- In-stock-only filter with visible result counts
 - Product cards with:
   - Item name and description
   - Stock quantity
@@ -168,7 +168,7 @@ http://localhost:5173
 - Large product image placeholder
 - Stock status (in stock/out of stock)
 - Product specifications (ID, quantity)
-- "Add to Cart" button (placeholder)
+- Disabled "Cart coming soon" action until the cart API exists
 - "Continue Shopping" button
 - Back navigation to catalog
 - Breadcrumb navigation
@@ -371,8 +371,6 @@ npm run build
 
 These features are placeholders for future development:
 
-- [ ] Search functionality (UI created)
-- [ ] Filter/sorting UI created
 - [ ] Shopping cart system
 - [ ] Checkout flow
 - [ ] Product reviews

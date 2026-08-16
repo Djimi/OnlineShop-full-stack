@@ -10,11 +10,18 @@
 }
 
 @layer base {
+  *,
+  *::before,
+  *::after {
+    box-sizing: border-box;
+  }
+
   html {
     scroll-behavior: smooth;
   }
 
   body {
+    margin: 0;
     background-color: var(--paper);
     color: var(--ink);
     font-family: 'Inter', system-ui, -apple-system, sans-serif;
@@ -27,6 +34,13 @@
     color: inherit;
     text-decoration: none;
     transition: color 200ms;
+  }
+
+  button:focus-visible,
+  a:focus-visible,
+  input:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 3px;
   }
 }
 
@@ -68,7 +82,7 @@
     letter-spacing: 0.18em;
     text-transform: uppercase;
     border-radius: 0;
-    transition: all 350ms ease;
+    transition: background-color 350ms ease, color 350ms ease, border-color 350ms ease, transform 150ms ease;
     cursor: pointer;
     white-space: nowrap;
   }
@@ -87,6 +101,15 @@
   .btn-primary:disabled {
     opacity: 0.4;
     cursor: not-allowed;
+  }
+
+  .btn:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+  }
+
+  .btn:active:not(:disabled) {
+    transform: translateY(1px);
   }
 
   .btn-secondary {
@@ -139,6 +162,11 @@
     border-bottom-color: var(--ink);
   }
 
+  .input-field:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 3px;
+  }
+
   .card {
     background-color: var(--paper);
     border: 1px solid var(--hair);
@@ -166,5 +194,20 @@
     letter-spacing: 0.18em;
     text-transform: uppercase;
     margin-bottom: 0.5rem;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
   }
 }

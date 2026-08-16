@@ -11,7 +11,7 @@ export function Card({ children, hoverable = false, className, ...rest }: CardPr
     <div
       className={clsx(
         'card p-6',
-        hoverable && 'cursor-pointer transform hover:scale-105 transition-transform',
+        hoverable && 'transform transition-transform duration-300 hover:-translate-y-1',
         className
       )}
       {...rest}

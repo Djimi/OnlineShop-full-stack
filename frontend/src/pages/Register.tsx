@@ -49,7 +49,7 @@ export default function Register() {
       });
 
       toast.success(`Welcome ${response.username}. Please sign in.`);
-      setTimeout(() => navigate('/login'), 2000);
+      navigate('/login');
     } catch (error: unknown) {
       const errorMessage = getApiErrorMessage(error, 'Registration failed. Please try again.');
       toast.error(errorMessage);

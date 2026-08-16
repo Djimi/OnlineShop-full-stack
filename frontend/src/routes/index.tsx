@@ -10,8 +10,8 @@ const ItemsCatalog = lazy(() => import('../pages/ItemsCatalog'));
 const ItemDetail = lazy(() => import('../pages/ItemDetail'));
 
 const LoadingSpinner = () => (
-  <div className="flex items-center justify-center min-h-screen">
-    <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
+  <div role="status" aria-label="Loading page" className="flex items-center justify-center min-h-screen">
+    <div aria-hidden="true" className="animate-spin rounded-full h-10 w-10 border-2 border-[#dcd5c7] border-t-[#7a3b2c]"></div>
   </div>
 );
 

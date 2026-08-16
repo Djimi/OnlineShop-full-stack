@@ -15,6 +15,7 @@ export function Button({
   size = 'md',
   isLoading = false,
   fullWidth = false,
+  type = 'button',
   className,
   disabled,
   ...rest
@@ -33,6 +34,7 @@ export function Button({
 
   return (
     <button
+      type={type}
       className={clsx(
         variantClasses[variant],
         sizeClasses[size],
@@ -41,6 +43,7 @@ export function Button({
         className
       )}
       disabled={disabled || isLoading}
+      aria-busy={isLoading || undefined}
       {...rest}
     >
       {isLoading ? (

@@ -3,6 +3,25 @@ import type { AuthState } from '../types/api';
 
 const STORAGE_KEY = 'onlineshop_auth';
 
+type StoredAuth = {
+  token: string;
+  userId: number;
+  username: string;
+};
+
+function isStoredAuth(value: unknown): value is StoredAuth {
+  if (!value || typeof value !== 'object') {
+    return false;
+  }
+
+  const authData = value as Partial<StoredAuth>;
+  return (
+    typeof authData.token === 'string' && authData.token.length > 0 &&
+    typeof authData.userId === 'number' && Number.isFinite(authData.userId) &&
+    typeof authData.username === 'string' && authData.username.length > 0
+  );
+}
+
 export const useAuthStore = create<AuthState>((set) => ({
   token: null,
   userId: null,
@@ -32,18 +51,26 @@ export const useAuthStore = create<AuthState>((set) => ({
 
   loadFromStorage: () => {
     const stored = localStorage.getItem(STORAGE_KEY);
-    if (stored) {
-      try {
-        const authData = JSON.parse(stored);
-        set({
-          token: authData.token,
-          userId: authData.userId,
-          username: authData.username,
-          isAuthenticated: true,
-        });
-      } catch (error) {
-        console.error('Failed to load auth from storage:', error);
+    if (!stored) {
+      return;
+    }
+
+    try {
+      const authData: unknown = JSON.parse(stored);
+      if (!isStoredAuth(authData)) {
+        localStorage.removeItem(STORAGE_KEY);
+        return;
       }
+
+      set({
+        token: authData.token,
+        userId: authData.userId,
+        username: authData.username,
+        isAuthenticated: true,
+      });
+    } catch (error) {
+      localStorage.removeItem(STORAGE_KEY);
+      console.error('Failed to load auth from storage:', error);
     }
   },
 }));

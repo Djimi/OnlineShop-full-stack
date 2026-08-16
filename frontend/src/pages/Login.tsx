@@ -1,4 +1,4 @@
-import { useNavigate, Link } from 'react-router';
+import { useNavigate, useLocation, Link } from 'react-router';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
@@ -19,6 +19,7 @@ type LoginFormData = z.infer<typeof loginSchema>;
 
 export default function Login() {
   const navigate = useNavigate();
+  const location = useLocation();
   const [isLoading, setIsLoading] = useState(false);
   const setAuth = useAuthStore((state) => state.setAuth);
 
@@ -40,7 +41,11 @@ export default function Login() {
 
       setAuth(response.token, response.userId, response.username);
       toast.success(`Welcome back, ${response.username}.`);
-      setTimeout(() => navigate('/items', { replace: true }), 500);
+      const from = (location.state as { from?: { pathname?: string; search?: string; hash?: string } } | null)?.from;
+      const destination = from?.pathname
+        ? `${from.pathname}${from.search ?? ''}${from.hash ?? ''}`
+        : '/items';
+      navigate(destination, { replace: true });
     } catch (error: unknown) {
       const errorMessage = getApiErrorMessage(error, 'Login failed. Please check your credentials.');
       toast.error(errorMessage);
