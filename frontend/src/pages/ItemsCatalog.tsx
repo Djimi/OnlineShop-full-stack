@@ -93,10 +93,10 @@ export default function ItemsCatalog() {
             </form>
 
             {/* Stock Filter */}
-            <div className="flex items-center gap-4">
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
               <Button
                 variant="secondary"
-                size="md"
+                size="sm"
                 type="button"
                 aria-pressed={showInStockOnly}
                 onClick={() => setShowInStockOnly((isEnabled) => !isEnabled)}

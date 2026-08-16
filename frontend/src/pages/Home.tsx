@@ -40,7 +40,7 @@ export default function Home() {
             </svg>
           </div>
 
-          <div className="absolute inset-x-6 bottom-4 md:inset-x-auto md:bottom-8 md:left-9 flex md:block items-end justify-between gap-6">
+          <div className="absolute inset-x-6 bottom-4 md:inset-x-9 md:bottom-8 flex md:block items-end justify-between gap-6">
             <div>
               <span className="block font-display italic text-ink text-xl md:text-2xl">
                 No. 04 — The Maren Carafe

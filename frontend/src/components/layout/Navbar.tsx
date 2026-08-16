@@ -23,7 +23,7 @@ export function Navbar() {
       </Link>
 
       <div className="hidden md:flex gap-10 justify-self-center">
-        <Link to="/items" className="nav-link">Shop</Link>
+        <Link to="/items" className="nav-link py-3">Shop</Link>
       </div>
 
       <div className="flex gap-2 sm:gap-6 items-center ml-auto md:justify-self-end md:ml-0">
@@ -38,10 +38,10 @@ export function Navbar() {
           </>
         ) : (
           <>
-            <Button href="/login" size="md">
+            <Button href="/login" size="sm">
               Sign in
             </Button>
-            <Button href="/register" size="md" aria-label="Create account">
+            <Button href="/register" size="sm" aria-label="Create account">
               <span className="sm:hidden">Join</span>
               <span className="hidden sm:inline">Create account</span>
             </Button>

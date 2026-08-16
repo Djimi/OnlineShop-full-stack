@@ -131,6 +131,7 @@
     color: var(--color-ink);
     border-bottom-width: 2px;
     border-bottom-color: var(--color-ink);
+    background-color: var(--color-paper-deep);
   }
 
   .btn-danger {
