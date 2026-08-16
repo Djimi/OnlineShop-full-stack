@@ -288,7 +288,7 @@ def test_preflight_rejects_missing_ecr_digest(env, capsys):
 
 def test_preflight_ecr_read_error_is_not_absence(env, capsys):
     class BrokenEcr:
-        def batch_get_image(self, repositoryName, imageIds):
+        def describe_images(self, repositoryName, imageIds=None, **kwargs):
             raise client_error("ThrottlingException")
 
     env.ecr = BrokenEcr()

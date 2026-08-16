@@ -229,6 +229,8 @@ jobs:
           cache-to: type=gha,mode=max
 
       # 5. Service-reported ECR digests: immutable identity, never mutable tags
+      # describe-images (not batch-get-image) resolves digests: batch-get-image
+      # returns a null imageDigest for multi-arch OCI index manifests.
       - name: Read back ECR image digests
         id: digests
         env:
@@ -241,13 +243,14 @@ jobs:
             repository="${entry##*:}"
             digest=""
             for attempt in 1 2 3 4 5 6; do
-              digest=$(aws ecr batch-get-image \
-                --region "$AWS_REGION" \
-                --repository-name "$repository" \
-                --image-ids "imageTag=sha-$WORKFLOW_SHA" \
-                --query 'images[0].imageDigest' \
-                --output text)
-              [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]] && break
+              if digest=$(aws ecr describe-images \
+                  --region "$AWS_REGION" \
+                  --repository-name "$repository" \
+                  --image-ids "imageTag=sha-$WORKFLOW_SHA" \
+                  --query 'imageDetails[0].imageDigest' \
+                  --output text); then
+                [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]] && break
+              fi
               if [[ "$attempt" -eq 6 ]]; then
                 echo "ERROR: image sha-$WORKFLOW_SHA for $repository not visible after $attempt attempts (ECR propagation delay?)" >&2
                 exit 1

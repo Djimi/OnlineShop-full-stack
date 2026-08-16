@@ -329,14 +329,18 @@ def test_ecr_digest_read_back_step_present() -> None:
     readbacks = [
         step
         for step in _steps(ci["jobs"]["publish"])
-        if "batch-get-image" in str(step.get("run", ""))
+        if "describe-images" in str(step.get("run", ""))
     ]
     assert len(readbacks) == 1
     step = readbacks[0]
     assert step["env"]["WORKFLOW_SHA"] == "${{ github.sha }}"
     assert "imageTag=sha-$WORKFLOW_SHA" in step["run"]
-    # A freshly pushed multi-arch index can lag batch-get-image visibility, so
-    # the read-back must re-query bounded instead of failing on the first miss.
+    # batch-get-image returns a null imageDigest for multi-arch OCI index
+    # manifests, so the read-back resolves via describe-images
+    # (imageDetails[0].imageDigest) and must re-query bounded instead of
+    # failing on the first miss.
+    assert "imageDetails[0].imageDigest" in step["run"]
+    assert "batch-get-image" not in step["run"]
     assert "for attempt in 1 2 3 4 5 6" in step["run"]
     assert "sleep 5" in step["run"]
     assert "not visible" in step["run"]

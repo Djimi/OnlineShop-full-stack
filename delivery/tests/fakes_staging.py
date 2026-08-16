@@ -330,14 +330,25 @@ class FakeEcr:
             "gateway": DIGEST_C,
         }
 
-    def batch_get_image(self, repositoryName, imageIds):
-        requested = imageIds[0].get("imageDigest")
+    def describe_images(self, repositoryName, imageIds=None, **kwargs):
         key = next(
             (name for name, repo in REPOSITORIES.items() if repo == repositoryName), None
         )
-        if key is None or self.digests.get(key) != requested:
-            return {"images": []}
-        return {"images": [{"imageDigest": requested}]}
+        if key is None:
+            return {"imageDetails": []}
+        details = []
+        for spec in imageIds or []:
+            requested = spec.get("imageDigest")
+            if self.digests.get(key) != requested:
+                return {"imageDetails": []}
+            details.append(
+                {
+                    "imageDigest": requested,
+                    "imageTags": [],
+                    "imageManifestMediaType": "application/vnd.oci.image.index.v1+json",
+                }
+            )
+        return {"imageDetails": details}
 
 
 class FakeElb:

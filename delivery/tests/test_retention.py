@@ -199,7 +199,7 @@ def test_protected_release_tags_window_plus_newest_10_margin():
 
 
 class ErrorEcr(FakeEcr):
-    def batch_get_image(self, repositoryName, imageIds):
+    def describe_images(self, repositoryName, imageIds=None, **kwargs):
         raise client_error("InternalError")
 
 
@@ -376,9 +376,10 @@ def test_audit_missing_ecr_tag_fails_closed(env, capsys):
     report = json.loads(output.out)
     entry = next(e for e in report["releases"] if e["releaseId"] == "release-0003")
     assert entry["complete"] is False
-    # a missing tag is now a ReadError: bounded retries exhausted (absence
-    # after a push is not provable), not a definitive ECR_TAG_NOT_FOUND
-    assert [failure["kind"] for failure in entry["failures"]] == ["READ_ERROR"] * 3
+    # a genuinely missing tag is a describe-images ImageNotFoundException ->
+    # AbsentResourceError -> a definitive ECR_TAG_NOT_FOUND; exhausted retries
+    # on empty responses stay READ_ERROR (absence after a push is not provable)
+    assert [failure["kind"] for failure in entry["failures"]] == ["ECR_TAG_NOT_FOUND"] * 3
 
 
 def test_audit_digest_mismatch_fails_closed(env, capsys):

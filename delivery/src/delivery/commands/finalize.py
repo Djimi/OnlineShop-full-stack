@@ -518,10 +518,10 @@ def _current_window_entry(ctx, ids, release_id, candidate) -> RollbackWindowEntr
         repository = ids["ecrRepositories"][key]
         expected = getattr(candidate.artifacts, key).digest
         try:
-            observed = ecr_client.batch_get_image(
+            observed = ecr_client.describe_images(
                 repositoryName=repository, imageIds=[{"imageTag": release_id}]
             )
-            images = observed.get("images") or []
+            images = observed.get("imageDetails") or []
             if not images or images[0].get("imageDigest") != expected:
                 failures.append(f"ECR tag {repository}:{release_id} does not resolve to {expected}")
         except ClientError as error:
@@ -550,10 +550,16 @@ def _mint_ecr_tags(
     for key in _SERVICE_KEYS:
         repository = ids["ecrRepositories"][key]
         expected = getattr(candidate.artifacts, key).digest
-        existing = ecr_client.batch_get_image(
-            repositoryName=repository, imageIds=[{"imageTag": release_id}]
-        )
-        images = existing.get("images") or []
+        try:
+            existing = ecr_client.describe_images(
+                repositoryName=repository, imageIds=[{"imageTag": release_id}]
+            )
+        except ClientError as error:
+            if absent_or_read(error):
+                existing = {"imageDetails": []}
+            else:
+                raise ReadError(f"describe_images failed for {repository}") from error
+        images = existing.get("imageDetails") or []
         if images:
             observed_digest = images[0].get("imageDigest")
             if observed_digest != expected:
@@ -575,10 +581,15 @@ def _mint_ecr_tags(
                 f"no imageManifest recorded for {expected} in {repository}"
             )
         put_image(ecr_client, repository, release_id, manifest_bytes)
-        readback = ecr_client.batch_get_image(
-            repositoryName=repository, imageIds=[{"imageTag": release_id}]
-        )
-        readback_images = readback.get("images") or []
+        try:
+            readback = ecr_client.describe_images(
+                repositoryName=repository, imageIds=[{"imageTag": release_id}]
+            )
+        except ClientError as error:
+            raise MutationVerificationError(
+                f"ECR tag read-back failed for {repository}:{release_id}"
+            ) from error
+        readback_images = readback.get("imageDetails") or []
         if not readback_images or readback_images[0].get("imageDigest") != expected:
             raise MutationVerificationError(
                 f"ECR tag read-back failed for {repository}:{release_id}"

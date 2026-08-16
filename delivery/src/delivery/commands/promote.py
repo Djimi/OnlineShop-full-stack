@@ -39,12 +39,14 @@ from datetime import UTC, datetime
 from pathlib import Path
 from uuid import uuid4
 
+from botocore.exceptions import ClientError
 from pydantic import ValidationError as PydanticValidationError
 
 from .. import frontend as frontend_utils
 from .. import live_marker
 from ..aws import context as aws_context
 from ..aws import get_object_sha256
+from ..aws.readback import absent_or_read
 from ..errors import AbsentResourceError, ReadError, ValidationError
 from ..github import GitHubApi
 from ..models import (
@@ -393,10 +395,17 @@ def _revalidate_ecr_digests(ctx, ids: dict, manifest: CandidateManifest) -> None
     for key in _SERVICE_KEYS:
         repository = ids["ecrRepositories"][key]
         expected = getattr(manifest.artifacts, key).digest
-        response = ecr_client.batch_get_image(
-            repositoryName=repository, imageIds=[{"imageDigest": expected}]
-        )
-        images = response.get("images") or []
+        try:
+            response = ecr_client.describe_images(
+                repositoryName=repository, imageIds=[{"imageDigest": expected}]
+            )
+        except ClientError as error:
+            if absent_or_read(error):
+                raise AbsentResourceError(
+                    f"digest {expected} does not exist in repository {repository}"
+                ) from error
+            raise ReadError(f"describe_images failed for {repository}") from error
+        images = response.get("imageDetails") or []
         if not images:
             raise AbsentResourceError(
                 f"digest {expected} does not exist in repository {repository}"

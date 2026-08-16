@@ -68,7 +68,9 @@ Test business logic in isolation. Mock all dependencies. These are your primary 
 
 **Domain events:** When testing code that emits domain events, assert event properties — never only the event type. The right event type with wrong data is still a bug.
 
-**Real time:** Unit tests must never burn real time in retry/backoff loops. Bounded retries keep their attempt budgets in tests, but the sleep must be injectable or disabled (e.g., the `delivery/tests/conftest.py` autouse fixture no-ops `ecr._sleep`; the production delay stays 5s/6 attempts). Test fakes must also mirror the real AWS response shape — `batch_get_image` responses carry `imageTag` alongside `imageDigest` — or retry logic keyed on those fields never converges and tests fail after minutes of wall time.
+**Real time:** Unit tests must never burn real time in retry/backoff loops. Bounded retries keep their attempt budgets in tests, but the sleep must be injectable or disabled (e.g., the `delivery/tests/conftest.py` autouse fixture no-ops `ecr._sleep`; the production delay stays 5s/6 attempts). Test fakes must also mirror the real AWS response shape — `describe_images` responses carry `imageDigest` plus the `imageTags` list on `imageDetails` entries — or retry logic keyed on those fields never converges and tests fail after minutes of wall time.
+
+**ECR digest resolution:** `aws ecr batch-get-image` returns a null `imageDigest` in the image `imageId` for multi-arch OCI index manifests (`application/vnd.oci.image.index.v1+json`), so tag/digest resolution must go through `describe_images` (`imageDetails[0].imageDigest`); `batch-get-image` remains only for fetching manifest bytes (e.g., server-side tag minting).
 
 ### Integration Tests
 Verify components work together with real dependencies. Use Testcontainers for PostgreSQL and Redis—never H2 or in-memory substitutes. Test repository queries, controller request handling, and database constraints. These catch issues unit tests miss.

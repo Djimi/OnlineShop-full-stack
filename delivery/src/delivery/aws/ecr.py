@@ -28,21 +28,26 @@ def _batch_get_digests_retrying(
 ) -> dict[str, str]:
     """Repeatedly resolve tags until every requested digest is visible.
 
-    A freshly pushed multi-arch index can lag batch_get_image visibility, so
-    empty or incomplete responses are retried for a bounded number of attempts.
-    Exhausted retries raise ReadError: absence after a push is not provable.
-    ClientErrors propagate to the caller for its own classification.
+    Digests are resolved via describe_images: batch_get_image returns a null
+    imageDigest for multi-arch OCI index manifests, so it is unusable for
+    digest resolution. Empty or incomplete responses are retried for a bounded
+    number of attempts. Exhausted retries raise ReadError: absence after a
+    push is not provable. ClientErrors propagate to the caller for its own
+    classification.
     """
     for attempt in range(attempts):
-        response = client.batch_get_image(
-            repositoryName=repository, imageIds=[{"imageTag": tag} for tag in tags]
+        response = client.describe_images(
+            repositoryName=repository,
+            imageIds=[{"imageTag": tag} for tag in tags],
         )
         digests: dict[str, str] = {}
-        for image in response.get("images") or []:
-            tag = image.get("imageTag")
-            digest = image.get("imageDigest")
-            if tag and digest:
-                digests[tag] = digest
+        for detail in response.get("imageDetails") or []:
+            digest = detail.get("imageDigest")
+            if not isinstance(digest, str) or not digest:
+                continue
+            for tag in detail.get("imageTags") or []:
+                if tag in tags:
+                    digests[tag] = digest
         missing = [tag for tag in tags if tag not in digests]
         if not missing:
             return digests
@@ -61,7 +66,7 @@ def repository_digest(client: Any, repository: str, tag: str) -> str:
     except ClientError as error:
         if absent_or_read(error):
             raise AbsentResourceError(f"image {repository}:{tag} not found") from error
-        raise ReadError(f"batch_get_image failed for {repository}:{tag}") from error
+        raise ReadError(f"describe_images failed for {repository}:{tag}") from error
     return digests[tag]
 
 
@@ -70,7 +75,7 @@ def batch_get_image_digests(client: Any, repository: str, tags: list[str]) -> di
     try:
         return _batch_get_digests_retrying(client, repository, tags)
     except ClientError as error:
-        raise ReadError(f"batch_get_image failed for {repository}") from error
+        raise ReadError(f"describe_images failed for {repository}") from error
 
 
 def put_image(client: Any, repository: str, tag: str, image_manifest: bytes) -> dict:

@@ -382,7 +382,7 @@ def test_lifecycle_ecr_digest_missing_fails_before_ecs_mutation(runner, capsys):
 
 def test_lifecycle_ecr_read_error_is_error_not_absence(runner, capsys):
     class BrokenEcr(FakeEcr):
-        def batch_get_image(self, repositoryName, imageIds):
+        def describe_images(self, repositoryName, imageIds=None, **kwargs):
             raise client_error("AccessDenied")
 
     runner.ecr = BrokenEcr()
