@@ -122,6 +122,26 @@ class RateLimitServiceTest {
     }
 
     @Test
+    void privateProxyUsesLastForwardedForEntryEvenWhenItDiffersFromRemoteAddr() {
+        RateLimitService service = buildService(bucketBuilderReturning(mock(BucketProxy.class)));
+        MockHttpServletRequest request = new MockHttpServletRequest("GET", "/items");
+        request.setRemoteAddr("10.0.0.4");
+        request.addHeader("X-Forwarded-For", "10.0.0.4, 203.0.113.99");
+
+        assertThat(service.resolveClientIp(request)).isEqualTo("203.0.113.99");
+    }
+
+    @Test
+    void cloudFrontViewerAddressIsIgnoredForUntrustedPeer() {
+        RateLimitService service = buildService(bucketBuilderReturning(mock(BucketProxy.class)));
+        MockHttpServletRequest request = new MockHttpServletRequest("GET", "/items");
+        request.setRemoteAddr("198.51.100.7");
+        request.addHeader("CloudFront-Viewer-Address", "203.0.113.99:53049");
+
+        assertThat(service.resolveClientIp(request)).isEqualTo("198.51.100.7");
+    }
+
+    @Test
     void cloudFrontViewerAddressTakesPrecedenceAndStripsPort() {
         RateLimitService service = buildService(bucketBuilderReturning(mock(BucketProxy.class)));
         MockHttpServletRequest request = new MockHttpServletRequest("GET", "/items");

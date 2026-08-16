@@ -44,6 +44,14 @@ public class RateLimitService {
     public String resolveClientIp(HttpServletRequest request) {
         String remoteAddr = request.getRemoteAddr();
         if (isTrustedProxy(remoteAddr)) {
+            // Prefer the CloudFront-Viewer-Address header (overwritten by
+            // CloudFront, so per-client keys behind CF). This is only safe
+            // while the ALB ingress is restricted to CloudFront's managed
+            // prefix list; if the ALB stays publicly reachable, the header
+            // can be forged by direct ALB traffic. The XFF fallback takes
+            // the LAST entry, which the ALB appends and a client cannot
+            // spoof; it resolves to the CF edge IP when CF is in front
+            // (shared per-edge bucket), which is why CF takes precedence.
             String cloudFrontViewer = request.getHeader("CloudFront-Viewer-Address");
             if (cloudFrontViewer != null && !cloudFrontViewer.isEmpty()) {
                 return stripPort(cloudFrontViewer);

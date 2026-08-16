@@ -48,7 +48,7 @@ api.interceptors.response.use(
     }
 
     if (error.response?.status === 429) {
-      const hadToken = Boolean(error.config?.headers?.Authorization);
+      const hadToken = error.config?.headers?.has('Authorization');
       if (hadToken) {
         // An authenticated request was throttled - most likely a stale session
         // burning the failed-auth bucket; send the user to login like a 401.
