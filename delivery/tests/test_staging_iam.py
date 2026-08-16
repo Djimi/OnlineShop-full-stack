@@ -20,11 +20,13 @@ STAGING_TD_RESOURCES = [
     "arn:aws:ecs:eu-north-1:799111666795:task-definition/onlineshop-*-staging-v2:*",
     "arn:aws:ecs:eu-north-1:799111666795:task-definition/onlineshop-staging-sql-runner:*",
 ]
-TD_ACTIONS = {
+TD_SCOPED_ACTIONS = {
     "ecs:RegisterTaskDefinition",
+    "ecs:DeleteTaskDefinitions",
+}
+TD_UNSCOPED_ACTIONS = {
     "ecs:DescribeTaskDefinition",
     "ecs:DeregisterTaskDefinition",
-    "ecs:DeleteTaskDefinitions",
 }
 
 
@@ -161,18 +163,25 @@ def test_policy_run_task_scoped_to_staging_cluster_only():
     assert "Condition" not in statement
 
 
-def test_policy_td_actions_scoped_to_staging_task_definition_families():
-    for statement in _policy()["Statement"]:
-        stmt_actions = statement.get("Action")
-        if isinstance(stmt_actions, str):
-            stmt_actions = [stmt_actions]
-        if TD_ACTIONS & set(stmt_actions):
-            assert set(statement["Resource"]) == set(STAGING_TD_RESOURCES)
-            for resource in statement["Resource"]:
-                assert resource.startswith(
-                    "arn:aws:ecs:eu-north-1:799111666795:task-definition/"
-                )
-                assert "staging" in resource
+def test_policy_scopes_supported_td_actions_to_staging_families():
+    statement = next(
+        entry
+        for entry in _policy()["Statement"]
+        if entry["Sid"] == "RegisterAndDeleteStagingTaskDefinitions"
+    )
+    assert set(statement["Action"]) == TD_SCOPED_ACTIONS
+    assert set(statement["Resource"]) == set(STAGING_TD_RESOURCES)
+
+
+def test_policy_wildcards_only_td_actions_without_resource_support():
+    statement = next(
+        entry
+        for entry in _policy()["Statement"]
+        if entry["Sid"] == "InspectAndDeregisterTaskDefinitionsWithoutResourceSupport"
+    )
+    assert set(statement["Action"]) == TD_UNSCOPED_ACTIONS
+    assert statement["Resource"] == "*"
+    assert TD_SCOPED_ACTIONS.isdisjoint(statement["Action"])
 
 
 def test_policy_ecs_actions_never_touch_production_cluster():
@@ -184,6 +193,9 @@ def test_policy_ecs_actions_never_touch_production_cluster():
             stmt_actions = [stmt_actions]
         if any(action.startswith("ecs:") for action in stmt_actions):
             resources = statement["Resource"]
+            if resources == "*":
+                assert set(stmt_actions) == TD_UNSCOPED_ACTIONS
+                continue
             if isinstance(resources, str):
                 resources = [resources]
             for resource in resources:

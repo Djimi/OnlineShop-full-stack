@@ -2,18 +2,25 @@
   "Version": "2012-10-17",
   "Statement": [
     {
-      "Sid": "RegisterAndInspectStagingTaskDefinitions",
+      "Sid": "RegisterAndDeleteStagingTaskDefinitions",
       "Effect": "Allow",
       "Action": [
         "ecs:RegisterTaskDefinition",
-        "ecs:DescribeTaskDefinition",
-        "ecs:DeregisterTaskDefinition",
         "ecs:DeleteTaskDefinitions"
       ],
       "Resource": [
         "arn:aws:ecs:eu-north-1:799111666795:task-definition/onlineshop-*-staging-v2:*",
         "arn:aws:ecs:eu-north-1:799111666795:task-definition/onlineshop-staging-sql-runner:*"
       ]
+    },
+    {
+      "Sid": "InspectAndDeregisterTaskDefinitionsWithoutResourceSupport",
+      "Effect": "Allow",
+      "Action": [
+        "ecs:DescribeTaskDefinition",
+        "ecs:DeregisterTaskDefinition"
+      ],
+      "Resource": "*"
     },
     {
       "Sid": "InspectStagingServicesAndTasks",

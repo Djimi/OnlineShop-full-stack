@@ -16,6 +16,15 @@ artifact names containing that run/attempt; artifact entries do not carry an
 attempt field. Candidate-manifest validation binds the same identity again
 after download.
 
+The staging role keeps task-definition registration and deletion scoped to
+the staging service and SQL-runner families. AWS ECS exposes no resource-level
+authorization for `DescribeTaskDefinition` or `DeregisterTaskDefinition`, so
+those two actions alone require `Resource: "*"`. This is an unavoidable IAM
+residual risk, not an application-code sandbox: it is bounded operationally by
+the narrow OIDC repository/ref trust, short sessions, reviewed workflows, and
+the remaining scoped registration, deletion, PassRole, RunTask, and service
+mutation permissions.
+
 ## Layout
 
 - `src/delivery/errors.py` — exception hierarchy with stable machine-readable codes
