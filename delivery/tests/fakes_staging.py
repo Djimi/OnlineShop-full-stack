@@ -7,6 +7,7 @@ from datetime import UTC, datetime, timedelta
 
 from conftest import client_error
 
+from delivery.errors import ValidationError
 from delivery.serialization import canonical_json
 
 ACCOUNT = "799111666795"
@@ -420,10 +421,17 @@ class FakeGitHub:
         self.releases = releases if releases is not None else []
         self._assets = {}
 
-    def list_run_artifacts(self, run_id, run_attempt):
+    def list_run_artifacts(self, run_id, run_attempt, expected_names):
         artifacts = []
         for name in self.artifacts.get((run_id, run_attempt), []):
-            artifacts.append({"id": 1000 + len(artifacts), "name": name})
+            if name in expected_names:
+                artifacts.append({"id": 1000 + len(artifacts), "name": name})
+        missing = expected_names - {artifact["name"] for artifact in artifacts}
+        if missing:
+            raise ValidationError(
+                f"missing artifacts {', '.join(sorted(missing))} "
+                f"for run {run_id} attempt {run_attempt}"
+            )
         return artifacts
 
     def list_releases(self):

@@ -14,6 +14,7 @@ from pathlib import Path
 from conftest import client_error
 
 from delivery import live_marker
+from delivery.errors import ValidationError
 from delivery.frontend import content_checksum
 
 ACCOUNT = "799111666795"
@@ -637,22 +638,37 @@ class FakeGithub:
             }
         return dict(self.run, id=run_id)
 
-    def list_run_artifacts(self, run_id, run_attempt):
-        return [
+    def list_run_artifacts(self, run_id, run_attempt, expected_names):
+        artifacts = [
             {"id": 1000 + index, "name": name}
             for index, name in enumerate(self.run_artifacts)
+            if name in expected_names
         ]
+        missing = expected_names - {artifact["name"] for artifact in artifacts}
+        if missing:
+            raise ValidationError(
+                f"missing artifacts {', '.join(sorted(missing))} "
+                f"for run {run_id} attempt {run_attempt}"
+            )
+        return artifacts
 
-    def list_artifacts_for_run(self, run_id):
+    def list_artifacts_for_run(self, run_id, run_attempt, expected_names):
         artifacts = []
         for name, attempt in self.artifacts_by_run.get(run_id, []):
-            artifacts.append(
-                {
-                    "id": 2000 + len(artifacts),
-                    "name": name,
-                    "run_attempt": attempt,
-                    "archive_download_url": f"https://example.com/artifacts/{name}",
-                }
+            if name in expected_names and attempt == run_attempt:
+                artifacts.append(
+                    {
+                        "id": 2000 + len(artifacts),
+                        "name": name,
+                        "run_attempt": attempt,
+                        "archive_download_url": f"https://example.com/artifacts/{name}",
+                    }
+                )
+        missing = expected_names - {artifact["name"] for artifact in artifacts}
+        if missing:
+            raise ValidationError(
+                f"missing artifacts {', '.join(sorted(missing))} "
+                f"for run {run_id} attempt {run_attempt}"
             )
         return artifacts
 

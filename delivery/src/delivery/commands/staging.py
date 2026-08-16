@@ -692,10 +692,6 @@ class _StagingMachine:
 
     def _revalidate_github_artifacts(self) -> None:
         api = GitHubApi(self._repository())
-        artifacts = api.list_run_artifacts(
-            self.identity.workflowRunId, self.identity.workflowRunAttempt
-        )
-        names = {artifact["name"] for artifact in artifacts}
         run = self.identity.workflowRunId
         attempt = self.identity.workflowRunAttempt
         required = {
@@ -704,12 +700,16 @@ class _StagingMachine:
             f"sboms-{run}-{attempt}",
             f"test-results-{run}-{attempt}",
         }
-        missing = sorted(required - names)
-        if missing:
+        try:
+            api.list_run_artifacts(run, attempt, required)
+        except ValidationError as error:
+            if not str(error).startswith("missing artifacts "):
+                raise
+            missing = str(error).split(" for run ", 1)[0].removeprefix("missing artifacts ")
             raise ValidationError(
                 f"candidate artifact set is incomplete (CT-CAND-03): "
-                f"missing {', '.join(missing)} for run {run} attempt {attempt}"
-            )
+                f"missing {missing} for run {run} attempt {attempt}"
+            ) from error
 
     def _repository(self) -> str:
         return self.manifest.source.repository
