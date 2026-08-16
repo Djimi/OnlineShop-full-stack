@@ -377,6 +377,7 @@ Learned during staging provisioning (2026-08-02). Full narrative: [AWS_COMMANDS_
 | `taskId length should be one of [32,36]` / `Unexpected number of separators` | An empty/`None` task ARN was passed to `describe-tasks` | Guard: `[ "$TASK_ARN" != "None" ] && [ -n "$TASK_ARN" ]` before describing |
 | `Invalid control character` parsing `--container-definitions` | Multi-line strings (SQL, JSON) inline in CLI params | Never inline complex JSON: build with python `json.dump` to a temp file, use `--cli-input-json file://` |
 | `The Systems Manager parameter name specified for secret ... is invalid` | `secrets[].valueFrom` with the `:json-key::` suffix requires the **full ARN** (name alone is treated as an SSM parameter) | Resolve names via `describe-secret --query ARN` before building TD JSON |
+| `Tags can not be empty` from `RegisterTaskDefinition` | `describe-task-definition --include TAGS` returns `tags: []`, but registration rejects an explicit empty tag list | Omit `tags` from the registration payload when the observed list is empty; preserve and pass it only when non-empty |
 
 ### ECS anti-patterns
 

@@ -272,6 +272,18 @@ def test_lifecycle_first_invocation_happy_path(runner, capsys):
     assert "prepared for candidate" in capsys.readouterr().out
 
 
+def test_lifecycle_keeps_services_stopped_until_reset_finishes(runner, monkeypatch):
+    def fake_sql(ctx, ids, steps, db_host):
+        assert all(runner.ecs.desired_counts[service] == 0 for service in SERVICES)
+        runner.sql_steps.append(list(steps))
+        return [{} for _ in steps]
+
+    monkeypatch.setattr("delivery.commands.staging.execute_sql_steps", fake_sql)
+
+    assert main(runner.lifecycle_argv()) == 0
+    assert all(runner.ecs.desired_counts[service] == 1 for service in SERVICES)
+
+
 def test_lifecycle_continuation_passed_completes(runner):
     assert main(runner.lifecycle_argv()) == 0
     code = main(runner.continue_argv("passed"))

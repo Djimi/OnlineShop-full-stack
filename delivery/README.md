@@ -53,7 +53,7 @@ CLI exit code (see below).
 
 - `candidate validate --manifest <file>` — validate a candidate manifest
 - `snapshot production --out <file> [--profile NAME] [--region REGION] [--environment ENV] [--identifiers FILE]` — capture and internally validate the production snapshot
-- `staging lifecycle --candidate <file> --frontend-archive <file> --repo-path DIR --out <file> [--e2e-url-out FILE]` — first invocation of the staging lifecycle (through E2E-prepared)
+- `staging lifecycle --candidate <file> --frontend-archive <file> --repo-path DIR --out <file> [--e2e-url-out FILE]` — first invocation of the staging lifecycle (through E2E-prepared); it keeps every service at desired `0` while RDS starts and resets, then registers each digest-pinned candidate revision before starting that service, so a stale task definition or database host can never start first
 - `staging lifecycle --continue --e2e-conclusion <passed|failed> --repo-path DIR --out <file>` — second invocation: record the real cloud E2E conclusion, stop/verify cleanup, release the ownership marker, complete the record
 - `staging apply --candidate <file> --repo-path DIR --out <file>` — deploy exact candidate digests to a running staging environment (no start/stop)
 - `staging reconcile --out <file>` — OP-STG-05 ownerless-RDS reconciliation (stops ownerless running staging RDS and exits non-zero to surface the event; a genuinely absent staging DB is a no-op success)

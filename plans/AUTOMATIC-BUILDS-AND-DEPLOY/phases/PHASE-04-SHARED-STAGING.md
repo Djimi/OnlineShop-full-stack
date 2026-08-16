@@ -19,16 +19,18 @@ stage-candidate.yml (workflow_dispatch: candidate run id + attempt)
   v
 QUEUED → OWNED ────────────── marker acquire on staging RDS (fail-closed
   │       revalidate: GitHub artifacts of the EXACT run/attempt +
-  │       ECR digests via ecr:BatchGetImage (read-only)
+  │       ECR digests via DescribeImages / ecr:DescribeImages (read-only)
   v
-STARTING → RESETTING ──────── RDS start; tenant DB reset through the ECS
+STARTING → RESETTING ──────── RDS start while services stay at desired 0;
+  │       tenant DB reset through the ECS
   │       SQL runner: schema + grants + seed + connectivity proof,
   │       every step with mandatory read-back (SQL sources resolved
   │       from the checkout via --repo-path, fail-closed)
   v
-DEPLOYING ─────────────────── digest-pinned image-only TD diff,
-  │       ordered auth+items → gateway, bounded waiters,
-  │       running-digest observation
+DEPLOYING ─────────────────── digest-pinned image-only TD diff registered
+  │       before each service starts; ordered auth+items → gateway, bounded waiters,
+  │       running-digest observation; stale task definitions and database
+  │       hosts never start before reset and candidate registration
   v
 COMPATIBILITY ─────────────── AD-15: previous-official-frontend read-only
   │       journey, or bootstrapException when no official release exists
@@ -99,8 +101,8 @@ Both workflows assume `arn:aws:iam::799111666795:role/github-actions-staging`
 pass). The desired policy artifact
 `delivery/staging-iam/staging-deploy-policy.json` enforces:
 
-- scoped read-only ECR on the three repositories (`ecr:BatchGetImage`,
-  `ecr:DescribeImages` — no `PutImage`);
+- scoped read-only ECR digest lookup on the three repositories
+  (`ecr:DescribeImages` — no manifest fetch and no `PutImage`);
 - `ecs:RunTask` scoped to the staging cluster with an
   `ecs:task-definition-family` condition (sql-runner family only);
 - TD register/inspect/deregister scoped to staging families;

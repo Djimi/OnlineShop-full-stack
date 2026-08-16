@@ -755,7 +755,7 @@ class _StagingMachine:
         self._start_db(rds_client, self.ids["dbInstance"])
         ecs_client = aws_context.client_for(self.ctx, "ecs")
         for service in self.ids["services"]:
-            self._scale(ecs_client, service, 1)
+            self._scale(ecs_client, service, 0)
             self.mutation_began = True
 
     def _reset_database(self) -> None:
@@ -919,6 +919,8 @@ class _StagingMachine:
                 replace_container_images(td, {matches[0]: target}),
             )
             update_service(ecs_client, self.ids["cluster"], service, revision_arn)
+            if service_observed.get("desiredCount") == 0:
+                self._scale(ecs_client, service, 1)
             deployment_id = _primary_deployment_id(
                 describe_services(ecs_client, self.ids["cluster"], [service])[service],
                 service,
