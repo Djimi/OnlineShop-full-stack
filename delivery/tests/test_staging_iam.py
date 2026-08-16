@@ -11,6 +11,9 @@ STAGING_CLUSTER_SERVICE = (
     "arn:aws:ecs:eu-north-1:799111666795:service/onlineshop-staging-cluster/onlineshop-*-staging"
 )
 STAGING_CLUSTER_ARN = "arn:aws:ecs:eu-north-1:799111666795:cluster/onlineshop-staging-cluster"
+STAGING_TASK_ARN = (
+    "arn:aws:ecs:eu-north-1:799111666795:task/onlineshop-staging-cluster/*"
+)
 ECR_REPOSITORY_ARNS = [
     "arn:aws:ecr:eu-north-1:799111666795:repository/onlineshop-auth",
     "arn:aws:ecr:eu-north-1:799111666795:repository/onlineshop-items",
@@ -163,6 +166,23 @@ def test_policy_run_task_scoped_to_staging_cluster_only():
     assert statement["Condition"] == {"ArnEquals": {"ecs:cluster": STAGING_CLUSTER_ARN}}
 
 
+def test_policy_scopes_service_and_task_reads_to_staging():
+    by_sid = {statement["Sid"]: statement for statement in _policy()["Statement"]}
+    services = by_sid["InspectStagingServices"]
+    assert services["Action"] == "ecs:DescribeServices"
+    assert services["Resource"] == STAGING_CLUSTER_SERVICE
+
+    tasks = by_sid["InspectStagingTasks"]
+    assert tasks["Action"] == "ecs:DescribeTasks"
+    assert tasks["Resource"] == STAGING_TASK_ARN
+    assert tasks["Condition"] == {"ArnEquals": {"ecs:cluster": STAGING_CLUSTER_ARN}}
+
+    listing = by_sid["ListStagingTasksWithoutResourceSupport"]
+    assert listing["Action"] == "ecs:ListTasks"
+    assert listing["Resource"] == "*"
+    assert listing["Condition"] == {"ArnEquals": {"ecs:cluster": STAGING_CLUSTER_ARN}}
+
+
 def test_policy_scopes_supported_td_actions_to_staging_families():
     statement = next(
         entry
@@ -194,7 +214,9 @@ def test_policy_ecs_actions_never_touch_production_cluster():
         if any(action.startswith("ecs:") for action in stmt_actions):
             resources = statement["Resource"]
             if resources == "*":
-                assert set(stmt_actions) == TD_UNSCOPED_ACTIONS
+                assert set(stmt_actions) == TD_UNSCOPED_ACTIONS or stmt_actions == [
+                    "ecs:ListTasks"
+                ]
                 continue
             if isinstance(resources, str):
                 resources = [resources]

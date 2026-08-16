@@ -440,7 +440,9 @@ scripts/ecs-run-sql.sh --database <db> --file <schema.sql> --verify "\dt"
 
 `ecs:RunTask` is authorized against the task-definition ARN, not the cluster
 ARN. Scope the resource to the staging SQL-runner family and constrain the
-cluster with `ArnEquals` on `ecs:cluster`. For cleanup, RDS accepts
+cluster with `ArnEquals` on `ecs:cluster`. Likewise, `ecs:DescribeTasks` uses
+task ARNs; `ecs:ListTasks` requires `Resource: "*"` and should be constrained
+with the same `ecs:cluster` condition. For cleanup, RDS accepts
 `StopDBInstance` only from `available`; wait through transient start or
 configuration states, and if the instance is already `stopping`, wait for
 `stopped` without issuing a duplicate stop.

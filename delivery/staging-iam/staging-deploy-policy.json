@@ -23,17 +23,32 @@
       "Resource": "*"
     },
     {
-      "Sid": "InspectStagingServicesAndTasks",
+      "Sid": "InspectStagingServices",
       "Effect": "Allow",
-      "Action": [
-        "ecs:DescribeServices",
-        "ecs:ListTasks",
-        "ecs:DescribeTasks"
-      ],
-      "Resource": [
-        "arn:aws:ecs:eu-north-1:799111666795:cluster/onlineshop-staging-cluster",
-        "arn:aws:ecs:eu-north-1:799111666795:service/onlineshop-staging-cluster/onlineshop-*-staging"
-      ]
+      "Action": "ecs:DescribeServices",
+      "Resource": "arn:aws:ecs:eu-north-1:799111666795:service/onlineshop-staging-cluster/onlineshop-*-staging"
+    },
+    {
+      "Sid": "InspectStagingTasks",
+      "Effect": "Allow",
+      "Action": "ecs:DescribeTasks",
+      "Resource": "arn:aws:ecs:eu-north-1:799111666795:task/onlineshop-staging-cluster/*",
+      "Condition": {
+        "ArnEquals": {
+          "ecs:cluster": "arn:aws:ecs:eu-north-1:799111666795:cluster/onlineshop-staging-cluster"
+        }
+      }
+    },
+    {
+      "Sid": "ListStagingTasksWithoutResourceSupport",
+      "Effect": "Allow",
+      "Action": "ecs:ListTasks",
+      "Resource": "*",
+      "Condition": {
+        "ArnEquals": {
+          "ecs:cluster": "arn:aws:ecs:eu-north-1:799111666795:cluster/onlineshop-staging-cluster"
+        }
+      }
     },
     {
       "Sid": "RunStagingSqlRunnerOnly",
