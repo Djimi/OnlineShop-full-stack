@@ -96,7 +96,7 @@ class RateLimitServiceTest {
     }
 
     @Test
-    void trustedProxyUsesFirstForwardedForValue() {
+    void trustedProxyUsesLastForwardedForEntry() {
         ProxyManager<String> proxyManager = mock(ProxyManager.class);
         RemoteBucketBuilder<String> remoteBuilder = bucketBuilderReturning(mock(BucketProxy.class));
         when(proxyManager.builder()).thenReturn(remoteBuilder);
@@ -108,17 +108,38 @@ class RateLimitServiceTest {
         request.setRemoteAddr("203.0.113.7");
         request.addHeader("X-Forwarded-For", "198.51.100.23, 203.0.113.7");
 
-        assertThat(service.resolveClientIp(request)).isEqualTo("198.51.100.23");
+        assertThat(service.resolveClientIp(request)).isEqualTo("203.0.113.7");
     }
 
     @Test
-    void privateProxyIsTrustedWithoutConfiguration() {
+    void privateProxyTrustsOnlyLastForwardedForEntry() {
         RateLimitService service = buildService(bucketBuilderReturning(mock(BucketProxy.class)));
         MockHttpServletRequest request = new MockHttpServletRequest("GET", "/items");
         request.setRemoteAddr("10.0.0.4");
-        request.addHeader("X-Forwarded-For", "198.51.100.42");
+        request.addHeader("X-Forwarded-For", "198.51.100.42, 10.0.0.4");
 
-        assertThat(service.resolveClientIp(request)).isEqualTo("198.51.100.42");
+        assertThat(service.resolveClientIp(request)).isEqualTo("10.0.0.4");
+    }
+
+    @Test
+    void cloudFrontViewerAddressTakesPrecedenceAndStripsPort() {
+        RateLimitService service = buildService(bucketBuilderReturning(mock(BucketProxy.class)));
+        MockHttpServletRequest request = new MockHttpServletRequest("GET", "/items");
+        request.setRemoteAddr("10.0.0.4");
+        request.addHeader("X-Forwarded-For", "198.51.100.42, 10.0.0.4");
+        request.addHeader("CloudFront-Viewer-Address", "203.0.113.99:53049");
+
+        assertThat(service.resolveClientIp(request)).isEqualTo("203.0.113.99");
+    }
+
+    @Test
+    void cloudFrontViewerAddressStripsBracketsAndPortFromIpv6() {
+        RateLimitService service = buildService(bucketBuilderReturning(mock(BucketProxy.class)));
+        MockHttpServletRequest request = new MockHttpServletRequest("GET", "/items");
+        request.setRemoteAddr("10.0.0.4");
+        request.addHeader("CloudFront-Viewer-Address", "[2001:db8::1]:443");
+
+        assertThat(service.resolveClientIp(request)).isEqualTo("2001:db8::1");
     }
 
     @Test

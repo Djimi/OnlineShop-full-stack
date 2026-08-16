@@ -44,9 +44,17 @@ public class RateLimitService {
     public String resolveClientIp(HttpServletRequest request) {
         String remoteAddr = request.getRemoteAddr();
         if (isTrustedProxy(remoteAddr)) {
+            String cloudFrontViewer = request.getHeader("CloudFront-Viewer-Address");
+            if (cloudFrontViewer != null && !cloudFrontViewer.isEmpty()) {
+                return stripPort(cloudFrontViewer);
+            }
             String xForwardedFor = request.getHeader("X-Forwarded-For");
             if (xForwardedFor != null && !xForwardedFor.isEmpty()) {
-                return xForwardedFor.split(",")[0].trim();
+                String[] entries = xForwardedFor.split(",");
+                String lastEntry = entries[entries.length - 1].trim();
+                if (!lastEntry.isEmpty()) {
+                    return lastEntry;
+                }
             }
         }
         return remoteAddr;
@@ -63,12 +71,37 @@ public class RateLimitService {
     private boolean isPrivateAddress(String address) {
         try {
             java.net.InetAddress inetAddress = java.net.InetAddress.getByName(address);
-            return inetAddress.isSiteLocalAddress()
+            if (inetAddress.isSiteLocalAddress()
                     || inetAddress.isLinkLocalAddress()
-                    || inetAddress.isLoopbackAddress();
+                    || inetAddress.isLoopbackAddress()) {
+                return true;
+            }
+            if (inetAddress instanceof java.net.Inet6Address inet6) {
+                byte[] bytes = inet6.getAddress();
+                return bytes[0] == (byte) 0xfc || bytes[0] == (byte) 0xfd;
+            }
+            return false;
         } catch (java.net.UnknownHostException e) {
             return false;
         }
+    }
+
+    private String stripPort(String value) {
+        String candidate = value.trim();
+        if (candidate.startsWith("[")) {
+            int close = candidate.indexOf(']');
+            if (close > 0) {
+                return candidate.substring(1, close);
+            }
+        }
+        int lastColon = candidate.lastIndexOf(':');
+        if (lastColon > 0 && candidate.indexOf(':') == lastColon) {
+            String suffix = candidate.substring(lastColon + 1);
+            if (suffix.chars().allMatch(Character::isDigit)) {
+                return candidate.substring(0, lastColon);
+            }
+        }
+        return candidate;
     }
 
     private boolean tryConsume(String key, BucketConfiguration config) {

@@ -67,6 +67,8 @@ public class GlobalExceptionHandler {
     public ResponseEntity<ErrorResponse> handleIllegalStateException(
             IllegalStateException ex,
             WebRequest request) {
+        logger.warn("Business rule violation on {}: {}", request.getDescription(false), ex.getMessage());
+
         ErrorResponse errorResponse = ErrorResponse.builder()
                 .type("https://api.example.com/errors/bad-request")
                 .title("Bad Request")

@@ -47,8 +47,8 @@ public class TokenSanitizer {
             return "";
         }
 
-        // Remove CRLF characters to prevent header injection
-        return username.replaceAll("[\\r\\n]", "");
+        // Remove control characters to prevent header injection
+        return username.replaceAll("\\p{Cc}", "");
     }
 
     private boolean containsNullByte(String token) {

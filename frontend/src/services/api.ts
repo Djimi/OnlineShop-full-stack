@@ -48,6 +48,18 @@ api.interceptors.response.use(
     }
 
     if (error.response?.status === 429) {
+      const hadToken = Boolean(error.config?.headers?.Authorization);
+      if (hadToken) {
+        // An authenticated request was throttled - most likely a stale session
+        // burning the failed-auth bucket; send the user to login like a 401.
+        useAuthStore.getState().logout();
+        sessionStorage.setItem(
+          'onlineshop_redirect_from',
+          `${window.location.pathname}${window.location.search}${window.location.hash}`
+        );
+        window.location.href = '/login';
+        return Promise.reject(new axios.CanceledError('Redirecting to login'));
+      }
       toast.error('Too many requests. Please wait a moment and try again.');
       return Promise.reject(error);
     }
