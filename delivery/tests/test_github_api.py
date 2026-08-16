@@ -11,6 +11,7 @@ from delivery.github import GitHubApi
 REPO = "owner/repo"
 RUN = 4712
 ATTEMPT = 2
+EXPECTED = f"candidate-manifest-{RUN}-{ATTEMPT}"
 
 
 class FakeResponse:
@@ -73,7 +74,8 @@ def test_list_run_artifacts_validates_exact_run_and_attempt(monkeypatch):
         "artifacts": [
             {
                 "id": 11,
-                "name": f"candidate-manifest-{RUN}-{ATTEMPT}",
+                "name": EXPECTED,
+                "expired": False,
                 "workflow_run": {"id": RUN, "run_attempt": ATTEMPT},
             }
         ]
@@ -87,8 +89,8 @@ def test_list_run_artifacts_validates_exact_run_and_attempt(monkeypatch):
             ),
         },
     )
-    artifacts = api.list_run_artifacts(RUN, ATTEMPT)
-    assert artifacts == [{"id": 11, "name": f"candidate-manifest-{RUN}-{ATTEMPT}"}]
+    artifacts = api.list_run_artifacts(RUN, ATTEMPT, {EXPECTED})
+    assert artifacts == [{"id": 11, "name": EXPECTED}]
 
 
 def test_list_run_artifacts_rejects_run_attempt_mismatch(monkeypatch):
@@ -107,7 +109,7 @@ def test_list_run_artifacts_rejects_run_attempt_mismatch(monkeypatch):
         },
     )
     with pytest.raises(ValidationError):
-        api.list_run_artifacts(RUN, ATTEMPT)
+        api.list_run_artifacts(RUN, ATTEMPT, {EXPECTED})
 
 
 def test_list_run_artifacts_rejects_foreign_run_artifact(monkeypatch):
@@ -123,7 +125,8 @@ def test_list_run_artifacts_rejects_foreign_run_artifact(monkeypatch):
         "artifacts": [
             {
                 "id": 11,
-                "name": "other-manifest",
+                "name": EXPECTED,
+                "expired": False,
                 "workflow_run": {"id": 9999, "run_attempt": ATTEMPT},
             }
         ]
@@ -138,7 +141,7 @@ def test_list_run_artifacts_rejects_foreign_run_artifact(monkeypatch):
         },
     )
     with pytest.raises(ValidationError):
-        api.list_run_artifacts(RUN, ATTEMPT)
+        api.list_run_artifacts(RUN, ATTEMPT, {EXPECTED})
 
 
 def test_list_run_artifacts_rejects_attempt_mismatch(monkeypatch):
@@ -154,7 +157,8 @@ def test_list_run_artifacts_rejects_attempt_mismatch(monkeypatch):
         "artifacts": [
             {
                 "id": 11,
-                "name": "other-manifest",
+                "name": EXPECTED,
+                "expired": False,
                 "workflow_run": {"id": RUN, "run_attempt": 99},
             }
         ]
@@ -169,7 +173,7 @@ def test_list_run_artifacts_rejects_attempt_mismatch(monkeypatch):
         },
     )
     with pytest.raises(ValidationError):
-        api.list_run_artifacts(RUN, ATTEMPT)
+        api.list_run_artifacts(RUN, ATTEMPT, {EXPECTED})
 
 
 def test_list_run_artifacts_rejects_missing_artifact_run_attempt(monkeypatch):
@@ -182,7 +186,14 @@ def test_list_run_artifacts_rejects_missing_artifact_run_attempt(monkeypatch):
         "html_url": "https://github.com/owner/repo/actions/runs/4712",
     }
     artifacts_json = {
-        "artifacts": [{"id": 11, "name": "other-manifest", "workflow_run": {"id": RUN}}]
+        "artifacts": [
+            {
+                "id": 11,
+                "name": EXPECTED,
+                "expired": False,
+                "workflow_run": {"id": RUN},
+            }
+        ]
     }
     api = _api(
         monkeypatch,
@@ -194,12 +205,149 @@ def test_list_run_artifacts_rejects_missing_artifact_run_attempt(monkeypatch):
         },
     )
     with pytest.raises(ValidationError):
-        api.list_run_artifacts(RUN, ATTEMPT)
+        api.list_run_artifacts(RUN, ATTEMPT, {EXPECTED})
 
 
 def test_list_run_artifacts_rejects_zero_run_id():
     with pytest.raises(ValidationError):
-        GitHubApi(REPO, token="t").list_run_artifacts(0, 1)
+        GitHubApi(REPO, token="t").list_run_artifacts(0, 1, {"candidate-manifest-0-1"})
+
+
+def test_list_run_artifacts_ignores_buildx_and_malformed_unrelated_entries(monkeypatch):
+    run_json = {
+        "id": RUN,
+        "run_attempt": ATTEMPT,
+        "run_number": 7,
+        "head_sha": "b" * 40,
+        "head_branch": "main",
+        "html_url": f"https://github.com/{REPO}/actions/runs/{RUN}",
+    }
+    expected = {
+        f"candidate-manifest-{RUN}-{ATTEMPT}",
+        f"frontend-archive-{RUN}-{ATTEMPT}",
+        f"sboms-{RUN}-{ATTEMPT}",
+        f"test-results-{RUN}-{ATTEMPT}",
+    }
+    artifacts = [
+        {
+            "id": index,
+            "name": name,
+            "expired": False,
+            "workflow_run": {"id": RUN, "run_attempt": ATTEMPT},
+        }
+        for index, name in enumerate(sorted(expected), start=11)
+    ]
+    artifacts.extend(
+        [
+            {
+                "id": 99,
+                "name": "Djimi~OnlineShop-full-stack~QVQL7U.dockerbuild",
+                "expired": False,
+            },
+            {"id": 100, "name": f"candidate-manifest-{RUN}-{ATTEMPT}-similar"},
+            {"id": "malformed-without-name"},
+            "malformed top-level entry",
+        ]
+    )
+    api = _api(
+        monkeypatch,
+        {
+            f"https://api.github.com/repos/{REPO}/actions/runs/{RUN}": FakeResponse(run_json),
+            f"https://api.github.com/repos/{REPO}/actions/runs/{RUN}/artifacts": FakeResponse(
+                {"artifacts": artifacts}
+            ),
+        },
+    )
+
+    selected = api.list_run_artifacts(RUN, ATTEMPT, expected)
+
+    assert {artifact["name"] for artifact in selected} == expected
+
+
+def test_list_run_artifacts_rejects_duplicate_expected_artifact(monkeypatch):
+    run_json = {
+        "id": RUN,
+        "run_attempt": ATTEMPT,
+        "run_number": 7,
+        "head_sha": "b" * 40,
+        "head_branch": "main",
+        "html_url": f"https://github.com/{REPO}/actions/runs/{RUN}",
+    }
+    artifact = {
+        "id": 11,
+        "name": EXPECTED,
+        "expired": False,
+        "workflow_run": {"id": RUN, "run_attempt": ATTEMPT},
+    }
+    api = _api(
+        monkeypatch,
+        {
+            f"https://api.github.com/repos/{REPO}/actions/runs/{RUN}": FakeResponse(run_json),
+            f"https://api.github.com/repos/{REPO}/actions/runs/{RUN}/artifacts": FakeResponse(
+                {"artifacts": [artifact, dict(artifact, id=12)]}
+            ),
+        },
+    )
+
+    with pytest.raises(ValidationError, match="duplicate artifact"):
+        api.list_run_artifacts(RUN, ATTEMPT, {EXPECTED})
+
+
+@pytest.mark.parametrize(
+    ("artifact", "error"),
+    [
+        (None, ValidationError),
+        (
+            {
+                "id": 11,
+                "name": EXPECTED,
+                "expired": True,
+                "workflow_run": {"id": RUN, "run_attempt": ATTEMPT},
+            },
+            ReadError,
+        ),
+        (
+            {
+                "id": "11",
+                "name": EXPECTED,
+                "expired": False,
+                "workflow_run": {"id": RUN, "run_attempt": ATTEMPT},
+            },
+            ValidationError,
+        ),
+        (
+            {
+                "id": 11,
+                "name": EXPECTED,
+                "workflow_run": {"id": RUN, "run_attempt": ATTEMPT},
+            },
+            ReadError,
+        ),
+    ],
+)
+def test_list_run_artifacts_rejects_missing_expired_or_malformed_selected(
+    monkeypatch, artifact, error
+):
+    run_json = {
+        "id": RUN,
+        "run_attempt": ATTEMPT,
+        "run_number": 7,
+        "head_sha": "b" * 40,
+        "head_branch": "main",
+        "html_url": f"https://github.com/{REPO}/actions/runs/{RUN}",
+    }
+    api = _api(
+        monkeypatch,
+        {
+            f"https://api.github.com/repos/{REPO}/actions/runs/{RUN}": FakeResponse(run_json),
+            f"https://api.github.com/repos/{REPO}/actions/runs/{RUN}/artifacts": FakeResponse(
+                {"artifacts": [] if artifact is None else [artifact]}
+            ),
+        },
+    )
+
+    with pytest.raises(error):
+        api.list_run_artifacts(RUN, ATTEMPT, {EXPECTED})
 
 
 def test_list_releases_parses_assets(monkeypatch):

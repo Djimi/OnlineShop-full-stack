@@ -147,15 +147,19 @@ class GitHubApi:
         except (UnicodeDecodeError, json.JSONDecodeError) as error:
             raise ReadError(f"GitHub API {path} returned invalid JSON") from error
 
-    def list_run_artifacts(self, run_id: int, run_attempt: int) -> list[dict]:
-        """List artifacts owned by the exact run/attempt, never unscoped/latest.
+    def list_run_artifacts(
+        self, run_id: int, run_attempt: int, expected_names: set[str]
+    ) -> list[dict]:
+        """Select named artifacts owned by the exact run/attempt.
 
         The artifact list endpoint does not report the run attempt, so the
         exact run is additionally fetched and validated with
         ``parse_workflow_run`` (positive JSON numbers, head fields) before
-        the artifacts are accepted.
+        the artifacts are accepted. Unrelated entries are ignored before any
+        of their other fields are parsed; every selected entry is validated.
         """
         run_id, run_attempt = assert_run_attempt_shape(run_id, run_attempt)
+        expected_names = self._validate_expected_artifact_names(expected_names)
         run_response = self._request(f"/repos/{self.repository}/actions/runs/{run_id}")
         if not isinstance(run_response, dict):
             raise ReadError("workflow run response must be a JSON object")
@@ -166,14 +170,21 @@ class GitHubApi:
         raw_artifacts = data.get("artifacts")
         if not isinstance(raw_artifacts, list):
             raise ReadError("artifacts response must contain an artifacts list")
-        cleaned = []
+        selected = {}
         for artifact in raw_artifacts:
             if not isinstance(artifact, dict):
-                raise ReadError("each artifact must be a JSON object")
-            artifact_id = _positive_int(artifact.get("id"), "artifact id")
+                continue
             name = artifact.get("name")
-            if not isinstance(name, str) or not _ARTIFACT_NAME.fullmatch(name):
+            if not isinstance(name, str) or name not in expected_names:
+                continue
+            artifact_id = _positive_int(artifact.get("id"), "artifact id")
+            if not _ARTIFACT_NAME.fullmatch(name):
                 raise ReadError(f"artifact {artifact_id} has an unsafe name")
+            expired = artifact.get("expired")
+            if not isinstance(expired, bool):
+                raise ReadError(f"artifact {artifact_id} has no boolean expired state")
+            if expired:
+                raise ReadError(f"artifact {artifact_id} is expired")
             run = artifact.get("workflow_run")
             if not isinstance(run, dict):
                 raise ReadError(f"artifact {artifact_id} has no workflow_run object")
@@ -189,8 +200,13 @@ class GitHubApi:
                     f"artifact {artifact_id} belongs to run attempt "
                     f"{observed_run_attempt}, not the requested attempt {run_attempt}"
                 )
-            cleaned.append({"id": artifact_id, "name": name})
-        return cleaned
+            if name in selected:
+                raise ValidationError(
+                    f"duplicate artifact {name!r} for run {run_id} attempt {run_attempt}"
+                )
+            selected[name] = {"id": artifact_id, "name": name}
+        self._require_expected_artifacts(selected, expected_names, run_id, run_attempt)
+        return [selected[name] for name in sorted(expected_names)]
 
     def list_releases(self) -> list[dict]:
         """List published GitHub Releases (newest first), fail-closed on shape.
@@ -273,30 +289,43 @@ class GitHubApi:
             raise ReadError("workflow run response must be a JSON object")
         return parse_workflow_run(response, run_id=run_id)
 
-    def list_artifacts_for_run(self, run_id: int) -> list[dict]:
-        """List every artifact of a run with its producing attempt.
+    def list_artifacts_for_run(
+        self, run_id: int, run_attempt: int, expected_names: set[str]
+    ) -> list[dict]:
+        """Select downloadable named artifacts from an exact run/attempt.
 
         The artifact list endpoint does not report the run attempt, so the
         exact run is additionally fetched and validated with
-        ``parse_workflow_run`` before the artifacts are accepted. Unlike
-        ``list_run_artifacts`` this does not filter to a single attempt:
-        callers resolve ambiguity from the per-artifact ``run_attempt``.
+        ``parse_workflow_run`` before the artifacts are accepted.
         """
-        self.get_run(run_id)
+        run_id, run_attempt = assert_run_attempt_shape(run_id, run_attempt)
+        expected_names = self._validate_expected_artifact_names(expected_names)
+        run = self.get_run(run_id)
+        if run["run_attempt"] != run_attempt:
+            raise ValidationError(
+                f"run attempt mismatch: requested {run_attempt}, observed {run['run_attempt']}"
+            )
         data = self._request(f"/repos/{self.repository}/actions/runs/{run_id}/artifacts")
         if not isinstance(data, dict):
             raise ReadError("artifacts response must be a JSON object")
         raw_artifacts = data.get("artifacts")
         if not isinstance(raw_artifacts, list):
             raise ReadError("artifacts response must contain an artifacts list")
-        cleaned = []
+        selected = {}
         for artifact in raw_artifacts:
             if not isinstance(artifact, dict):
-                raise ReadError("each artifact must be a JSON object")
-            artifact_id = _positive_int(artifact.get("id"), "artifact id")
+                continue
             name = artifact.get("name")
-            if not isinstance(name, str) or not _ARTIFACT_NAME.fullmatch(name):
+            if not isinstance(name, str) or name not in expected_names:
+                continue
+            artifact_id = _positive_int(artifact.get("id"), "artifact id")
+            if not _ARTIFACT_NAME.fullmatch(name):
                 raise ReadError(f"artifact {artifact_id} has an unsafe name")
+            expired = artifact.get("expired")
+            if not isinstance(expired, bool):
+                raise ReadError(f"artifact {artifact_id} has no boolean expired state")
+            if expired:
+                raise ReadError(f"artifact {artifact_id} is expired")
             run_ref = artifact.get("workflow_run")
             if not isinstance(run_ref, dict):
                 raise ReadError(f"artifact {artifact_id} has no workflow_run object")
@@ -307,18 +336,45 @@ class GitHubApi:
                     f"not the requested run {run_id}"
                 )
             observed_attempt = _positive_int(run_ref.get("run_attempt"), "artifact run attempt")
+            if observed_attempt != run_attempt:
+                raise ValidationError(
+                    f"artifact {artifact_id} belongs to run attempt {observed_attempt}, "
+                    f"not the requested attempt {run_attempt}"
+                )
             archive_url = artifact.get("archive_download_url")
             if not isinstance(archive_url, str) or not archive_url.startswith("https://"):
                 raise ReadError(f"artifact {artifact_id} has no https archive_download_url")
-            cleaned.append(
-                {
-                    "id": artifact_id,
-                    "name": name,
-                    "run_attempt": observed_attempt,
-                    "archive_download_url": archive_url,
-                }
+            if name in selected:
+                raise ValidationError(
+                    f"duplicate artifact {name!r} for run {run_id} attempt {run_attempt}"
+                )
+            selected[name] = {
+                "id": artifact_id,
+                "name": name,
+                "run_attempt": observed_attempt,
+                "archive_download_url": archive_url,
+            }
+        self._require_expected_artifacts(selected, expected_names, run_id, run_attempt)
+        return [selected[name] for name in sorted(expected_names)]
+
+    @staticmethod
+    def _validate_expected_artifact_names(expected_names: set[str]) -> set[str]:
+        if not isinstance(expected_names, set) or not expected_names:
+            raise ValidationError("expected artifact names must be a non-empty set")
+        for name in expected_names:
+            if not isinstance(name, str) or not _ARTIFACT_NAME.fullmatch(name):
+                raise ValidationError(f"unsafe expected artifact name {name!r}")
+        return expected_names
+
+    @staticmethod
+    def _require_expected_artifacts(
+        selected: dict, expected_names: set[str], run_id: int, run_attempt: int
+    ) -> None:
+        missing = sorted(expected_names - selected.keys())
+        if missing:
+            raise ValidationError(
+                f"missing artifacts {', '.join(missing)} for run {run_id} attempt {run_attempt}"
             )
-        return cleaned
 
     def download_artifact_zip(self, archive_url: str) -> bytes:
         """Download an artifact zip from its (short-lived) archive URL.
@@ -378,11 +434,13 @@ class GitHubApi:
         candidates = []
         for run in sorted(newer, key=lambda entry: entry["id"])[:limit]:
             run_id = run["id"]
-            artifacts = self.list_artifacts_for_run(run_id)
-            names = {artifact["name"] for artifact in artifacts}
             required = f"candidate-manifest-{run_id}-{run['run_attempt']}"
-            if required not in names:
-                continue
+            try:
+                self.list_artifacts_for_run(run_id, run["run_attempt"], {required})
+            except ValidationError as error:
+                if str(error).startswith("missing artifacts "):
+                    continue
+                raise
             candidates.append(
                 {
                     "id": run_id,

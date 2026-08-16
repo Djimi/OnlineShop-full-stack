@@ -8,6 +8,10 @@ The engine is strict by design: fail-closed validation, canonical JSON
 serialization, exact workflow run/attempt authority, immutable record
 identity, and no secrets in records.
 
+Artifact discovery selects only exact deterministic names for the validated
+run/attempt. Unrelated GitHub artifacts are ignored without parsing their
+fields; every selected record must be unique, non-expired, and fully valid.
+
 ## Layout
 
 - `src/delivery/errors.py` — exception hierarchy with stable machine-readable codes
