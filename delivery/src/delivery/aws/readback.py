@@ -17,6 +17,8 @@ _ABSENT_CODES = {
     "NoSuchEntity",
     "NotFoundException",
     "ResourceNotFoundException",
+    "ImageNotFoundException",
+    "RepositoryNotFoundException",
 }
 
 

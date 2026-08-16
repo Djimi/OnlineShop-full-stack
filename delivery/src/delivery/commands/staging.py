@@ -732,10 +732,17 @@ class _StagingMachine:
         for key in _SERVICE_KEYS:
             repository = self.ids["ecrRepositories"][key]
             expected = getattr(self.manifest.artifacts, key).digest
-            response = ecr_client.batch_get_image(
-                repositoryName=repository, imageIds=[{"imageDigest": expected}]
-            )
-            images = response.get("images") or []
+            try:
+                response = ecr_client.describe_images(
+                    repositoryName=repository, imageIds=[{"imageDigest": expected}]
+                )
+            except ClientError as error:
+                if absent_or_read(error):
+                    raise AbsentResourceError(
+                        f"digest {expected} does not exist in repository {repository}"
+                    ) from error
+                raise ReadError(f"describe_images failed for {repository}") from error
+            images = response.get("imageDetails") or []
             if not images:
                 raise AbsentResourceError(
                     f"digest {expected} does not exist in repository {repository}"

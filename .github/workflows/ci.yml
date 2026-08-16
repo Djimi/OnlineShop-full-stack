@@ -229,6 +229,8 @@ jobs:
           cache-to: type=gha,mode=max
 
       # 5. Service-reported ECR digests: immutable identity, never mutable tags
+      # describe-images (not batch-get-image) resolves digests: batch-get-image
+      # returns a null imageDigest for multi-arch OCI index manifests.
       - name: Read back ECR image digests
         id: digests
         env:
@@ -239,13 +241,23 @@ jobs:
           for entry in "auth:onlineshop-auth" "items:onlineshop-items" "api-gateway:onlineshop-api-gateway"; do
             component="${entry%%:*}"
             repository="${entry##*:}"
-            digest=$(aws ecr batch-get-image \
-              --region "$AWS_REGION" \
-              --repository-name "$repository" \
-              --image-ids "imageTag=sha-$WORKFLOW_SHA" \
-              --query 'images[0].imageDigest' \
-              --output text)
-            [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "ERROR: invalid digest for $repository" >&2; exit 1; }
+            digest=""
+            for attempt in 1 2 3 4 5 6; do
+              if digest=$(aws ecr describe-images \
+                  --region "$AWS_REGION" \
+                  --repository-name "$repository" \
+                  --image-ids "imageTag=sha-$WORKFLOW_SHA" \
+                  --query 'imageDetails[0].imageDigest' \
+                  --output text); then
+                [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]] && break
+              fi
+              if [[ "$attempt" -eq 6 ]]; then
+                echo "ERROR: image sha-$WORKFLOW_SHA for $repository not visible after $attempt attempts (ECR propagation delay?)" >&2
+                exit 1
+              fi
+              echo "$repository sha-$WORKFLOW_SHA not visible yet (attempt $attempt); retrying in 5s"
+              sleep 5
+            done
             printf '%s=%s\n' "${component}_digest" "$digest" >> "$GITHUB_OUTPUT"
             echo "$repository sha-$WORKFLOW_SHA -> $digest"
           done
@@ -352,7 +364,8 @@ jobs:
             --arg frontendContentChecksum "$FRONTEND_CONTENT_CHECKSUM" \
             '{source: {repository: $repository, branch: $branch, ref: $ref, fullSha: $fullSha},
               build: {workflowRunId: $runId, workflowRunAttempt: $runAttempt, workflowUrl: $workflowUrl, createdAt: $createdAt, completedAt: $completedAt},
-              artifacts: {auth: {repository: $authRepository, digest: $authDigest}, items: {repository: $itemsRepository, digest: $itemsDigest, commonSourceSha: $commonSourceSha}, gateway: {repository: $gatewayRepository, digest: $gatewayDigest}, frontend: {artifactId: $frontendArtifactId, artifactDigest: $frontendArtifactDigest, contentChecksum: $frontendContentChecksum}},
+              artifacts: {auth: {repository: $authRepository, digest: $authDigest}, items: {repository: $itemsRepository, digest: $itemsDigest, commonSourceSha: $commonSourceSha}, gateway: {repository: $gatewayRepository, digest: $gatewayDigest}},
+              frontend: {artifactId: $frontendArtifactId, artifactDigest: $frontendArtifactDigest, contentChecksum: $frontendContentChecksum},
               tests: {unit: "passed", integration: "passed", frontend: "lint+build", localE2E: "passed"}}' \
             > candidate-inputs.json
           printf 'branch=%s\n' "$BRANCH_NAME" >> "$GITHUB_OUTPUT"

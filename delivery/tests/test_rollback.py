@@ -259,10 +259,10 @@ class RollbackEcr(FakeEcr):
         self.tags = tags
         self.read_error = None
 
-    def batch_get_image(self, repositoryName, imageIds):
+    def describe_images(self, repositoryName, imageIds=None, **kwargs):
         if self.read_error is not None:
             raise self.read_error
-        return super().batch_get_image(repositoryName, imageIds)
+        return super().describe_images(repositoryName, imageIds, **kwargs)
 
 
 class RollbackGithub(FakeGithub):
@@ -552,8 +552,11 @@ def test_preflight_rejects_missing_ecr_tag(env, capsys):
     code = main(env.preflight_argv())
     assert code == 1
     err = capsys.readouterr().err
+    # a genuinely missing tag is a describe-images ImageNotFoundException ->
+    # AbsentResourceError -> ECR_TAG_NOT_FOUND -> not a complete retained
+    # release (a ValidationError), never READ_ERROR
     assert "ERROR VALIDATION" in err
-    assert "ECR_TAG_NOT_FOUND" in err
+    assert "not a complete retained release" in err
 
 
 def test_preflight_rejects_missing_frontend_prefix_marker(env, capsys):

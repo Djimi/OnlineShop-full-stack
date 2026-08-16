@@ -445,7 +445,39 @@ class FakeEcr:
         if self.tags.get((key, tag)) is None:
             return {"images": []}
         digest = self.tags[(key, tag)]
-        return {"images": [{"imageDigest": digest}]}
+        return {"images": [{"imageTag": tag, "imageDigest": digest}]}
+
+    def describe_images(self, repositoryName, imageIds=None, **kwargs):
+        key = self._key(repositoryName)
+        if key is None:
+            raise client_error("RepositoryNotFoundException")
+        if not imageIds:
+            return {"imageDetails": list(self.image_details.get(repositoryName, []))}
+        details = []
+        for spec in imageIds:
+            if "imageDigest" in spec:
+                if self.digests.get(key) != spec["imageDigest"]:
+                    raise client_error("ImageNotFoundException")
+                details.append(
+                    {
+                        "imageDigest": spec["imageDigest"],
+                        "imageTags": [],
+                        "imageManifestMediaType": "application/vnd.oci.image.index.v1+json",
+                    }
+                )
+            else:
+                tag = spec.get("imageTag")
+                digest = self.tags.get((key, tag))
+                if digest is None:
+                    raise client_error("ImageNotFoundException")
+                details.append(
+                    {
+                        "imageDigest": digest,
+                        "imageTags": [tag],
+                        "imageManifestMediaType": "application/vnd.oci.image.index.v1+json",
+                    }
+                )
+        return {"imageDetails": details}
 
     def put_image(self, repositoryName, imageTag, imageManifest):
         self.put_calls.append((repositoryName, imageTag))
@@ -465,9 +497,6 @@ class FakeEcr:
         self.lifecycle_put_calls.append(repositoryName)
         self.lifecycle_policies[repositoryName] = lifecyclePolicyText
         return {}
-
-    def describe_images(self, repositoryName, **kwargs):
-        return {"imageDetails": list(self.image_details.get(repositoryName, []))}
 
     def start_lifecycle_policy_preview(self, repositoryName):
         self.preview_started.append(repositoryName)
