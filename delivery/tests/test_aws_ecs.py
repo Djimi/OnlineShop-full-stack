@@ -196,6 +196,40 @@ def test_running_digests_includes_every_container_of_every_task():
     assert running_digests(fake, CLUSTER, SERVICE) == sorted([DIGEST_A, DIGEST_B])
 
 
+def test_running_digests_ignores_ecs_managed_service_connect_proxy():
+    fake = FakeEcs(
+        services={"auth": _service()},
+        tasks={
+            "auth": [
+                _task(
+                    "arn:...:task/1",
+                    containers=[
+                        {"name": "auth", "imageDigest": DIGEST_A},
+                        {"name": "ecs-service-connect-abc123"},
+                    ],
+                )
+            ]
+        },
+    )
+    assert running_digests(fake, CLUSTER, SERVICE) == [DIGEST_A]
+
+
+def test_running_digests_rejects_task_with_only_managed_proxy():
+    fake = FakeEcs(
+        services={"auth": _service()},
+        tasks={
+            "auth": [
+                _task(
+                    "arn:...:task/1",
+                    containers=[{"name": "ecs-service-connect-abc123"}],
+                )
+            ]
+        },
+    )
+    with pytest.raises(ReadError, match="no application containers"):
+        running_digests(fake, CLUSTER, SERVICE)
+
+
 def test_running_digests_empty_task_list_is_read_error():
     fake = FakeEcs(services={"auth": _service()})
     with pytest.raises(ReadError, match="no running tasks"):

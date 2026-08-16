@@ -446,3 +446,8 @@ with the same `ecs:cluster` condition. For cleanup, RDS accepts
 `StopDBInstance` only from `available`; wait through transient start or
 configuration states, and if the instance is already `stopping`, wait for
 `stopped` without issuing a duplicate stop.
+
+ECS injects Service Connect runtime containers named `ecs-service-connect-*`.
+They are not application task-definition containers and can omit
+`imageDigest`; running-image verification ignores only this managed prefix and
+still fails closed for every application or user-defined sidecar container.

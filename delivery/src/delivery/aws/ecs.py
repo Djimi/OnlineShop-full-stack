@@ -128,7 +128,7 @@ def wait_for_deployment(
 
 
 def running_digests(client: Any, cluster: str, service: str) -> list[str]:
-    """Return the sorted image digests of the running containers of a service."""
+    """Return running application digests, excluding ECS-managed runtime proxies."""
     try:
         listed = client.list_tasks(cluster=cluster, serviceName=service)
     except ClientError as error:
@@ -155,19 +155,26 @@ def running_digests(client: Any, cluster: str, service: str) -> list[str]:
         containers = task.get("containers") or []
         if not containers:
             raise ReadError(f"task {task.get('taskArn')} has no containers")
+        task_digests = []
         for container in containers:
+            name = container.get("name") or ""
+            if name.startswith("ecs-service-connect-"):
+                continue
             digest = container.get("imageDigest")
             if not digest:
                 raise ReadError(
-                    f"task {task.get('taskArn')} container {container.get('name')} "
+                    f"task {task.get('taskArn')} container {name} "
                     "has no imageDigest"
                 )
             if not _IMAGE_DIGEST.fullmatch(digest):
                 raise ReadError(
-                    f"task {task.get('taskArn')} container {container.get('name')} "
+                    f"task {task.get('taskArn')} container {name} "
                     f"has malformed imageDigest {digest}"
                 )
-            digests.append(digest)
+            task_digests.append(digest)
+        if not task_digests:
+            raise ReadError(f"task {task.get('taskArn')} has no application containers")
+        digests.extend(task_digests)
     return sorted(digests)
 
 
