@@ -502,6 +502,51 @@ mutations and read-backs, and the real GitHub Release publication — is
 
 **Commit:** `feat(release): add approved production promotion`
 
+#### Pass 3R.1 repair overlay (offline contract)
+
+The 3R.1 repair tightens the existing v1 promotion handoff without changing
+the manifest schema or staging design. The workflow boundary is
+workflow-level `contents: read` with explicit job-scoped permission opt-ins;
+untrusted GitHub contexts are transferred through step `env`, validated for
+event-specific refs/full SHAs/IDs, and passed to shell only as quoted
+variables/argv. Pull-request paths do not bootstrap AWS credentials or publish
+ECR images. The structural PR/trusted-job split is Pass 3R.2/3R.3 and the
+purpose-specific role cutover is Pass 3R.9.
+
+Promotion now consumes a schema-valid candidate manifest **without** current
+task-definition ARNs plus a read-only production snapshot. The snapshot is the
+sole source of current service ARNs. `deploy-production.sh` emits a deployment
+manifest containing the newly registered ARNs; only that output is rendered as
+official, and production verification still precedes finalization. The
+optional `source_sha` selector must match the downloaded candidate evidence.
+
+Candidate run evidence is bound to the exact run and attempt. The gather path
+uses GitHub's attempt-scoped workflow-run and jobs endpoints, validates the
+response `id` and `run_attempt` as matching positive JSON numbers, and
+normalizes the REST response's bare `head_branch: "main"` to
+`refs/heads/main`. The unscoped/latest jobs endpoint is not accepted.
+
+The production snapshot fails closed unless the actual live frontend marker,
+matching immutable `_releases/v<version>/` marker/index, full-object S3
+`ChecksumSHA256`, and exact canonical `v<version>` Git tag/source SHA agree;
+annotated tags are peeled before comparison. Frontend publication, rollback
+restore, and compensation request `--checksum-algorithm SHA256` on every S3
+write; snapshot decodes canonical full-object checksum metadata and never
+falls back to an ETag.
+
+The offline evidence is:
+
+```bash
+bash tests/scripts/ci_security_contract_test.sh
+bash tests/scripts/promotion_handoff_test.sh
+bash tests/scripts/promotion_test.sh
+bash tests/scripts/rollback_test.sh
+```
+
+These static/stateful checks do not claim live AWS, staging, GitHub approval,
+role cutover, or GitHub Release publication; those remain deferred to the
+explicit Pass 3R live checkpoints, culminating in Pass 3R.10.
+
 ### 3.5 Existing production environment hardening
 
 - [x] Inventory the existing production VPC, ECS cluster/services, Service

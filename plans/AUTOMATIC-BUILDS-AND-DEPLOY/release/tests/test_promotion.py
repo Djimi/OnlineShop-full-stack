@@ -58,6 +58,27 @@ class DispatchTests(unittest.TestCase):
         self.assertFalse(decision.valid)
 
 
+class SourceShaBindingTests(unittest.TestCase):
+    def test_omitted_selector_is_allowed(self):
+        decision = promotion.source_sha_issues("", SHA)
+        self.assertTrue(decision.valid)
+
+    def test_matching_selector_is_allowed(self):
+        decision = promotion.source_sha_issues(SHA, SHA)
+        self.assertTrue(decision.valid)
+        self.assertEqual(decision.issues, [])
+
+    def test_mismatching_selector_fails_closed(self):
+        decision = promotion.source_sha_issues("f" * 40, SHA)
+        self.assertFalse(decision.valid)
+        self.assertIn("SOURCE_SHA_MISMATCH", codes(decision))
+
+    def test_invalid_selector_fails_closed(self):
+        decision = promotion.source_sha_issues("not-a-sha", SHA)
+        self.assertFalse(decision.valid)
+        self.assertIn("INVALID_SHA", codes(decision))
+
+
 class RunEvidenceTests(unittest.TestCase):
     def test_ok(self):
         decision = promotion.run_evidence_issues(fixture("run-ok.json"), SHA)

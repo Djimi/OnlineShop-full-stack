@@ -1,0 +1,31 @@
+{
+  "environment": "staging",
+  "accountId": "799111666795",
+  "cluster": "onlineshop-staging-cluster",
+  "services": [
+    "onlineshop-auth-staging",
+    "onlineshop-items-staging",
+    "onlineshop-api-gateway-staging"
+  ],
+  "ecrRepositories": {
+    "auth": "onlineshop-auth",
+    "items": "onlineshop-items",
+    "gateway": "onlineshop-api-gateway"
+  },
+  "dbInstance": "onlineshop-staging-postgres",
+  "albName": "onlineshop-staging-v2-alb",
+  "dbSecrets": {
+    "auth": "onlineshop/auth/db-staging",
+    "items": "onlineshop/items/db-staging"
+  },
+  "sqlRunnerFamily": "onlineshop-staging-sql-runner",
+  "sqlLogGroup": "/ecs/onlineshop-staging-sql-runner",
+  "sqlSubnets": [
+    "subnet-04f5da5a8cf1b1350",
+    "subnet-06b823d8d6b24333b"
+  ],
+  "sqlSecurityGroup": "sg-0edd7fa1813d03018",
+  "executionRoleArn": "arn:aws:iam::799111666795:role/ecsTaskExecutionRole",
+  "compatFrontendBucket": "onlineshop-frontend-799111666795",
+  "compatFrontendReleasesPrefix": "_releases/"
+}

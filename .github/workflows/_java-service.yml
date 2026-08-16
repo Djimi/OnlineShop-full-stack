@@ -1,0 +1,59 @@
+name: Java service tests (reusable)
+
+on:
+  workflow_call:
+    inputs:
+      service:
+        type: string
+        required: true
+      working-directory:
+        type: string
+        required: true
+      needs-common:
+        type: boolean
+        required: false
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      # 1. Checkout
+      - name: Checkout repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      # 2. Set up Java (version must match <java.version> in pom.xml and the Dockerfile FROM line)
+      - name: Set up Java
+        uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4.9.1
+        with:
+          java-version: '25'
+          distribution: temurin
+
+      # 3. Items depends on the common library; install it into the local Maven cache first
+      - name: Build common dependency
+        if: inputs.needs-common
+        working-directory: common
+        run: chmod +x mvnw && ./mvnw install -DskipTests
+
+      # 4. Unit + integration tests via the service Maven wrapper
+      - name: Run unit and integration tests
+        working-directory: ${{ inputs.working-directory }}
+        run: chmod +x mvnw && ./mvnw clean test
+
+      # 5. Surefire reports owned by the exact caller run/attempt
+      - name: Upload surefire test results
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: ${{ inputs.service }}-test-results-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ inputs.working-directory }}/target/surefire-reports/
+          if-no-files-found: ignore
+          retention-days: 30

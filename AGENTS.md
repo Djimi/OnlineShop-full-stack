@@ -456,6 +456,62 @@ retention audit against real production state, and real S3/frontend retention â€
 is deferred to the consolidated Pass 3 verification pass and is not claimed by
 the offline gate.
 
+### Pass 3R.1 â€” CI security and promotion handoff repair (offline only)
+
+The current 3R.1 implementation hardens the existing v1 workflows and
+promotion wrappers; it does not redesign the release schema or staging. The
+three in-scope workflows have workflow-level `permissions: contents: read`.
+The change detector, frontend validation, and PR E2E jobs stay read-only. The
+existing combined backend jobs remain AWS-capable at job scope because the same
+jobs still serve branch pushes; their pull-request credential and publication
+steps are guarded off, and the source-controlled role trust does not admit a
+`pull_request` subject. The structural PR/trusted-job split is Pass 3R.2/3R.3,
+and the purpose-specific role cutover and live trust read-back are Pass 3R.9.
+
+Every untrusted GitHub context used by shell is transferred through step
+`env`, validated for its event-specific shape (`rl_assert_ci_ref`,
+`rl_assert_ci_pr_ref`, full SHA, and task-definition ARN), and passed to
+commands only as quoted variables/argv. The security gate also exercises
+quotes, whitespace, command substitutions, backticks, separators,
+redirection, and newlines, proving no marker command/file is evaluated.
+
+Promotion consumes a schema-valid **candidate** manifest (which must not carry
+task-definition ARNs) plus the read-only production snapshot. The snapshot is
+the sole source of current ECS task-definition ARNs and fails closed unless it
+contains the live frontend marker, a full-object S3 `ChecksumSHA256` for
+`index.html`, a matching immutable `_releases/v<version>/` marker/index, and
+the exact canonical `v<version>` Git tag/source SHA (including annotated-tag
+peeling). `deploy-production.sh` registers the digest-pinned revisions and
+emits `deployment-manifest.json`; only that output is converted to an official
+manifest, then production is verified before finalization.
+
+Candidate evidence is bound to the exact producing run and attempt. The
+workflow may use the unscoped run/artifact listing only to discover the
+candidate SHA and uniquely named evidence artifact; it downloads that artifact
+with the selected `--attempt`. GitHub's authoritative workflow-run API shape
+is handled explicitly: `head_branch` is the bare `main` branch name, while
+attempt jobs are read from `actions/runs/{run}/attempts/{attempt}/jobs`; the
+response `id` and `run_attempt` must be positive JSON numbers matching the
+requested run and attempt. An optional promotion `source_sha` is validated
+and must match the downloaded evidence byte-for-byte; an unscoped/latest jobs
+response is never accepted.
+
+All promotion, rollback, and compensation S3 writers request
+`--checksum-algorithm SHA256`; snapshot reads the service-reported full-object
+checksum (base64-decoded to canonical hex) and never substitutes an ETag.
+This is an offline contract only. Run the 3R.1 gates before claiming the
+documentation or implementation complete:
+
+```bash
+bash tests/scripts/ci_security_contract_test.sh
+bash tests/scripts/promotion_handoff_test.sh
+bash tests/scripts/promotion_test.sh
+bash tests/scripts/rollback_test.sh
+```
+
+The stateful AWS/GitHub stubs and static checks do not claim live AWS,
+staging, GitHub approval, role-split, or release-publication verification.
+
 ### Before any AWS work
 - Always run `aws sts get-caller-identity --profile dpm-profile --region eu-north-1` first in any new terminal session
 - Always pass `--profile dpm-profile --region eu-north-1` explicitly on every command; AWS resources are region-scoped and invisible across regions

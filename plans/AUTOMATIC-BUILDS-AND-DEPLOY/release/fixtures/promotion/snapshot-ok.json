@@ -10,7 +10,7 @@
           "base": 1
         }
       ],
-      "taskDefinitionArn": "arn:aws:ecs:eu-north-1:799111666795:task-definition/onlineshop-auth:4",
+      "taskDefinitionArn": "arn:aws:ecs:eu-north-1:799111666795:task-definition/onlineshop-auth:5",
       "runningDigest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
       "loadBalancers": [],
       "deployments": [
@@ -29,7 +29,7 @@
           "base": 1
         }
       ],
-      "taskDefinitionArn": "arn:aws:ecs:eu-north-1:799111666795:task-definition/onlineshop-items:3",
+      "taskDefinitionArn": "arn:aws:ecs:eu-north-1:799111666795:task-definition/onlineshop-items:4",
       "runningDigest": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
       "loadBalancers": [],
       "deployments": [
@@ -48,7 +48,7 @@
           "base": 1
         }
       ],
-      "taskDefinitionArn": "arn:aws:ecs:eu-north-1:799111666795:task-definition/onlineshop-api-gateway:12",
+      "taskDefinitionArn": "arn:aws:ecs:eu-north-1:799111666795:task-definition/onlineshop-api-gateway:13",
       "runningDigest": "sha256:3333333333333333333333333333333333333333333333333333333333333333",
       "loadBalancers": [
         {

@@ -1,0 +1,747 @@
+name: Promote Release to Production (Greenfield)
+
+# Phase 5 production promotion (OP-PRO-01). Bring-up name: this file is named
+# promote-release-greenfield.yml until cutover, when the legacy
+# promote-release.yml is removed and this file is renamed to promote-release.yml
+# (OP-CUT-02). workflow_dispatch only — production intent is never push-implied
+# (AD-10); the dispatch inputs are stable and exact: candidate run id + attempt
+# and the staging run id. Digests, tags, ARNs, manifests, and URLs are never
+# entered by hand (D2).
+#
+# Control plane (AD-10 / OP-PRO-01/02):
+#   - job A `preflight` is read-only and runs BEFORE approval: it validates the
+#     inputs, downloads the candidate artifacts of the exact run/attempt, runs
+#     the engine preflight (candidate eligibility, exact staging gate, ECR
+#     digests, production snapshot, AD-11 newer-candidate warning, OP-DB gate)
+#     and prints the approval summary with the exact SHA.
+#   - job B `promote` sits behind the protected `production` Environment
+#     (owner-only required reviewer), shares the queued non-canceling
+#     `production` concurrency group, and repeats the FULL preflight against a
+#     FRESH snapshot after approval/lock acquisition; the preflight report's
+#     approval identity must match job A's byte for byte (post-approval drift
+#     aborts before mutation). `approvedBy` is derived from the environment
+#     approval evidence (actions/runs/{run}/approvals), never github.actor.
+#
+# OP-CUT-01 bring-up guard: while the legacy promote-release.yml OR
+# rollback-release.yml still declares its production-mutating path, both jobs
+# refuse with exit 1 BEFORE any AWS credentials are used, so the legacy and
+# greenfield paths can never mutate production concurrently. The legacy
+# rollback workflow holds the `production-mutation` concurrency group, which
+# does NOT serialize with this workflow's `production` group — hence both
+# legacy files are refused. REMOVE THE GUARD STEPS AT CUTOVER together with
+# the legacy workflows. (A "disabled" workflow state is not locally
+# observable; the guard is fail-closed: remove or empty the legacy files to
+# proceed.)
+#
+# Failure honesty (D7 / AD-13): the promote job has NO hidden success path.
+# On a post-mutation failure the promote job fails with the pre-mutation
+# snapshot, preflight reports, verification report, and finalization evidence
+# uploaded as artifacts (retention 14 days). Phase 6 adds automatic recovery:
+# every mutation step publishes its completion as a job output, and the
+# `compensate` job restores exactly those components from the pre-mutation
+# snapshot after a defined post-mutation failure (OP-REC-01/02). Pre-mutation
+# failures set no mutation outputs, so compensation is skipped and the
+# evidence waits for manual diagnosis. The database is never mutated and
+# never reversed by this system.
+on:
+  workflow_dispatch:
+    inputs:
+      candidate_run_id:
+        description: 'Workflow run id of the complete main candidate'
+        required: true
+      candidate_run_attempt:
+        description: 'Workflow run attempt of the complete main candidate'
+        required: true
+      staging_run_id:
+        description: 'Staging workflow run id whose staging-record artifact is the gate evidence'
+        required: true
+
+permissions:
+  contents: read
+
+env:
+  AWS_REGION: eu-north-1
+  # AD-17 job-scoped role boundaries: the unapproved read-only `preflight`
+  # job must never hold the full production Deployer role, and the mutation
+  # job must never hold the read-only one.
+  # - AWS_ROLE_ARN_PRODUCTION: the full production Deployer role. Assumed
+  #   ONLY by the `promote` job (the single mutation-capable job, behind the
+  #   protected `production` Environment).
+  # - PRODUCTION_PREFLIGHT_ROLE_ARN: the read-only preflight role, assumed
+  #   ONLY by the unapproved `preflight` job. The live pass creates
+  #   github-actions-production-preflight with EXACTLY this policy scope so
+  #   it can be implemented as documented here:
+  #   read-only: ecs describe*, ecr batch-get-image/describe*, s3 get-object
+  #   on the frontend bucket, rds describe*, elb describe*, cloudfront get*;
+  #   ZERO mutation actions (no ecs update-service, no ecr put-image, no
+  #   s3 put-object, no secrets, no deploy finalization).
+  AWS_ROLE_ARN_PRODUCTION: arn:aws:iam::799111666795:role/github-actions-production
+  PRODUCTION_PREFLIGHT_ROLE_ARN: arn:aws:iam::799111666795:role/github-actions-production-preflight
+  MAX_AGE_DAYS: '30'
+
+jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    # Read-only pre-approval job: does NOT hold the production concurrency
+    # group (D5) and has no protected environment. id-token: write is used
+    # only for the read-only AWS scope (snapshot + ECR revalidation).
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      actions: read
+      id-token: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      # OP-CUT-01 / AD-18 bring-up guard (REMOVE AT CUTOVER): refuse before
+      # any AWS credentials while either legacy production-mutation workflow
+      # still exists. The legacy rollback-release.yml holds the
+      # `production-mutation` concurrency group, which does NOT serialize
+      # with this workflow's `production` group, so its mutation path is
+      # refused here too.
+      # Marker choice: each legacy workflow's mutation entry point —
+      # promote-release.yml invokes finalize-release.sh and
+      # rollback-release.yml invokes deploy-rollback.sh (the rollback analog
+      # of finalize-release.sh). `production-mutation` was deliberately NOT
+      # used as the rollback marker: it is a concurrency-group name that
+      # could be renamed without removing the mutation capability, whereas
+      # the invoked mutation script is the stable indicator of the path.
+      - name: 'Bring-up guard: refuse while a legacy production-mutation path is active'
+        run: |
+          set -euo pipefail
+          LEGACY_PROMOTE_WORKFLOW=".github/workflows/promote-release.yml"
+          LEGACY_ROLLBACK_WORKFLOW=".github/workflows/rollback-release.yml"
+          if [ -f "$LEGACY_PROMOTE_WORKFLOW" ] && grep -q -F -- 'finalize-release.sh' "$LEGACY_PROMOTE_WORKFLOW"; then
+            echo "ERROR: the legacy promote-release.yml production-mutation path is still present" >&2
+            echo "Old and new must never mutate production concurrently (OP-CUT-01)." >&2
+            echo "No AWS credentials were used; nothing was mutated." >&2
+            exit 1
+          fi
+          if [ -f "$LEGACY_ROLLBACK_WORKFLOW" ] && grep -q -F -- 'deploy-rollback.sh' "$LEGACY_ROLLBACK_WORKFLOW"; then
+            echo "ERROR: the legacy rollback-release.yml production-mutation path is still present" >&2
+            echo "Its production-mutation concurrency group does not serialize with the greenfield production group (OP-CUT-01)." >&2
+            echo "No AWS credentials were used; nothing was mutated." >&2
+            exit 1
+          fi
+          echo "legacy production-mutation paths inactive; preflight proceeds"
+
+      # Untrusted workflow_dispatch inputs travel through step env and are
+      # regex-validated before any use; they are never interpolated raw.
+      - name: Validate dispatch inputs
+        env:
+          CANDIDATE_RUN_ID: ${{ github.event.inputs.candidate_run_id }}
+          CANDIDATE_RUN_ATTEMPT: ${{ github.event.inputs.candidate_run_attempt }}
+          STAGING_RUN_ID: ${{ github.event.inputs.staging_run_id }}
+        run: |
+          set -euo pipefail
+          [[ "$CANDIDATE_RUN_ID" =~ ^[0-9]+$ ]] || { echo "ERROR: candidate_run_id must be digits only" >&2; exit 1; }
+          [[ "$CANDIDATE_RUN_ATTEMPT" =~ ^[0-9]+$ ]] || { echo "ERROR: candidate_run_attempt must be digits only" >&2; exit 1; }
+          [[ "$STAGING_RUN_ID" =~ ^[0-9]+$ ]] || { echo "ERROR: staging_run_id must be digits only" >&2; exit 1; }
+
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: '3.12'
+
+      - name: Install delivery package
+        run: python -m pip install --disable-pip-version-check -q ./delivery
+
+      # Candidate artifacts of the exact run/attempt. The engine additionally
+      # revalidates the full four-artifact set through the GitHub API
+      # (CT-CAND-03), so test-results does not need to be downloaded here.
+      - name: Download candidate manifest
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: candidate-manifest-${{ github.event.inputs.candidate_run_id }}-${{ github.event.inputs.candidate_run_attempt }}
+          path: candidate
+          run-id: ${{ github.event.inputs.candidate_run_id }}
+          github-token: ${{ github.token }}
+
+      - name: Download frontend archive
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: frontend-archive-${{ github.event.inputs.candidate_run_id }}-${{ github.event.inputs.candidate_run_attempt }}
+          path: candidate
+          run-id: ${{ github.event.inputs.candidate_run_id }}
+          github-token: ${{ github.token }}
+
+      - name: Download SBOMs
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: sboms-${{ github.event.inputs.candidate_run_id }}-${{ github.event.inputs.candidate_run_attempt }}
+          path: candidate/sboms
+          run-id: ${{ github.event.inputs.candidate_run_id }}
+          github-token: ${{ github.token }}
+
+      # AD-17: the unapproved preflight is read-only and must never hold the
+      # full production Deployer role. It assumes the dedicated read-only
+      # preflight role (see the PRODUCTION_PREFLIGHT_ROLE_ARN env comment for
+      # the exact policy scope; zero mutation actions). The promote job is
+      # the only consumer of AWS_ROLE_ARN_PRODUCTION.
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4.3.1
+        with:
+          role-to-assume: ${{ env.PRODUCTION_PREFLIGHT_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Capture the read-only production snapshot
+        run: |
+          set -euo pipefail
+          python -m delivery.cli snapshot production \
+            --environment production \
+            --identifiers scripts/config/production-identifiers.json \
+            --out production-snapshot.json
+
+      # The staging record is downloaded by the ENGINE from the exact staging
+      # run (artifact name staging-record-<run>-<attempt>; the attempt is
+      # resolved from the authoritative run object), never by hand (D2).
+      - name: Run the read-only promotion preflight
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          STAGING_RUN_ID: ${{ github.event.inputs.staging_run_id }}
+          MAX_AGE_DAYS: ${{ env.MAX_AGE_DAYS }}
+        run: |
+          set -euo pipefail
+          python -m delivery.cli promote preflight \
+            --candidate candidate/candidate-manifest.json \
+            --frontend-archive candidate/frontend.tar \
+            --sbom-dir candidate/sboms \
+            --staging-run "$STAGING_RUN_ID" \
+            --snapshot production-snapshot.json \
+            --repo-path "$GITHUB_WORKSPACE" \
+            --max-age-days "$MAX_AGE_DAYS" \
+            --environment production \
+            --identifiers scripts/config/production-identifiers.json \
+            --out preflight-report.json \
+            --staging-record-out staging-record.json
+
+      - name: Print the approval summary
+        run: jq -r '.approvalSummary' preflight-report.json
+
+      - name: Upload preflight report and staging record
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: preflight-report-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            preflight-report.json
+            production-snapshot.json
+            staging-record.json
+          if-no-files-found: warn
+          retention-days: 14
+
+  promote:
+    needs: preflight
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    # AD-10 / OP-GEN-01: one queued, non-canceling production mutation group.
+    # The preflight job does NOT hold it; only this job mutates production.
+    concurrency:
+      group: production
+      cancel-in-progress: false
+    # AD-10: the protected `production` Environment requires owner approval.
+    environment:
+      name: production
+    # AD-13: each mutation step publishes its completion so the compensate job
+    # can derive the exact --changed array from steps that actually completed
+    # (never guessed). A step that failed part-way sets no output: its partial
+    # mutation is ambiguous, compensation of it is skipped, and the evidence
+    # artifacts below are preserved for a manual decision.
+    outputs:
+      backends: ${{ steps.deploy-backends.outputs.outcome }}
+      gateway: ${{ steps.deploy-gateway.outputs.outcome }}
+      frontend: ${{ steps.deploy-frontend.outputs.outcome }}
+    permissions:
+      contents: write
+      actions: read
+      deployments: read
+      id-token: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      # OP-CUT-01 / AD-18 bring-up guard (REMOVE AT CUTOVER): same refusal as
+      # the preflight job (promotion AND legacy rollback mutation paths,
+      # `finalize-release.sh` and `deploy-rollback.sh` markers — see the
+      # preflight job comment for the marker choice), re-checked under the
+      # lock.
+      - name: 'Bring-up guard: refuse while a legacy production-mutation path is active'
+        run: |
+          set -euo pipefail
+          LEGACY_PROMOTE_WORKFLOW=".github/workflows/promote-release.yml"
+          LEGACY_ROLLBACK_WORKFLOW=".github/workflows/rollback-release.yml"
+          if [ -f "$LEGACY_PROMOTE_WORKFLOW" ] && grep -q -F -- 'finalize-release.sh' "$LEGACY_PROMOTE_WORKFLOW"; then
+            echo "ERROR: the legacy promote-release.yml production-mutation path is still present" >&2
+            echo "Old and new must never mutate production concurrently (OP-CUT-01)." >&2
+            echo "No AWS credentials were used; nothing was mutated." >&2
+            exit 1
+          fi
+          if [ -f "$LEGACY_ROLLBACK_WORKFLOW" ] && grep -q -F -- 'deploy-rollback.sh' "$LEGACY_ROLLBACK_WORKFLOW"; then
+            echo "ERROR: the legacy rollback-release.yml production-mutation path is still present" >&2
+            echo "Its production-mutation concurrency group does not serialize with the greenfield production group (OP-CUT-01)." >&2
+            echo "No AWS credentials were used; nothing was mutated." >&2
+            exit 1
+          fi
+          echo "legacy production-mutation paths inactive; promote proceeds"
+
+      - name: Validate dispatch inputs
+        env:
+          CANDIDATE_RUN_ID: ${{ github.event.inputs.candidate_run_id }}
+          CANDIDATE_RUN_ATTEMPT: ${{ github.event.inputs.candidate_run_attempt }}
+          STAGING_RUN_ID: ${{ github.event.inputs.staging_run_id }}
+        run: |
+          set -euo pipefail
+          [[ "$CANDIDATE_RUN_ID" =~ ^[0-9]+$ ]] || { echo "ERROR: candidate_run_id must be digits only" >&2; exit 1; }
+          [[ "$CANDIDATE_RUN_ATTEMPT" =~ ^[0-9]+$ ]] || { echo "ERROR: candidate_run_attempt must be digits only" >&2; exit 1; }
+          [[ "$STAGING_RUN_ID" =~ ^[0-9]+$ ]] || { echo "ERROR: staging_run_id must be digits only" >&2; exit 1; }
+
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: '3.12'
+
+      - name: Install delivery package
+        run: python -m pip install --disable-pip-version-check -q ./delivery
+
+      - name: Download candidate manifest
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: candidate-manifest-${{ github.event.inputs.candidate_run_id }}-${{ github.event.inputs.candidate_run_attempt }}
+          path: candidate
+          run-id: ${{ github.event.inputs.candidate_run_id }}
+          github-token: ${{ github.token }}
+
+      - name: Download frontend archive
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: frontend-archive-${{ github.event.inputs.candidate_run_id }}-${{ github.event.inputs.candidate_run_attempt }}
+          path: candidate
+          run-id: ${{ github.event.inputs.candidate_run_id }}
+          github-token: ${{ github.token }}
+
+      - name: Download SBOMs
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: sboms-${{ github.event.inputs.candidate_run_id }}-${{ github.event.inputs.candidate_run_attempt }}
+          path: candidate/sboms
+          run-id: ${{ github.event.inputs.candidate_run_id }}
+          github-token: ${{ github.token }}
+
+      - name: Download the pre-approval preflight report
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: preflight-report-${{ github.run_id }}-${{ github.run_attempt }}
+          path: preflight
+          run-id: ${{ github.run_id }}
+          github-token: ${{ github.token }}
+
+      # AD-17: the approved mutation job is the only consumer of the full
+      # production Deployer role (AWS_ROLE_ARN_PRODUCTION); it never uses
+      # the read-only preflight role.
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4.3.1
+        with:
+          role-to-assume: ${{ env.AWS_ROLE_ARN_PRODUCTION }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      # OP-PRO-02/03: fresh snapshot under the lock, then the FULL preflight
+      # against fresh state. --previous-report proves the approved state did
+      # not drift; any change aborts before mutation.
+      - name: Capture the pre-mutation production snapshot
+        run: |
+          set -euo pipefail
+          python -m delivery.cli snapshot production \
+            --environment production \
+            --identifiers scripts/config/production-identifiers.json \
+            --out production-snapshot.json
+
+      # AD-13: publish the pre-mutation snapshot IMMEDIATELY after capture so
+      # the compensate job can always download it — even when a later
+      # mutation step fails hard and the end-of-job evidence upload never
+      # runs (e.g. the job timeout kills the remaining steps).
+      - name: Upload the pre-mutation snapshot for automatic recovery
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: promotion-snapshot-${{ github.run_id }}-${{ github.run_attempt }}
+          path: production-snapshot.json
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Repeat the full preflight after approval and lock
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          STAGING_RUN_ID: ${{ github.event.inputs.staging_run_id }}
+          MAX_AGE_DAYS: ${{ env.MAX_AGE_DAYS }}
+        run: |
+          set -euo pipefail
+          python -m delivery.cli promote preflight \
+            --candidate candidate/candidate-manifest.json \
+            --frontend-archive candidate/frontend.tar \
+            --sbom-dir candidate/sboms \
+            --staging-run "$STAGING_RUN_ID" \
+            --snapshot production-snapshot.json \
+            --repo-path "$GITHUB_WORKSPACE" \
+            --max-age-days "$MAX_AGE_DAYS" \
+            --previous-report preflight/preflight-report.json \
+            --environment production \
+            --identifiers scripts/config/production-identifiers.json \
+            --out preflight-report.json \
+            --staging-record-out staging-record.json
+
+      # OP-DEP-01: Auth + Items first (both register/update before either
+      # waits), then the gateway, then the frontend last. Each mutation step
+      # publishes `outcome=success` ONLY after its mutation and verification
+      # completed (AD-13: the compensate job never guesses).
+      - name: Deploy backends (Auth + Items)
+        id: deploy-backends
+        run: |
+          set -euo pipefail
+          python -m delivery.cli deploy backends \
+            --candidate candidate/candidate-manifest.json \
+            --snapshot production-snapshot.json \
+            --environment production \
+            --identifiers scripts/config/production-identifiers.json
+          echo "outcome=success" >> "$GITHUB_OUTPUT"
+
+      - name: Deploy API Gateway
+        id: deploy-gateway
+        run: |
+          set -euo pipefail
+          python -m delivery.cli deploy gateway \
+            --candidate candidate/candidate-manifest.json \
+            --snapshot production-snapshot.json \
+            --environment production \
+            --identifiers scripts/config/production-identifiers.json
+          echo "outcome=success" >> "$GITHUB_OUTPUT"
+
+      # OP-DEP-03: immutable prefix first, checksum proven BEFORE the live
+      # switch, live marker names the CANDIDATE (not an unfinalized release).
+      - name: Deploy frontend (immutable prefix + live switch)
+        id: deploy-frontend
+        run: |
+          set -euo pipefail
+          python -m delivery.cli deploy frontend \
+            --candidate candidate/candidate-manifest.json \
+            --snapshot production-snapshot.json \
+            --frontend-archive candidate/frontend.tar \
+            --environment production \
+            --identifiers scripts/config/production-identifiers.json \
+            --out frontend-publish.json
+          echo "outcome=success" >> "$GITHUB_OUTPUT"
+
+      # OP-DEP-04 / CT-PROD-01..04: read-only observed verification before
+      # official finalization (AD-06). No business-data mutation exists here.
+      - name: Verify production read-only
+        run: |
+          set -euo pipefail
+          python -m delivery.cli verify production \
+            --candidate candidate/candidate-manifest.json \
+            --environment production \
+            --identifiers scripts/config/production-identifiers.json \
+            --out verification-report.json
+
+      # approvedBy AND approvedAt are derived from the environment-approval
+      # evidence (actions/runs/{run}/approvals), never from github.actor or
+      # user input, and approvedAt is never the runner clock (AD-10 /
+      # CT-AUDIT-01). The matching approved production review carries the
+      # approval timestamp as approved_at (falling back to created_at when
+      # approved_at is absent from the API answer); both logins and the
+      # timestamp are strictly validated before the JSON is written, and the
+      # step fails closed when the API answer carries no non-empty ISO-8601
+      # timestamp. `date` is never called here.
+      - name: Resolve the environment approver and approval timestamp
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          RUN_ACTOR: ${{ github.actor }}
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          [[ "$RUN_ACTOR" =~ ^[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?$ ]] || { echo "ERROR: invalid actor login" >&2; exit 1; }
+          APPROVAL_EVENT=$(gh api "repos/$REPOSITORY/actions/runs/$RUN_ID/approvals" \
+            --jq '[.[] | select(.state == "approved") | select((.environments // []) | any(.name == "production"))] | if length == 0 then error("no approved production environment review") else .[0] end')
+          APPROVED_BY=$(printf '%s' "$APPROVAL_EVENT" | jq -r '.user.login // empty')
+          [[ "$APPROVED_BY" =~ ^[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?$ ]] || { echo "ERROR: invalid approver login" >&2; exit 1; }
+          APPROVED_AT=$(printf '%s' "$APPROVAL_EVENT" | jq -r '.approved_at // .created_at // empty')
+          [[ "$APPROVED_AT" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$ ]] || {
+            echo "ERROR: the approved production review carries no valid ISO-8601 approval timestamp" >&2
+            exit 1
+          }
+          jq -n \
+            --arg approver "$APPROVED_BY" \
+            --arg requester "$RUN_ACTOR" \
+            --arg workflowUrl "https://github.com/$REPOSITORY/actions/runs/$RUN_ID" \
+            --arg approvedAt "$APPROVED_AT" \
+            '{schemaVersion: "1.0", approver: $approver, requester: $requester, workflowUrl: $workflowUrl, approvedAt: $approvedAt}' \
+            > approval-evidence.json
+          jq -e '.approver != "" and .requester != "" and .approvedAt != ""' approval-evidence.json >/dev/null
+
+      # OP-FIN-01: allocate release-NNNN, mint ECR release tags from recorded
+      # bytes, protect the immutable frontend, prepare the CT-REL manifest,
+      # switch to the official marker, publish the GitHub Release with the
+      # manifest + 4 pinned SBOMs, audit the rollback window. Exact-match
+      # resume for partial finalization (OP-FIN-02); a mismatch fails closed.
+      - name: Finalize the official release
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          STAGING_IDENTITY=$(jq -r '.stagingGate.evidenceIdentity' preflight-report.json)
+          python -m delivery.cli finalize \
+            --candidate candidate/candidate-manifest.json \
+            --snapshot production-snapshot.json \
+            --staging-record staging-record.json \
+            --staging-record-identity "$STAGING_IDENTITY" \
+            --verification-report verification-report.json \
+            --approval approval-evidence.json \
+            --frontend-publish frontend-publish.json \
+            --frontend-archive candidate/frontend.tar \
+            --sbom-dir candidate/sboms \
+            --manifest release-manifest.json \
+            --environment production \
+            --identifiers scripts/config/production-identifiers.json \
+            --out finalize-report.json
+
+      # AD-13 / OP-REC-02: record the ORIGINAL failure separately from the
+      # recovery outcome. The compensate job consumes this context so the
+      # recovery result names the original failure honestly (never fabricated
+      # from the recovery's own state). github.actor is not consulted.
+      - name: Record the promotion failure context
+        if: failure()
+        env:
+          RUN_ID: ${{ github.run_id }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
+        run: |
+          set -euo pipefail
+          jq -n \
+            --arg workflowRunId "$RUN_ID" \
+            --arg workflowRunAttempt "$RUN_ATTEMPT" \
+            --arg workflowUrl "https://github.com/$GITHUB_REPOSITORY/actions/runs/$RUN_ID" \
+            '{schemaVersion: "1.0", workflowRunId: ($workflowRunId | tonumber), workflowRunAttempt: ($workflowRunAttempt | tonumber), workflowUrl: $workflowUrl, conclusion: "failed"}' \
+            > promotion-failure-context.json
+
+      # D7 failure honesty: on any failure the pre-mutation snapshot and every
+      # evidence file are preserved (>= 14 days) for recovery/rollback.
+      - name: Upload promotion evidence (snapshot + reports)
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: promotion-evidence-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            production-snapshot.json
+            preflight-report.json
+            staging-record.json
+            frontend-publish.json
+            verification-report.json
+            approval-evidence.json
+            release-manifest.json
+            finalize-report.json
+            promotion-failure-context.json
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Print finalization conclusions
+        if: always()
+        run: |
+          set -euo pipefail
+          if [ -f finalize-report.json ]; then
+            jq -e '{releaseId: .releaseId, resumed: .resumed, rollbackCapableAtPublication: .rollbackCapableAtPublication, window: .window}' finalize-report.json
+          else
+            echo "finalize report was not written; evidence artifacts above are preserved for recovery"
+          fi
+
+  # ---------------------------------------------------------------------------
+  # Phase 6 automatic recovery (AD-13 / OP-REC-01/02, VR-REC-01).
+  #
+  # Runs only when the promote job FAILED and at least one mutation step
+  # completed (its output is set exclusively at the end of a successful step).
+  # The changed array is built ONLY from those completed steps — never
+  # guessed. A promote job that failed before any mutation (preflight,
+  # snapshot, drift, bring-up guard) sets no outputs, so this job is skipped
+  # and the evidence waits for manual diagnosis. A step that failed part-way
+  # is ambiguous: it sets no output, is NOT compensated, and its evidence is
+  # preserved (documented limitation).
+  #
+  # Per AD-13 this job requires NO protected-Environment approval: it can
+  # only move production BACK toward the pre-mutation snapshot the owner
+  # already approved deploying away from, using inputs recorded by the
+  # promote job itself. It still holds the queued non-canceling production
+  # concurrency group so recovery can never race promotion or rollback.
+  # ---------------------------------------------------------------------------
+  compensate:
+    needs: promote
+    if: failure() && (needs.promote.outputs.backends == 'success' || needs.promote.outputs.gateway == 'success' || needs.promote.outputs.frontend == 'success')
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    concurrency:
+      group: production
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      actions: read
+      id-token: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      # OP-CUT-01 / AD-18 bring-up guard (REMOVE AT CUTOVER): identical to the
+      # other jobs. Recovery only ever runs after the promote job mutated,
+      # which already proves the legacy paths were inactive; the re-check is
+      # defense in depth under the lock.
+      - name: 'Bring-up guard: refuse while a legacy production-mutation path is active'
+        run: |
+          set -euo pipefail
+          LEGACY_PROMOTE_WORKFLOW=".github/workflows/promote-release.yml"
+          LEGACY_ROLLBACK_WORKFLOW=".github/workflows/rollback-release.yml"
+          if [ -f "$LEGACY_PROMOTE_WORKFLOW" ] && grep -q -F -- 'finalize-release.sh' "$LEGACY_PROMOTE_WORKFLOW"; then
+            echo "ERROR: the legacy promote-release.yml production-mutation path is still present" >&2
+            echo "Old and new must never mutate production concurrently (OP-CUT-01)." >&2
+            echo "No AWS credentials were used; nothing was mutated." >&2
+            exit 1
+          fi
+          if [ -f "$LEGACY_ROLLBACK_WORKFLOW" ] && grep -q -F -- 'deploy-rollback.sh' "$LEGACY_ROLLBACK_WORKFLOW"; then
+            echo "ERROR: the legacy rollback-release.yml production-mutation path is still present" >&2
+            echo "Its production-mutation concurrency group does not serialize with the greenfield production group (OP-CUT-01)." >&2
+            echo "No AWS credentials were used; nothing was mutated." >&2
+            exit 1
+          fi
+          echo "legacy production-mutation paths inactive; recovery proceeds"
+
+      # Same validation convention as the other jobs: workflow_dispatch inputs
+      # are untrusted and validated before any use.
+      - name: Validate dispatch inputs
+        env:
+          CANDIDATE_RUN_ID: ${{ github.event.inputs.candidate_run_id }}
+          CANDIDATE_RUN_ATTEMPT: ${{ github.event.inputs.candidate_run_attempt }}
+          STAGING_RUN_ID: ${{ github.event.inputs.staging_run_id }}
+        run: |
+          set -euo pipefail
+          [[ "$CANDIDATE_RUN_ID" =~ ^[0-9]+$ ]] || { echo "ERROR: candidate_run_id must be digits only" >&2; exit 1; }
+          [[ "$CANDIDATE_RUN_ATTEMPT" =~ ^[0-9]+$ ]] || { echo "ERROR: candidate_run_attempt must be digits only" >&2; exit 1; }
+          [[ "$STAGING_RUN_ID" =~ ^[0-9]+$ ]] || { echo "ERROR: staging_run_id must be digits only" >&2; exit 1; }
+
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: '3.12'
+
+      - name: Install delivery package
+        run: python -m pip install --disable-pip-version-check -q ./delivery
+
+      # The snapshot artifact is uploaded by the promote job right after
+      # capture, before any mutation, so it exists even for hard failures.
+      - name: Download the pre-mutation snapshot
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: promotion-snapshot-${{ github.run_id }}-${{ github.run_attempt }}
+          path: promotion-snapshot
+          run-id: ${{ github.run_id }}
+          github-token: ${{ github.token }}
+
+      # Optional evidence bundle: carries the original-failure context. A
+      # genuinely absent bundle (job killed before the upload) is tolerated
+      # here and reported honestly in the recovery result.
+      - name: Download the promotion evidence
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: promotion-evidence-${{ github.run_id }}-${{ github.run_attempt }}
+          path: promotion-evidence
+          run-id: ${{ github.run_id }}
+          github-token: ${{ github.token }}
+          if-no-files-found: warn
+
+      # AD-17: compensation is a declared production mutation and uses the
+      # full production Deployer role, never the read-only preflight role.
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4.3.1
+        with:
+          role-to-assume: ${{ env.AWS_ROLE_ARN_PRODUCTION }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      # Build --changed ONLY from mutation steps that completed (their
+      # outputs), through jq (never shell string concatenation). Values are
+      # compared against the literal "success"; anything else contributes
+      # nothing and a fully-empty array fails closed.
+      - name: Build the changed component array from completed mutation steps
+        env:
+          BACKENDS: ${{ needs.promote.outputs.backends }}
+          GATEWAY: ${{ needs.promote.outputs.gateway }}
+          FRONTEND: ${{ needs.promote.outputs.frontend }}
+        run: |
+          set -euo pipefail
+          CHANGED='[]'
+          if [ "$BACKENDS" = "success" ]; then
+            CHANGED=$(jq -c '. + ["auth", "items"]' <<<"$CHANGED")
+          fi
+          if [ "$GATEWAY" = "success" ]; then
+            CHANGED=$(jq -c '. + ["gateway"]' <<<"$CHANGED")
+          fi
+          if [ "$FRONTEND" = "success" ]; then
+            CHANGED=$(jq -c '. + ["frontend"]' <<<"$CHANGED")
+          fi
+          jq -e 'length > 0' <<<"$CHANGED" >/dev/null || {
+            echo "ERROR: no completed mutation step; automatic compensation must not run" >&2
+            exit 1
+          }
+          printf '%s\n' "$CHANGED" > changed.json
+          echo "changed components: $CHANGED"
+
+      # OP-REC-02: stop forward progress (already stopped — the promote job
+      # failed), restore the changed components from the snapshot, and record
+      # both outcomes. The recovery result carries the original failure
+      # separately from the recovery outcome; a recovery failure fails this
+      # job and is never reported as success.
+      - name: Restore the pre-mutation snapshot (automatic recovery)
+        env:
+          ORIGINAL_RESULT: ${{ needs.promote.result }}
+        run: |
+          set -euo pipefail
+          ORIGINAL_FAILURE="promotion job result: $ORIGINAL_RESULT"
+          if [ -f promotion-evidence/promotion-failure-context.json ]; then
+            jq -e '.conclusion == "failed"' promotion-evidence/promotion-failure-context.json >/dev/null
+            ORIGINAL_FAILURE="promotion failed (run $(jq -r '.workflowRunId' promotion-evidence/promotion-failure-context.json), attempt $(jq -r '.workflowRunAttempt' promotion-evidence/promotion-failure-context.json))"
+          fi
+          python -m delivery.cli recover \
+            --snapshot promotion-snapshot/production-snapshot.json \
+            --changed changed.json \
+            --out recovery-result.json \
+            --original-failure "$ORIGINAL_FAILURE" \
+            --environment production \
+            --identifiers scripts/config/production-identifiers.json
+
+      - name: Upload the recovery result
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: recovery-result-${{ github.run_id }}-${{ github.run_attempt }}
+          path: recovery-result.json
+          if-no-files-found: warn
+          retention-days: 14
+
+      # OP-REC-01: report BOTH the original failure and the recovery outcome;
+      # the job fails when recovery failed, and never claims success for a
+      # failed recovery.
+      - name: Report the original failure and the recovery outcome
+        if: always()
+        run: |
+          set -euo pipefail
+          echo "ORIGINAL FAILURE: promotion job result was ${{ needs.promote.result }} (run ${{ github.run_id }})"
+          if [ ! -f recovery-result.json ]; then
+            echo "ERROR: automatic recovery produced no result; the original failure is UNRESOLVED" >&2
+            exit 1
+          fi
+          jq '{outcome, snapshotId, originalFailure, components: [.components[] | {component, conclusion}]}' recovery-result.json
+          OUTCOME=$(jq -r '.outcome' recovery-result.json)
+          if [ "$OUTCOME" = "failed" ]; then
+            echo "ERROR: automatic recovery FAILED ($(jq -r '.failureDetail // "no detail"' recovery-result.json)); the original failure is UNRESOLVED" >&2
+            exit 1
+          fi
+          echo "RECOVERY OUTCOME: completed - the pre-mutation snapshot was restored"

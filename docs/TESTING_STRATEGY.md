@@ -213,6 +213,34 @@ Environment approval, ECR/ECS/S3/CloudFront mutations and read-backs, and the
 GitHub Release publication) is verified in the consolidated Pass 3 verification
 pass, not by these offline gates.
 
+## Pass 3R.1 CI security and promotion handoff gate (offline)
+
+The 3R.1 gate covers the workflow security boundary and the exact candidate →
+snapshot → deployment → official handoff. It executes only local static checks
+and stateful AWS/GitHub stubs; it does not start staging or contact live AWS,
+GitHub, or production. The checks prove that GitHub contexts reach shell only
+through step `env`, hostile values stay inert, permissions are job-scoped,
+candidate evidence is bound to the exact run/attempt and optional `source_sha`,
+the real GitHub `head_branch: "main"` / attempt-jobs API shape is handled, the
+snapshot binds the actual live release/tag/immutable frontend prefix and
+full-object SHA-256 checksum, and publication/restore/compensation request
+SHA-256 object checksums.
+
+```bash
+bash tests/scripts/ci_security_contract_test.sh
+bash tests/scripts/promotion_handoff_test.sh
+bash tests/scripts/promotion_test.sh
+bash tests/scripts/rollback_test.sh
+```
+
+`promotion_handoff_test.sh` runs the real shell wrappers against a stateful
+offline stub and checks that the candidate remains unchanged, the snapshot
+provides current task-definition ARNs, deployment emits final ARNs, only the
+deployment manifest becomes official, verification precedes finalization, and
+the finalization decision is dry-run/idempotent. The structural PR/trusted-job
+split is deferred to 3R.2/3R.3, the live role cutover to 3R.9, and environment
+approval, AWS mutations, and GitHub Release publication to 3R.10.
+
 ### Running Tests
 
 > **Important:** Always run from the target service directory — NOT from a parent or sibling directory. Do NOT use `-f ../Service/pom.xml` patterns.

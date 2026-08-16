@@ -309,6 +309,8 @@ write_stub_clis() {
   mkdir -p "$TMP/bin"
   cat > "$TMP/bin/aws" <<'PY'
 #!/usr/bin/env python3
+import base64
+import hashlib
 import json
 import os
 import sys
@@ -436,23 +438,50 @@ elif service == "s3api" and sub == "get-object":
             handle.write(str(content))
 elif service == "s3api" and sub == "head-object":
     key = arg("--key") or ""
-    record(f"s3api head-object {key}")
-    text(state["frontend"].get(key, "etag"))
+    checksum_mode = arg("--checksum-mode")
+    record(f"s3api head-object {key} checksum-mode={checksum_mode or '<missing>'}")
+    if checksum_mode != "ENABLED":
+        fail_not_found()
+    frontend = state["frontend"]
+    if "headChecksumSha256" in frontend:
+        checksum = frontend["headChecksumSha256"]
+    else:
+        checksum_hex = frontend.get("checksums", {}).get(key)
+        if checksum_hex is None:
+            checksum = None
+        else:
+            try:
+                checksum = base64.b64encode(bytes.fromhex(checksum_hex)).decode("ascii")
+            except ValueError:
+                checksum = checksum_hex
+    emit({
+        "checksum": checksum,
+        "checksumType": frontend.get("headChecksumType", "FULL_OBJECT"),
+    })
 elif service == "s3" and sub == "cp":
-    record("s3 cp")
+    checksum_algorithm = arg("--checksum-algorithm")
+    record(f"s3 cp checksum-algorithm={checksum_algorithm or '<missing>'}")
     uri = [a for a in args if a.startswith("s3://")]
     if uri:
         uri_index = args.index(uri[0])
         src = args[uri_index - 1] if uri_index > 0 else ""
         bucket, key = uri[0][len("s3://"):].split("/", 1)
         if src:
-            with open(src, encoding="utf-8") as handle:
-                content = handle.read()
+            with open(src, "rb") as handle:
+                raw = handle.read()
+            content = raw.decode("utf-8")
             try:
                 content = json.loads(content)
             except ValueError:
                 pass
-            state.setdefault("frontend", {})[key] = content
+            frontend = state.setdefault("frontend", {})
+            frontend[key] = content
+            checksums = frontend.setdefault("checksums", {})
+            if checksum_algorithm == "SHA256":
+                checksums[key] = hashlib.sha256(raw).hexdigest()
+            else:
+                checksums.pop(key, None)
+            frontend.pop("headChecksumSha256", None)
             persist()
     text("")
 elif service == "s3" and sub == "sync":
@@ -784,11 +813,44 @@ assert_success bash "$RELEASE/bin/restore-frontend.sh" \
   --profile dpm-profile --region eu-north-1
 jq -e '.frontend["release.json"].version == "1.1.0"' "$TMP/state.json" >/dev/null \
   || fail "restore-frontend must re-point the live root to the target release"
+RESTORED_INDEX_SHA=$(printf '%s' '<html>v1.1.0</html>' | sha256sum | awk '{print $1}')
+jq -e --arg sha "$RESTORED_INDEX_SHA" '
+  (.frontend.checksums["release.json"] | type == "string" and test("^[0-9a-f]{64}$")) and
+  .frontend.checksums["index.html"] == $sha
+' "$TMP/state.json" >/dev/null \
+  || fail "restore-frontend must establish SHA-256 metadata for the live marker and index"
+EXPECTED_INDEX_CHECKSUM=$(python3 - "$RESTORED_INDEX_SHA" <<'PY'
+import base64
+import sys
+
+print(base64.b64encode(bytes.fromhex(sys.argv[1])).decode("ascii"))
+PY
+)
+LIVE_INDEX_HEAD=$(aws s3api head-object --profile dpm-profile --region eu-north-1 \
+  --bucket onlineshop-frontend-799111666795 --key index.html \
+  --checksum-mode ENABLED \
+  --query '{checksum: ChecksumSHA256, checksumType: ChecksumType}' --output json)
+printf '%s' "$LIVE_INDEX_HEAD" | jq -e --arg checksum "$EXPECTED_INDEX_CHECKSUM" \
+  '.checksum == $checksum and .checksumType == "FULL_OBJECT"' >/dev/null \
+  || fail "restore-frontend must leave a valid live ChecksumSHA256"
+[[ "$(grep -c 's3 cp checksum-algorithm=SHA256' "$TMP/calls.txt")" -eq 2 ]] \
+  || fail "restore-frontend must request SHA-256 for both live-root writes"
 grep -q "cloudfront create-invalidation" "$TMP/calls.txt" \
   || fail "restore-frontend must invalidate the SPA entry paths"
 if grep -q -- "--delete" "$TMP/calls.txt"; then
   fail "restore-frontend must never use --delete"
 fi
+# The stub must not retain stale checksum metadata when a later overwrite omits
+# the checksum request; this makes a missing --checksum-algorithm catchable.
+printf '%s' '<html>omitted-checksum</html>' > "$TMP/omitted-index.html"
+aws s3 cp --profile dpm-profile --region eu-north-1 \
+  "$TMP/omitted-index.html" "s3://onlineshop-frontend-799111666795/index.html" \
+  --content-type text/html >/dev/null
+OUT=$(aws s3api head-object --profile dpm-profile --region eu-north-1 \
+  --bucket onlineshop-frontend-799111666795 --key index.html \
+  --checksum-mode ENABLED --output json)
+printf '%s' "$OUT" | jq -e '.checksum == null' >/dev/null \
+  || fail "rollback stub must remove checksum metadata when SHA-256 is omitted"
 # Dry-run must not mutate.
 stub_state_rollback
 OUT=$(bash "$RELEASE/bin/restore-frontend.sh" \

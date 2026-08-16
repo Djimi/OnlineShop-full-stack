@@ -41,6 +41,7 @@ audit, automated tests, and this documentation.
 | `src/release_contract/serialization.py` | Staging mutation serialization model (offline proof) | ✅ yes |
 | `src/release_contract/ecr.py` | Server-side `release-<version>` mint / reuse / fail-closed decision + post-mutation digest verification (3.3) | ✅ yes |
 | `src/release_contract/releaseid.py` | Release-identity collision / interrupted-promotion resume decision (3.3) | ✅ yes |
+| `src/release_contract/official.py` | Exact live-marker → canonical Git tag resolver for production snapshots (3R.1) | ✅ yes |
 | `src/release_contract/iam.py` | IAM least-privilege + OIDC trust policy validation (3.3) | ✅ yes |
 | `ecr/immutable-repositories.json` | Desired ECR `IMMUTABLE_WITH_EXCLUSION` repository state (3.3) | ✅ yes |
 | `bin/apply-immutable-repositories.sh` | Apply immutable-tag repository config with immediate read-back (3.3) | ✅ yes |
@@ -62,10 +63,13 @@ audit, automated tests, and this documentation.
 | `bin/emit-candidate-manifest.sh` | Renders a schema-valid candidate manifest from evidence + owner-assigned SemVer | ✅ yes |
 | `bin/record-artifact.sh` | Records the GitHub artifact ID, URL, and service-reported digest from the `actions/upload-artifact@v4` step outputs | ✅ yes |
 | `tests/*.py` | Python unit + validation tests (stdlib `unittest`) | ✅ yes |
+| `tests/test_official.py` | Paginated GitHub tag/API-shape and canonical-tag identity tests (3R.1) | ✅ yes |
 | `requirements.txt` | Pinned Python dependencies (`jsonschema`, `PyYAML`) | ✅ yes |
 | `../../tests/scripts/release_contract_test.sh` | Repo-level verification gate for the 3.1 contract | ✅ yes |
 | `../../tests/scripts/candidate_evidence_test.sh` | Repo-level verification gate for the 3.2 candidate evidence (incl. workflow static checks) | ✅ yes |
 | `../../tests/scripts/ecr_release_tagging_test.sh` | Repo-level verification gate for the 3.3 ECR tagging / immutability / least privilege | ✅ yes |
+| `../../tests/scripts/ci_security_contract_test.sh` | Offline 3R.1 workflow-context, job-permission, hostile-input, and validator-boundary gate | ✅ yes |
+| `../../tests/scripts/promotion_handoff_test.sh` | Stateful offline candidate → snapshot → deployment → official → verify → finalize handoff gate (3R.1) | ✅ yes |
 | `bin/validate-task-definition.sh` | Shell wrapper over `release_contract.ecs_config validate-td` (3.5) | ✅ yes |
 | `bin/sanitize-task-definition.sh` | Digest-pin transform + image-only diff, secrets stay in `valueFrom` (3.5) | ✅ yes |
 | `src/release_contract/ecs_config.py` | Task-definition + service-config hardening validation (3.5) | ✅ yes |
@@ -188,9 +192,80 @@ retention) must use these helpers rather than re-deriving tag names.
 `bin/release-input.sh` validates every dispatch input **before** use:
 `rl_assert_semver`, `rl_assert_full_sha`, `rl_assert_sha256_hex`,
 `rl_assert_positive_integer`, `rl_assert_github_login`, `rl_assert_http_url`,
-`rl_assert_regular_file`. Validated inputs are passed downstream only as
+`rl_assert_regular_file`, `rl_assert_ci_ref`, `rl_assert_ci_pr_ref`, and
+`rl_assert_task_definition_arn`. Validated inputs are passed downstream only as
 environment variables or argument-array entries, never interpolated into shell,
-JSON, GitHub CLI, or AWS CLI command strings.
+JSON, GitHub CLI, or AWS CLI command strings. The 3R.1 workflows transfer
+untrusted GitHub contexts through step `env` and keep the workflow-level
+permission boundary at `contents: read`; jobs opt into additional permissions
+explicitly. Pull-request credential bootstrap and ECR publication remain
+disabled; the structural PR/trusted-job split is Pass 3R.2/3R.3 and the
+purpose-specific role cutover is Pass 3R.9.
+
+Promotion's optional `source_sha` is a selector, not a second source of truth:
+when present it must be a full lowercase commit SHA and must match the
+downloaded candidate evidence exactly (`release_contract.promotion source-sha`).
+Candidate evidence is consumed from one exact workflow run **and attempt**;
+the unscoped/latest attempt is never accepted.
+
+## Pass 3R.1 — CI security and promotion handoff repair (offline)
+
+This subphase hardens the current v1 promotion path without changing the
+manifest schema or staging design. The offline gates are:
+
+```bash
+bash tests/scripts/ci_security_contract_test.sh
+bash tests/scripts/promotion_handoff_test.sh
+```
+
+`ci_security_contract_test.sh` parses the three in-scope workflows with a
+duplicate-key-rejecting YAML loader, verifies full-SHA action pins and the
+workflow/job permission boundary, checks event-specific refs, and passes shell-
+hostile values through the validators to prove no command/file is evaluated.
+The `promotion_handoff_test.sh` stateful stub follows the real sequence:
+
+```text
+candidate manifest (schema-valid, no task-definition ARN)
+  → read-only production snapshot
+  → deploy-production.sh(candidate + snapshot)
+  → deployment manifest (final task-definition ARNs)
+  → official manifest
+  → production verification
+  → finalization decision
+```
+
+`deploy-production.sh` validates the candidate and snapshot before mutation,
+uses only snapshot service task-definition ARNs as its current-state source,
+and emits the deployment manifest; only that output may be converted to an
+official manifest. The candidate bytes are not rewritten.
+
+The GitHub API gather path is pinned to the real attempt-scoped shape:
+`actions/runs/{run}/attempts/{attempt}` and
+`actions/runs/{run}/attempts/{attempt}/jobs`. A workflow-run response must have
+positive numeric `id` and `run_attempt` matching the requested values, and its
+REST `head_branch: "main"` is normalized to the contract ref
+`refs/heads/main`. The unscoped jobs endpoint is never used because it can
+describe the latest attempt instead of the selected candidate.
+
+Before a production mutation, `snapshot-production.sh` fails closed unless it
+captures the actual live `release.json` identity, a full-object S3
+`ChecksumSHA256` for `index.html`, the matching immutable
+`_releases/v<version>/release.json` and `index.html`, and the exact canonical
+`v<version>` Git tag/source SHA. Tags are resolved from paginated GitHub API
+pages by the live marker's version (never by highest sort order); annotated
+tags are peeled and must resolve to the same source SHA. The new
+`release_contract.official` module owns the paginated response-shape and
+canonical-tag decision.
+
+`publish-frontend.sh`, `restore-frontend.sh`, and the frontend path in
+`compensate-production.sh` pass `--checksum-algorithm SHA256` to every S3
+writer. Snapshot decodes the service-reported base64 `ChecksumSHA256` and
+requires `FULL_OBJECT`; it never synthesizes a digest from bytes or falls back
+to an ETag. The stateful gate checks missing, malformed, and composite metadata.
+
+These gates are offline evidence only. Live AWS/GitHub reads and mutations,
+protected approval, role cutover, and GitHub Release publication remain
+deferred to the explicit Pass 3R checkpoints, culminating in Pass 3R.10.
 
 ---
 
@@ -374,8 +449,15 @@ Subphase 3.4 is the approved, approval-gated promotion of one verified monorepo
 snapshot from staging to production. The rule set lives in
 `src/release_contract/promotion.py` (pure, fixture-tested):
 
+Pass 3R.1 tightens this existing flow: the deployment input is a candidate
+manifest plus a validated production snapshot, and the official manifest is
+rendered only from the resulting deployment manifest after verification. The
+candidate never supplies current task-definition ARNs.
+
 - `dispatch` — SemVer + numeric candidate run id; a hand-typed image tag/
   digest is rejected (`INVALID_VERSION`/`INVALID_RUN_ID`).
+- `source-sha` — an optional dispatch selector must be a full SHA matching the
+  downloaded candidate evidence exactly (`INVALID_SHA`/`SOURCE_SHA_MISMATCH`).
 - `run` evidence — a successful `push` on `refs/heads/main` at the exact SHA
   with a successful cloud staging `e2e-staging` job
   (`RUN_EVENT_MISMATCH`/`RUN_REF_MISMATCH`/`RUN_SHA_MISMATCH`/
@@ -386,8 +468,11 @@ snapshot from staging to production. The rule set lives in
 - `preflight` — manifest schema, run evidence, ancestry, staging gate,
   release-name uniqueness, and the Decision 8 database-change review
   (`SCHEMA_CHANGE_UNREVIEWED`).
-- `snapshot` — every field needed for compensation/resume
-  (`SNAPSHOT_MISSING_FIELD`).
+- `snapshot` — every field needed for compensation/resume, including the live
+  marker identity, full-object frontend index SHA-256, matching immutable
+  prefix marker/index, and exact canonical Git tag/source SHA
+  (`SNAPSHOT_MISSING_FIELD`, `SNAPSHOT_MARKER_INVALID`,
+  `SNAPSHOT_INDEX_INVALID`, `SNAPSHOT_OFFICIAL_MISMATCH`).
 - `plan` — canonical auth+items → api-gateway → frontend order and the safe
   rolling / circuit-breaker parameters (`PLAN_ORDER_INVALID`,
   `CIRCUIT_BREAKER_DISABLED`, `ROLLBACK_DISABLED`, `MIN_HEALTHY_PERCENT`,
@@ -606,7 +691,9 @@ decisions and reuses the promotion contract for the shared ones:
   run. Never mints or moves ECR tags and never creates an official release.
 - `bin/restore-frontend.sh` — restores the live root from the retained
   immutable `_releases/v<version>/` prefix (marker + index.html, no `--delete`)
-  and invalidates the SPA entry paths, with read-back.
+  and invalidates the SPA entry paths, with read-back. Every S3 write requests
+  `--checksum-algorithm SHA256`; the same explicit full-object checksum
+  contract is used by promotion compensation.
 - `bin/verify-rollback.sh` — read-only post-rollback verification (running
   `containers[].imageDigest`, service task-definition ARNs, frontend marker,
   ALB health) against the deployment manifest; a paused environment fails

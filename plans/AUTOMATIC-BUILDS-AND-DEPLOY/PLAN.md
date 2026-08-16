@@ -1,5 +1,7 @@
 # Automatic Builds & Deploy — PLAN
 
+<!-- Pass 3R redesign plan is appended below; preserve prior passes as execution history. -->
+
 ## Strategy: Iterative, Fast Feedback
 
 This plan is split into **4 passes**, each building on the previous one. The guiding principle is **deploy to AWS as fast as possible**, then harden and polish incrementally.
@@ -150,3 +152,551 @@ Every step executed in this plan **MUST** update [`executed/INFO.md`](./executed
 | ✅ Staging CI started stale images before candidate deployment | Added `resume-staging.sh --defer-services`; CI provisions RDS/ALB with ECS stopped, then deploys the candidate before scaling services |
 | ✅ Uncached invalid-token E2E returned 502 on cold staging Auth lookup | Gateway registry wiring and wrapped-exception classification are fixed and unit-tested; merged-main run 31267620402 passed the invalid-token E2E with 401 |
 | ✅ Candidate evidence failed after green staging E2E because `referencing` was absent on the runner | Candidate-evidence installs the pinned release-contract requirements before producer-set validation, uses the verified setup-python pin, and was confirmed end-to-end by merged-main run 31271458491 |
+---
+
+# Pass 3R — CI/CD and Release Redesign
+
+## Why this pass exists
+
+Pass 3 produced valuable release-safety foundations, but the current implementation is too large and has not completed its live promotion/rollback proof. The active workflow repeats backend jobs, rebuilds every component on every `main` merge, mixes orchestration with environment-specific shell/AWS logic, and spends about 37 minutes in ephemeral staging even though the cloud E2E tests themselves take under one minute.
+
+Pass 3R replaces that path incrementally. Completed Pass 1–3 records above remain historical evidence. The unfinished consolidated Pass 3 live verification is superseded by 3R.10 and MUST NOT be run against the old promotion path.
+
+Target behavior:
+
+```text
+feature/** push or pull request
+    ├── detect affected components
+    ├── run affected unit/integration jobs in parallel
+    ├── run frontend lint/build when applicable
+    └── run the complete local Docker Compose API E2E suite
+             └── no AWS credentials and no ECR publication
+
+main merge
+    ├── resolve changes since the latest successfully staged ancestor candidate
+    ├── build only affected components
+    ├── reuse verified immutable artifacts for unaffected components
+    ├── assemble one complete four-component candidate set
+    ├── create clean ephemeral staging
+    ├── deploy the exact backend digests and run cloud E2E
+    └── always destroy staging
+
+manual promotion (initial 3R behavior)
+    ├── protected production approval
+    ├── deploy only artifacts that differ from production
+    ├── verify exact running digests/checksum
+    └── publish one official application release
+```
+
+## Locked decisions
+
+- One application SemVer identifies one complete Auth + Items + API Gateway + frontend release set.
+- A component is independently built/reused, but it does not get an independent SemVer.
+- `common/**` changes always mark Items as affected.
+- Every `feature/**` push runs local Docker Compose E2E. Pull requests also run it, including fork PRs.
+- Feature/PR validation never assumes an AWS role and never publishes ECR images. Draft PRs are the normal early-feedback mechanism; no separate manual snapshot-image workflow is added until a real need exists.
+- Main merges create verified candidates automatically. Production promotion remains manually versioned and approval-gated during Pass 3R.
+- Staging remains clean and ephemeral per candidate. A warm/stopped staging database is not introduced.
+- New candidates and official releases use a clean manifest contract v2. Existing v1 data is not migrated and is not a rollback target after v2 cutover.
+- Promotion never rebuilds. Unchanged artifacts are reused by digest/checksum.
+- Local/operator AWS commands require `--profile dpm-profile --region eu-north-1`. GitHub Actions uses temporary OIDC environment credentials with explicit region/account verification and no named profile.
+- Durable infrastructure-as-code migration remains deferred and is tracked as architectural debt.
+
+## Mandatory execution protocol
+
+This protocol applies to every 3R subphase and is part of the deliverable.
+
+1. Work only in the dedicated `feature/cicd-release-redesign` worktree.
+2. Before implementation, read root `AGENTS.md`, this Pass 3R section, `docs/CI_CD_GOTCHAS.md`, `docs/TESTING_STRATEGY.md`, and the files named by the subphase.
+3. One subphase equals one independently reviewable product. Do not mix work from the next subphase.
+4. Implementation loop:
+   - Luna/max implementation agent reads this file from a clean context and implements/tests the subphase.
+   - Terra/high reviewer performs a read-only correctness, security, maintainability, and scope review.
+   - Luna/max challenger independently looks for counterexamples, missing tests, unsafe assumptions, and needless complexity.
+   - If either reports actionable findings, a Luna/max implementation pass fixes them; repeat review/challenge until both return no actionable findings.
+   - Luna/max documentation agent checks the recursive documentation contract and fixes all affected docs.
+   - Root agent runs the required gates, reviews the diff, updates this plan and produces the user handoff.
+5. Mark a subphase complete only when implementation, automated gates, both reviews, documentation audit, and user manual acceptance are complete.
+6. At the end of a subphase, stop. Give the user a short result summary, changed-file map, automated evidence, and exact manual instructions. Do not start the next subphase until the user explicitly accepts or requests changes.
+7. Record review outcomes and commands in the subphase evidence block. Never claim a live check from an offline stub.
+8. Do not commit or push unless the user separately requests it.
+
+### AWS/staging budget
+
+- Implementation and review agents MUST NOT call live AWS unless the current subphase explicitly requires a live acceptance run and the user has reached that checkpoint.
+- Review/challenge/documentation agents never start staging.
+- Combine cumulative staging changes into the live checkpoints in 3R.5b, 3R.7 and 3R.10. Subphases 3R.4 and 3R.5a use offline/stateful stubs only.
+- Before any live AWS work, run `aws sts get-caller-identity --profile dpm-profile --region eu-north-1`. If it reports `Your session has expired`, stop and ask the user to re-authenticate; do not retry.
+- Every AWS create/put/delete must be followed by describe/get/list read-back.
+- A staging-owning run always tears down ECS, ALB and RDS. It retains a snapshot only through the explicit diagnostic exception.
+
+## Status dashboard
+
+| Subphase | Product | Implementation | Review | Challenge | Docs | Automated | Manual acceptance |
+|---|---|---:|---:|---:|---:|---:|---:|
+| 3R.0 | Plan, worktree and baseline contract | complete | pending | pending | pending | n/a | pending |
+| 3R.1 | Critical CI security and promotion handoff repair | complete | complete | complete | complete | complete | pending |
+| 3R.2 | Feature/PR validation and reusable Java matrix | pending | pending | pending | pending | pending | pending |
+| 3R.3 | Trusted-main reusable candidate workflow | pending | pending | pending | pending | pending | pending |
+| 3R.4 | Digest-pinned staging interface and timing evidence | pending | pending | pending | pending | pending | pending |
+| 3R.5a | Three-task database bootstrap | pending | pending | pending | pending | pending | pending |
+| 3R.5b | Parallel ECS deploy and measured health tuning | pending | pending | pending | pending | pending | pending |
+| 3R.6 | Release-set v2 contract and resolver | pending | pending | pending | pending | pending | pending |
+| 3R.7 | Selective main builds and v2 candidate staging | pending | pending | pending | pending | pending | pending |
+| 3R.8 | Changed-only promotion, rollback and traceability | pending | pending | pending | pending | pending | pending |
+| 3R.9 | OIDC/IAM role cutover | pending | pending | pending | pending | pending | pending |
+| 3R.10 | Live v2 cutover, rollback drill and legacy cleanup | pending | pending | pending | pending | pending | pending |
+
+## Shared interfaces and invariants
+
+### Workflow boundaries
+
+The target files are small orchestration workflows plus one reusable Java workflow:
+
+```text
+.github/workflows/validation.yml       feature/** push + pull_request
+.github/workflows/candidate.yml        trusted main push
+.github/workflows/_java-service.yml    workflow_call job implementation
+.github/workflows/promote-release.yml  protected manual promotion
+.github/workflows/rollback-release.yml protected manual rollback
+```
+
+`_java-service.yml` accepts a closed `component` value (`auth`, `items`, `apiGateway`) and a boolean `publish`. Component metadata inside the reusable workflow derives working directory, report path, Docker context/file and ECR repository. It MUST NOT accept caller-supplied shell commands.
+
+Items behavior is explicit:
+
+```text
+component=items
+    ├── cache key: Items/pom.xml + common/pom.xml
+    ├── common/: ./mvnw install -DskipTests
+    ├── Items/: ./mvnw verify
+    ├── Docker context: repository root
+    └── Dockerfile: Items/Dockerfile
+```
+
+### Component plan
+
+The pure resolver writes deterministic `component-plan.json`:
+
+```json
+{
+  "schemaVersion": 1,
+  "assemblySha": "<current-main-sha>",
+  "baseCandidate": {
+    "sourceSha": "<last-successful-staged-ancestor-sha>",
+    "runId": 123,
+    "runAttempt": 1,
+    "manifestSha256": "<sha256>"
+  },
+  "components": {
+    "auth": {"action": "build", "reason": "Auth/** changed"},
+    "items": {"action": "reuse", "reason": "unaffected"},
+    "apiGateway": {"action": "reuse", "reason": "unaffected"},
+    "frontend": {"action": "reuse", "reason": "unaffected"}
+  }
+}
+```
+
+Rules:
+
+- Diff from the latest successfully staged candidate whose assembly SHA is an ancestor of the current main SHA. Never rely only on the immediately previous commit.
+- If the base is absent, expired, invalid, incomplete or not an ancestor, rebuild all four components.
+- Changes accumulated through failed main runs are included in the next candidate.
+- `common/**` implies Items.
+- Workflow/release/build configuration changes conservatively affect the components they can change; ambiguous shared build changes affect all components.
+- Documentation-only and E2E-test-only changes may reuse all application artifacts, but the complete set still runs in cloud staging.
+- Every component has exactly one `build` or `reuse` decision.
+
+### Candidate evidence and release manifest v2
+
+Candidate evidence is versionless and independently consumable. It includes the frontend archive/checksum/SBOM and all backend SBOMs even when copied from a prior candidate.
+
+Each component records:
+
+- `sourceSha` of the artifact;
+- `mode`: `built` or `reused`;
+- backend repository, immutable `sha-<component-sourceSha>` tag and digest, or frontend archive checksum;
+- original producer workflow run/attempt;
+- SBOM name and checksum;
+- immediate base-candidate identity for reused artifacts.
+
+`release.sourceSha` is the assembly/main commit tested as a set. Component source SHAs may differ. Built components must use the assembly SHA. Reused components must match their validated base component record byte-for-byte. Items always has `commonSourceSha == items.sourceSha`.
+
+One official SemVer creates `release-<version>` membership tags for all three selected backend digests, including reused images. This is server-side tagging, not a rebuild. An official frontend gets a complete immutable `_releases/v<version>/` prefix even when its bytes are reused.
+
+### Deployment and compensation
+
+- Resolve tags once and deploy `repository@sha256:...` everywhere.
+- Build, staging and production compare component digest/checksum, not top-level release SHA.
+- Prepare task definitions first; deploy Auth and Items concurrently; deploy Gateway after both; publish frontend assets before the live marker.
+- Unchanged production backends retain their task-definition ARNs.
+- Maintain a mutation journal after every successful mutation. Compensation consumes that journal in reverse order; workflows never pass a hard-coded all-components list.
+- Compensation stays in the already approved production job so a failure path does not need a new unprotected AWS role assumption.
+- Database rollback remains forbidden. Schema-changing production releases remain blocked until versioned forward/backward-compatible migrations and restore testing exist.
+
+## 3R.0 — Plan and baseline
+
+### Deliverable
+
+- [x] Create `feature/cicd-release-redesign` in an isolated worktree.
+- [x] Append Pass 3R without erasing previous execution history.
+- [x] Encode agent loop, user checkpoint, AWS budget and locked decisions.
+- [ ] Run a plan-only Terra review and Luna challenge.
+- [ ] Run a documentation-scope audit.
+- [x] Record current successful-main timing baseline from existing evidence (no new staging run): about 37m32s total; resume about 14m55s; deploy about 17m39s; E2E about 25s; teardown about 4m26s.
+- [ ] User accepts the phase boundaries and manual-checkpoint flow.
+
+Manual acceptance:
+
+1. Read this Pass 3R summary, locked decisions and status dashboard.
+2. Confirm feature pushes explicitly run local Docker Compose E2E without AWS/ECR.
+3. Confirm live staging is limited to 3R.5b, 3R.7 and 3R.10.
+4. Confirm no next subphase starts before the user accepts the current handoff.
+
+## 3R.1 — Critical CI security and promotion handoff repair
+
+### Deliverable
+
+- [x] Transfer every untrusted GitHub context used by shell (`workflow_dispatch` inputs, ref names and similar values) through step `env`; validate before use and pass only quoted variables/argv.
+- [x] Add hostile-input tests for single/double quotes, spaces, `$()`, backticks, semicolons, redirection and newlines. Prove no marker command/file can be created.
+- [x] Change `deploy-production.sh` to accept the schema-valid candidate manifest plus the production snapshot. Source current task-definition ARNs from the snapshot, replace only intended images, and emit a deployment manifest with final task-definition ARNs.
+- [x] Make the workflow convert only that deployment manifest into an official manifest.
+- [x] Add one stateful integration test matching the real workflow handoff: candidate → snapshot → deploy → deployment manifest → official manifest → verify → finalize.
+- [x] Bind promotion evidence to the exact requested run id, run attempt, source SHA and attempt-scoped jobs endpoint using the real GitHub REST response shape.
+- [x] Bind the production snapshot to the actually live frontend marker, its exact canonical Git tag/source SHA, matching immutable prefix marker/index, and full-object S3 SHA-256 before any mutation.
+- [x] Make promotion, compensation and rollback frontend writers establish the SHA-256 object-checksum contract required by the next snapshot.
+- [x] Replace workflow-level permissions with `contents: read` and job-specific opt-ins where this can be done without the later role migration.
+- [x] Do not redesign release v1 or staging in this subphase.
+
+Automated acceptance:
+
+```bash
+bash tests/scripts/ci_security_contract_test.sh
+bash tests/scripts/promotion_handoff_test.sh
+bash tests/scripts/promotion_test.sh
+bash tests/scripts/rollback_test.sh
+bash tests/scripts/release_contract_test.sh
+git diff --check
+```
+
+Manual acceptance (offline; no AWS/staging):
+
+1. Run `bash tests/scripts/ci_security_contract_test.sh`; expect zero failures.
+2. Run `bash tests/scripts/promotion_handoff_test.sh`; confirm all eight candidate → snapshot → deployment → official → verify → finalize stages pass.
+3. Run `bash plans/AUTOMATIC-BUILDS-AND-DEPLOY/release/bin/deploy-production.sh --help | less`; confirm it documents candidate manifest + snapshot input.
+4. Run `bash plans/AUTOMATIC-BUILDS-AND-DEPLOY/release/bin/validate-manifest.sh plans/AUTOMATIC-BUILDS-AND-DEPLOY/release/fixtures/valid/candidate-v1.2.1.json`; expect `"valid": true`. Then run `jq '[.components.auth,.components.items,.components.apiGateway] | map(.taskDefinitionArn // null)' plans/AUTOMATIC-BUILDS-AND-DEPLOY/release/fixtures/valid/candidate-v1.2.1.json`; expect three `null` values.
+5. Inspect lines 400–423 of `tests/scripts/promotion_handoff_test.sh`; confirm the real deploy script is called and each final backend ARN is required to be present and different from its snapshot source ARN.
+6. Run the hostile-input case printed by the security gate; confirm it fails validation and no marker file exists.
+7. Review the workflow diff and confirm no untrusted GitHub expression is embedded inside a `run:` script.
+
+Rollback: revert only the 3R.1 diff. No live resources are changed.
+
+### 3R.1 implementation evidence — 2026-08-13
+
+- Worktree/branch: `/home/dpm/CodingProjects/OnlineShop-full-stack-worktrees/cicd-release-redesign` on `feature/cicd-release-redesign`.
+- Implementation: Luna/max agents implemented the initial repair and bounded remediation passes. No agent called live AWS, started staging, mutated GitHub, committed or pushed.
+- Review: Terra/high (`phase_3r1_review`, then bounded clearance passes through `phase_3r1_clearance3`) found and drove fixes for rollback compensation permissions/YAML, PR ref behavior, workflow-dispatch selection, PR path-filter permissions, exact source/run/attempt binding, real GitHub API shapes, actual-live frontend snapshot identity, and S3 checksum wire/writer contracts. Final result: `no actionable findings`.
+- Challenge: Luna/max (`phase_3r1_challenge_last`) independently found the exact-attempt endpoint/identity gaps, bare `head_branch` API shape, wrong newest-tag snapshot assumption, incomplete snapshot compensation preconditions, and remaining checksum writers. Each finding received a fixture/stateful regression. Final result: `no actionable findings`.
+- Documentation: Luna/max `phase_3r1_docs` audited the root and service documentation tree; Luna/max `phase_3r1_docs_clearance` corrected the final unscoped-discovery versus attempt-scoped-authority wording. Root corrected the phase boundary: current combined backend jobs remain OIDC-capable at job scope, PR credential/publication steps are guarded and the source trust excludes `pull_request`, structural separation is 3R.2/3R.3, role cutover is 3R.9, and live proof is 3R.10. `common/` and `e2e-tests/` have no service-level `AGENTS.md`; no component behavior changed there.
+- Authoritative serial offline gates, all passing:
+
+  ```bash
+  bash tests/scripts/ci_security_contract_test.sh
+  bash tests/scripts/promotion_handoff_test.sh
+  bash tests/scripts/promotion_test.sh
+  bash tests/scripts/rollback_test.sh
+  bash tests/scripts/release_contract_test.sh
+  bash tests/scripts/candidate_evidence_test.sh
+  bash tests/scripts/ecr_release_tagging_test.sh
+  git diff --check
+  ```
+
+  The shared Python suite reported 446 passing tests; the gates also ran their relevant ShellCheck and Ruff checks.
+- Scope proof: the two Claude workflows have no diff. No live AWS, staging, production, protected-environment approval or GitHub Release claim is made.
+- Tracked boundary, not a 3R.1 acceptance blocker: because GitHub permissions cannot be event-conditional, the existing mixed PR/branch-push backend jobs retain job-scoped `id-token: write`. The role trust does not admit a `pull_request` subject. Pass 3R.2/3R.3 removes the token structurally by separating validation from trusted publication; Pass 3R.9 verifies/applies the live role split.
+- User manual acceptance: pending. Do not start 3R.2 until the user accepts this checkpoint or requests changes.
+
+## 3R.2 — Feature/PR validation and reusable Java matrix
+
+### Deliverable
+
+- [ ] Add `validation.yml` for both `push: feature/**` and `pull_request: main`.
+- [ ] Run the full Docker Compose API E2E job on every feature push and every PR, even when only one component changed.
+- [ ] Avoid duplicate push/PR work where possible without weakening fork-PR coverage; document the chosen GitHub event/concurrency behavior in the implementation evidence.
+- [ ] Add `_java-service.yml` with closed component metadata and a matrix containing affected Java services.
+- [ ] Preserve Items/common behavior described in Shared Interfaces.
+- [ ] Run frontend `npm ci`, lint and build when frontend is affected.
+- [ ] Give all validation jobs `contents: read` only; prohibit OIDC, AWS CLI credential setup, ECR login and image publication.
+- [ ] Add stable `validation-required` aggregation job for branch protection.
+- [ ] Keep all third-party actions SHA-pinned and add Dependabot weekly GitHub Actions pin maintenance.
+
+Automated acceptance:
+
+```bash
+bash tests/scripts/reusable_workflow_test.sh
+bash tests/scripts/ci_security_contract_test.sh
+git diff --check
+```
+
+Manual acceptance (GitHub only; no AWS):
+
+1. Push an Auth-only commit to `feature/**`: Auth validation and Docker Compose E2E run; no ECR/AWS steps appear.
+2. Push a `common/**` change: Items validation and Docker Compose E2E run.
+3. Push a frontend-only change: frontend lint/build and Docker Compose E2E run; backend unit jobs may skip.
+4. Open/update a PR and confirm the intended validation event behavior recorded by the implementation.
+5. Inspect job permissions and confirm there is no `id-token: write`.
+6. After `validation-required` exists on a real PR, update branch protection, read it back, and then retire obsolete required-check names.
+
+Rollback: restore previous required checks before reverting the workflow.
+
+## 3R.3 — Trusted-main reusable candidate workflow
+
+### Deliverable
+
+- [ ] Add `candidate.yml` for trusted `push: main` only.
+- [ ] Reuse `_java-service.yml`; initially build all backends so behavior stays equivalent.
+- [ ] Preserve frontend build/package, immutable SHA tags, SBOMs, candidate evidence and staging gate.
+- [ ] Keep singleton staging concurrency with `cancel-in-progress: false`.
+- [ ] Add stable `candidate-ready` aggregation status.
+- [ ] Disable main handling in the monolithic workflow only after the replacement produces one successful main candidate.
+
+Automated acceptance:
+
+```bash
+bash tests/scripts/reusable_workflow_test.sh
+bash tests/scripts/candidate_evidence_test.sh
+bash tests/scripts/ci_security_contract_test.sh
+git diff --check
+```
+
+Manual acceptance (one main run; staging is the existing behavior):
+
+1. Merge the workflow PR once prior phases are accepted.
+2. Confirm only one main candidate workflow starts.
+3. Confirm the three backend jobs run concurrently and frontend runs independently.
+4. Confirm candidate evidence appears only after cloud staging succeeds.
+5. Confirm teardown succeeds.
+6. Rerun the same workflow attempt and confirm trusted immutable SHA images are reused, not overwritten.
+
+Rollback: restore the old main trigger and revert `candidate.yml`.
+
+## 3R.4 — Digest-pinned staging interface and timing evidence
+
+### Deliverable
+
+- [ ] Replace `ci-deploy-staging.sh <one-tag>` with `ci-deploy-staging.sh --set <validated-json>` containing repository + digest per backend.
+- [ ] Verify each tag/digest once and register `repository@sha256:...`.
+- [ ] Reuse the hardened image-only task-definition sanitizer; preserve volumes, roles, runtime platform, proxy/ephemeral storage, logs, health and secrets references.
+- [ ] Move staging identifiers into `scripts/config/staging.env`.
+- [ ] Make scripts emit staging URL/deployment results so workflow YAML contains orchestration, not AWS/jq policy logic.
+- [ ] Emit a timing JSON artifact for RDS, bootstrap, ALB, each ECS service, E2E and teardown.
+- [ ] Document honestly that cloud E2E validates the backend API set; frontend is linted/built/checksummed but not browser-tested in AWS.
+
+Automated acceptance only; do not start staging in this subphase:
+
+```bash
+bash tests/scripts/staging_deployment_test.sh
+bash tests/scripts/lifecycle_test.sh
+bash tests/scripts/production_hardening_test.sh
+git diff --check
+```
+
+Manual acceptance (offline): inspect a stub-generated task definition and confirm only the selected container image differs; inspect the timing/deployment JSON schema; verify missing/malformed/mutable inputs fail closed.
+
+## 3R.5a — Three-task database bootstrap
+
+### Deliverable
+
+- [ ] Add a validated declarative SQL-runner plan interface. It contains ordered SQL files/commands, credential aliases and a required verification after every mutation; it never contains secret values.
+- [ ] Use three Fargate tasks: platform roles/databases; all Auth schema/seed/grants/restricted-user verification; all Items schema/seed/grants/restricted-user verification.
+- [ ] Run Auth and Items tasks concurrently after the platform task succeeds.
+- [ ] Delete every helper task-definition revision after use.
+- [ ] Preserve the existing single-operation runner mode as a temporary fallback until live acceptance.
+
+Automated acceptance only; do not start staging:
+
+```bash
+bash tests/scripts/sql_runner_test.sh
+bash tests/scripts/lifecycle_test.sh
+git diff --check
+```
+
+Required failures: missing verification, unknown credential alias, plaintext secret, intermediate SQL failure, restricted-user verification failure and helper cleanup failure.
+
+## 3R.5b — Parallel ECS deployment and measured health tuning
+
+### Deliverable
+
+- [ ] Prepare task definitions before service mutation.
+- [ ] Update/wait Auth and Items concurrently; update Gateway only after both are stable.
+- [ ] Capture task pull, task start, container health, target health and deployment completion timestamps.
+- [ ] Keep circuit breaker rollback and safe rolling settings.
+- [ ] After two successful cold runs, calculate health start/grace timing as `ceil(max observed startup-to-healthy / 15s) * 15s + 30s`, clamped to 60–180 seconds. Do not reduce it if either run has a health/start failure.
+- [ ] Do not parallelize the three REST E2E tests; their runtime is negligible.
+
+Automated acceptance:
+
+```bash
+bash tests/scripts/staging_deployment_test.sh
+bash tests/scripts/sql_runner_test.sh
+bash tests/scripts/lifecycle_test.sh
+git diff --check
+```
+
+Manual acceptance (two cold cycles plus one post-tuning cycle; this is the cumulative live checkpoint for 3R.4/5a/5b):
+
+1. Run the mandatory local AWS identity preflight once.
+2. For each cycle, resume staging with `--on-demand --defer-services`, deploy one validated set, verify selected digests and run cloud E2E, then pause staging.
+3. Confirm exactly three SQL tasks and concurrent Auth/Items timing.
+4. Confirm Gateway begins after both backends stabilize.
+5. Confirm helper task definitions are deleted and final ECS/ALB/RDS absence is verified.
+6. Apply the deterministic health formula only after two clean observations, then run one final cycle.
+7. Acceptance target: median staging job at or below 28 minutes and at least 20% faster than the 37m32s baseline. If AWS control-plane time prevents this, retain ephemeral staging and record the bottleneck; do not silently introduce a warm environment.
+
+Rollback: retain the sequential deploy and single-operation SQL fallback until the cumulative checkpoint passes.
+
+## 3R.6 — Release-set v2 contract and pure resolver
+
+### Deliverable
+
+- [ ] Implement v2 schema/validators and deterministic pure resolver without changing live workflows.
+- [ ] Implement the component-plan and candidate evidence interfaces defined above.
+- [ ] Remove all-components-same-SHA and same-producer-run assumptions from v2.
+- [ ] Make missing/invalid base fail safe to full rebuild; make tampered reuse fail closed.
+- [ ] Keep v1 code temporarily only for the old live path; no v1 migration or new v1 emission.
+
+Fixtures: first/all build, Auth-only, Gateway-only, frontend-only, common→Items, all reused, failed-main gap, absent/expired/non-ancestor/incomplete base, digest/checksum/SBOM mismatch, mixed trusted producers, mutable tag attempt and deterministic repetition.
+
+Automated acceptance:
+
+```bash
+bash tests/scripts/release_set_v2_test.sh
+bash tests/scripts/release_contract_test.sh
+bash tests/scripts/candidate_evidence_test.sh
+git diff --check
+```
+
+Manual acceptance (offline): run the resolver over each fixture, inspect all four decisions, verify failed-run accumulation, validate mixed-source v2, tamper with one reused digest and compare two outputs byte-for-byte.
+
+## 3R.7 — Selective main builds and v2 candidate staging
+
+### Deliverable
+
+- [ ] Switch `candidate.yml` to the v2 resolver.
+- [ ] Build matrix contains only `action=build` entries; an empty build matrix is valid.
+- [ ] Exchange unique per-component artifacts instead of unsafe shared matrix outputs.
+- [ ] Reused components are reverified and copied into the new independently consumable evidence bundle.
+- [ ] Stage the exact selected backend digests and run full cloud API E2E.
+- [ ] Ignore v1 evidence when choosing the v2 base.
+
+Automated acceptance:
+
+```bash
+bash tests/scripts/release_set_v2_test.sh
+bash tests/scripts/candidate_evidence_test.sh
+bash tests/scripts/staging_deployment_test.sh
+bash tests/scripts/reusable_workflow_test.sh
+git diff --check
+```
+
+Manual acceptance (one first-v2 run and one Auth-only run; each staging lifecycle is owned by CI):
+
+1. First v2 candidate has no v2 base and builds all components.
+2. Merge an Auth-only change; confirm only Auth builds/pushes.
+3. Confirm Items/Gateway/frontend retain original source SHAs and trusted producer evidence.
+4. Confirm staging runs the exact selected digest set and E2E passes.
+5. Download the candidate bundle and confirm all four artifacts/SBOMs are independently present.
+6. Confirm teardown. Rerun once and confirm no immutable bytes are overwritten.
+
+Rollback: temporarily restore v1 candidate emission; do not delete old production workflows.
+
+## 3R.8 — Changed-only promotion, rollback, traceability and retention
+
+### Deliverable
+
+- [ ] Promotion consumes exact candidate run/attempt and computes differences by digest/checksum.
+- [ ] Register/deploy only changed backends; preserve unchanged task-definition ARNs.
+- [ ] Mint application-version membership tags for all selected backend digests without rebuilding.
+- [ ] Publish a complete frontend prefix and update marker for every official version.
+- [ ] Use a durable mutation journal for compensation.
+- [ ] Rollback selects complete retained v2 releases and changes only differing artifacts; it never writes ECR or reverses the database.
+- [ ] Trace commit queries return component-scoped matches; retention keeps the newest ten complete v2 sets.
+- [ ] Remove the unused candidate artifact-pointer mechanism unless it becomes an actually verified input.
+
+Automated acceptance:
+
+```bash
+bash tests/scripts/promotion_test.sh
+bash tests/scripts/rollback_test.sh
+bash tests/scripts/release_traceability_test.sh
+bash tests/scripts/retention_test.sh
+bash tests/scripts/release_set_integration_test.sh
+git diff --check
+```
+
+Manual acceptance is offline: Auth-only promotion plan, frontend-only rollback plan, mixed production state, tag collision, candidate tamper and controlled verification failure/compensation. No production mutation occurs in this phase.
+
+## 3R.9 — OIDC/IAM role cutover
+
+### Deliverable
+
+- [ ] Update root/service documentation to distinguish local profile rules from CI OIDC rules.
+- [ ] Use a small SHA-pinned local composite action for OIDC bootstrap, account allowlist and identity output; do not copy credentials into `~/.aws`.
+- [ ] Create/use candidate-build, staging, production-deploy, promotion and rollback roles with exact trust subjects.
+- [ ] Scope `iam:PassRole` to exact ECS roles with `iam:PassedToService=ecs-tasks.amazonaws.com`.
+- [ ] Candidate role cannot mutate staging/production. Promotion cannot upload layers. Rollback cannot write ECR. Validation has no role.
+- [ ] Validate source policies and Access Analyzer findings before apply; apply/read back one role at a time.
+- [ ] Keep the old shared role intact but unused until 3R.10 completes.
+
+Automated acceptance:
+
+```bash
+bash tests/scripts/ecr_release_tagging_test.sh
+bash tests/scripts/ci_permissions_test.sh
+bash tests/scripts/reusable_workflow_test.sh
+git diff --check
+```
+
+Manual acceptance (one IAM session, no staging): identity preflight; validate policies; apply/read back each trust/permission document; inspect a PR/candidate role identity; use policy simulation to prove forbidden operations; inspect CloudTrail role sessions.
+
+## 3R.10 — Live v2 cutover, rollback drill and legacy cleanup
+
+### Deliverable
+
+- [ ] Produce/promote the first all-built v2 official release.
+- [ ] Produce/promote one single-component v2 release and prove changed-only mutation.
+- [ ] Roll back to the first v2 release and then forward to the second through the rollback workflow.
+- [ ] Complete live ECR, ECS, frontend/OAC, OIDC/IAM, CloudTrail, traceability and retention read-backs.
+- [ ] Make the first v2 release the rollback floor; do not import v1 releases.
+- [ ] Delete v1-only workflows, schema, fixtures and scripts only after the round trip passes.
+- [ ] Consolidate duplicate release docs and remove repeated environment identifiers/unused scripts.
+- [ ] Remove the old shared IAM role only after every new role is proven and read back.
+- [ ] Leave IaC migration as an explicit open issue.
+
+Automated acceptance: run every release, candidate, staging, lifecycle, promotion, rollback, hardening, traceability, retention, permissions and reusable-workflow gate, followed by `git diff --check`.
+
+Manual acceptance:
+
+1. Promote an all-built v2 candidate with protected approval; verify exact ECS digests, frontend marker/checksum, ECR membership tags and GitHub Release manifest.
+2. Promote an Auth-only candidate; confirm only Auth gets a new task definition/service deployment.
+3. Query by commit, version, digest and running state.
+4. Roll back to the first v2 release; verify exact prior artifacts and rollback-result evidence.
+5. Return to the newer release through the same rollback workflow.
+6. Verify staging resources are absent and all live read-backs are recorded.
+7. Only then remove legacy paths and the shared role.
+
+## Pass 3R final acceptance criteria
+
+- [ ] Every `feature/**` push and every PR runs local Docker Compose E2E with no AWS/ECR access.
+- [ ] Auth-only main change builds/pushes only Auth; `common` rebuilds Items.
+- [ ] Every candidate/release is a complete immutable four-component set with provenance.
+- [ ] Staging deploys digest-pinned images, median runtime is at most 28 minutes and at least 20% below baseline, and teardown always verifies absence.
+- [ ] Promotion/rollback mutate only differing artifacts and never rebuild.
+- [ ] CI uses OIDC temporary credentials without a named AWS profile; local commands keep the mandatory profile/region.
+- [ ] No untrusted GitHub expression is interpolated directly into shell code.
+- [ ] Workflow YAML owns orchestration; scripts/config own AWS operations, jq policy logic and environment identifiers.
+- [ ] One real v2 promotion and rollback round trip succeeds before legacy deletion.
+
+## Deferred Pass 4 task — automatic releases
+
+- [ ] After at least five consecutive successful manual v2 promotions and one rollback drill, adopt `release-please` for one application release PR based on Conventional Commits. Merging that PR assigns SemVer and automatically promotes the newest exact verified candidate set. It must not create independent component versions or rebuild during promotion.

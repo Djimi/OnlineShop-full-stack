@@ -1,0 +1,28 @@
+{
+  "schemaVersion": "1.0",
+  "environment": "production",
+  "snapshotId": "snap-4711-1-111111111111",
+  "capturedAt": "2026-08-10T12:30:00Z",
+  "release": {
+    "status": "official",
+    "releaseId": "release-0001",
+    "manifestSha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+  },
+  "services": {
+    "auth": {
+      "deploymentId": "deploy-auth-0001",
+      "taskDefinitionArn": "arn:aws:ecs:eu-north-1:799111666795:task-definition/onlineshop-auth:12",
+      "runningDigests": [
+        "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      ],
+      "health": "healthy"
+    }
+  },
+  "frontend": {
+    "immutableIdentity": "s3://onlineshop-frontend/_releases/v0.1.0/index.html",
+    "liveMarker": "release-0001",
+    "checksum": "not-a-checksum",
+    "cloudfrontDistributionId": "E123456789ABCD"
+  },
+  "compatibilityFingerprint": "fp-main-0001"
+}

@@ -12,6 +12,67 @@
 
 ---
 
+## Pass 3R.1 — CI security and promotion handoff repair (offline)
+
+Pass 3R.1 hardens the existing release-v1 workflows and wrappers. It does not
+change the manifest schema or staging design, and its gates are offline only.
+The three in-scope workflows set workflow-level `permissions: contents: read`;
+job-level permissions add only the required `pull-requests`, `actions`,
+`deployments`, or OIDC permissions. The existing backend jobs still combine PR
+validation with branch-push publication, so they remain OIDC-capable at job
+scope; PR credential/publication steps are guarded off and the role trust does
+not admit a `pull_request` subject. Pass 3R.2/3R.3 performs the structural job
+split, and Pass 3R.9 applies the purpose-specific role cutover.
+
+Never embed an untrusted GitHub expression in a `run:` script. Transfer event,
+ref, SHA, dispatch inputs, run/attempt IDs, repository names, and actor values
+through that step's `env`, validate them for the event-specific shape, and pass
+only quoted shell variables/argv. `rl_assert_ci_ref` accepts only `main` or a
+well-formed `feature/**` ref; `rl_assert_ci_pr_ref` accepts only
+`refs/pull/<positive-int>/merge`. The security gate proves hostile quotes,
+spaces, command substitutions, backticks, separators, redirection, and
+newlines cannot create a marker command/file.
+
+Promotion is an explicit handoff:
+
+1. The exact candidate run/attempt and optional `source_sha` are validated;
+   `source_sha`, when supplied, must equal the downloaded evidence exactly.
+2. GitHub workflow-run reads use the attempt-scoped REST shape
+   `actions/runs/{run}/attempts/{attempt}` and
+   `actions/runs/{run}/attempts/{attempt}/jobs`; the API returns bare
+   `head_branch: "main"`, which is normalized to `refs/heads/main`. The
+   response `id` and `run_attempt` must be positive JSON numbers matching the
+   requested values. Never consume the unscoped/latest attempt.
+3. `deploy-production.sh` accepts a schema-valid candidate manifest plus a
+   read-only production snapshot. The candidate cannot contain task-definition
+   ARNs; the snapshot supplies and validates the current service ARNs. The
+   script emits a deployment manifest with the newly registered ARNs, and only
+   that output is rendered as official after production verification.
+4. The snapshot fails closed unless the live marker has canonical version,
+   source SHA, and frontend SHA-256 identity; the immutable
+   `_releases/v<version>/` marker and `index.html` match it; the live index has
+   an S3 full-object `ChecksumSHA256`; and the exact canonical `v<version>`
+   GitHub tag resolves to the same source SHA (including annotated-tag
+   peeling). It never chooses a newer tag merely because it sorts higher.
+5. `publish-frontend.sh`, `restore-frontend.sh`, and compensation pass
+   `--checksum-algorithm SHA256` on every S3 writer. Snapshot decodes the
+   service-reported full-object checksum from base64 to canonical SHA-256 hex
+   and never falls back to an ETag.
+
+Run the 3R.1 offline gates:
+
+```bash
+bash tests/scripts/ci_security_contract_test.sh
+bash tests/scripts/promotion_handoff_test.sh
+bash tests/scripts/promotion_test.sh
+bash tests/scripts/rollback_test.sh
+```
+
+These stateful stubs/static checks do not claim live AWS, staging, GitHub
+approval, role-split, or release-publication verification.
+
+---
+
 ## Release contract (Pass 3, subphase 3.1)
 
 The versioned release-manifest JSON Schema, deterministic local validator,
