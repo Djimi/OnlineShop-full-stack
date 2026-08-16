@@ -118,9 +118,6 @@ def test_pass_role_is_exact_roles_with_passed_to_service():
     resources = set(statement["Resource"])
     assert resources == {
         f"arn:aws:iam::{ACCOUNT}:role/ecsTaskExecutionRole",
-        f"arn:aws:iam::{ACCOUNT}:role/onlineshop-auth-task",
-        f"arn:aws:iam::{ACCOUNT}:role/onlineshop-items-task",
-        f"arn:aws:iam::{ACCOUNT}:role/onlineshop-gateway-task",
     }
     condition = statement["Condition"]["StringEquals"]
     assert condition["iam:PassedToService"] == "ecs-tasks.amazonaws.com"

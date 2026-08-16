@@ -13,7 +13,7 @@ ARN; nothing here is claimed as applied live yet.
 | ECR | read (`BatchGetImage`, `DescribeImages`) + `PutImage` on the three backend repositories only |
 | ECS | deploy scoped to the production cluster, the three production services, and the three task-definition families; read-only `DescribeTasks` additionally scoped to the task ARN `task/onlineshop-cluster/*` (ECS authorizes it against the task, not the cluster/service) |
 | RDS | read-only `DescribeDBInstances` on the production DB instance ARN only (snapshot compatibility-fingerprint input) |
-| IAM | `PassRole` to the ECS execution role and the three production task roles, with `iam:PassedToService=ecs-tasks.amazonaws.com` |
+| IAM | `PassRole` to the ECS execution role only, with `iam:PassedToService=ecs-tasks.amazonaws.com` (task roles are not used: live task definitions have `taskRoleArn: null`) |
 | S3 | `PutObject`/`GetObject`/`HeadObject`/`ListBucket` on the frontend bucket only |
 | CloudFront | `CreateInvalidation`/`GetInvalidation`/`GetDistribution` on the production distribution only |
 | ELB | read-only `DescribeLoadBalancers`/`DescribeTargetHealth` for the read-only verification journeys |
@@ -55,7 +55,9 @@ naming instead, and this is testable offline:
 1. Role exists with this policy attached (or a structurally equivalent
    inlined policy) and the OIDC trust matches the protected
    `production` environment subject.
-2. `DescribeTaskDefinition` of the three production families confirms the
-   task-role ARNs used in `PassRole`; update the resource list if the live
-   roles differ.
+2. Task roles verified **absent** as of 2026-08-16: `DescribeTaskDefinition`
+   of the three live production families shows `taskRoleArn: null`, and the
+   roles `onlineshop-{auth,items,gateway}-task` do not exist (NoSuchEntity).
+   `PassRole` is scoped to `ecsTaskExecutionRole` only. If task roles are
+   introduced later, add their ARNs back to the policy and to the tests.
 3. IAM Access Analyzer policy validation passes.

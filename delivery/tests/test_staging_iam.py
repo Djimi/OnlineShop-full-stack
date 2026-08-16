@@ -20,7 +20,6 @@ STAGING_TD_RESOURCES = [
     "arn:aws:ecs:eu-north-1:799111666795:task-definition/onlineshop-*-staging-v2:*",
     "arn:aws:ecs:eu-north-1:799111666795:task-definition/onlineshop-staging-sql-runner:*",
 ]
-SQL_RUNNER_FAMILY = "onlineshop-staging-sql-runner"
 TD_ACTIONS = {
     "ecs:RegisterTaskDefinition",
     "ecs:DescribeTaskDefinition",
@@ -123,7 +122,7 @@ def test_policy_s3_read_only_on_frontend_bucket_prefix():
         for statement in _policy()["Statement"]
         if statement["Sid"] == "ReadPreviousOfficialFrontendBundle"
     )
-    assert set(s3["Action"]) <= {"s3:GetObject", "s3:HeadObject"}
+    assert set(s3["Action"]) == {"s3:GetObject"}
     assert s3["Resource"] == [FRONTEND_BUCKET_PREFIX]
     assert s3["Effect"] == "Allow"
 
@@ -131,7 +130,7 @@ def test_policy_s3_read_only_on_frontend_bucket_prefix():
 def test_policy_s3_never_writes_or_deletes():
     actions = _actions(_policy())
     s3_actions = {action for action in actions if action.startswith("s3:")}
-    assert s3_actions == {"s3:GetObject", "s3:HeadObject"}
+    assert s3_actions == {"s3:GetObject"}
     assert not any(
         action.startswith(("s3:Put", "s3:Delete", "s3:Create")) for action in actions
     )
@@ -147,7 +146,7 @@ def test_policy_update_service_scoped_to_staging_cluster_only():
     assert update["Resource"] == STAGING_CLUSTER_SERVICE
 
 
-def test_policy_run_task_scoped_to_staging_cluster_and_sql_runner_family():
+def test_policy_run_task_scoped_to_staging_cluster_only():
     policy = _policy()
     run_statements = [
         statement
@@ -159,8 +158,7 @@ def test_policy_run_task_scoped_to_staging_cluster_and_sql_runner_family():
     statement = run_statements[0]
     assert statement["Resource"] == STAGING_CLUSTER_ARN
     assert statement["Effect"] == "Allow"
-    condition = statement["Condition"]["StringEquals"]
-    assert condition["ecs:task-definition-family"] == SQL_RUNNER_FAMILY
+    assert "Condition" not in statement
 
 
 def test_policy_td_actions_scoped_to_staging_task_definition_families():

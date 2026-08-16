@@ -68,10 +68,7 @@
       "Effect": "Allow",
       "Action": "iam:PassRole",
       "Resource": [
-        "arn:aws:iam::799111666795:role/ecsTaskExecutionRole",
-        "arn:aws:iam::799111666795:role/onlineshop-auth-task",
-        "arn:aws:iam::799111666795:role/onlineshop-items-task",
-        "arn:aws:iam::799111666795:role/onlineshop-gateway-task"
+        "arn:aws:iam::799111666795:role/ecsTaskExecutionRole"
       ],
       "Condition": {
         "StringEquals": {

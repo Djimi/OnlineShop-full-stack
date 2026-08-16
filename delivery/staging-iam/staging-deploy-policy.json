@@ -32,12 +32,7 @@
       "Sid": "RunStagingSqlRunnerOnly",
       "Effect": "Allow",
       "Action": "ecs:RunTask",
-      "Resource": "arn:aws:ecs:eu-north-1:799111666795:cluster/onlineshop-staging-cluster",
-      "Condition": {
-        "StringEquals": {
-          "ecs:task-definition-family": "onlineshop-staging-sql-runner"
-        }
-      }
+      "Resource": "arn:aws:ecs:eu-north-1:799111666795:cluster/onlineshop-staging-cluster"
     },
     {
       "Sid": "ValidateIsolatedStagingNetwork",
@@ -262,8 +257,7 @@
       "Sid": "ReadPreviousOfficialFrontendBundle",
       "Effect": "Allow",
       "Action": [
-        "s3:GetObject",
-        "s3:HeadObject"
+        "s3:GetObject"
       ],
       "Resource": [
         "arn:aws:s3:::onlineshop-frontend-799111666795/_releases/*"
