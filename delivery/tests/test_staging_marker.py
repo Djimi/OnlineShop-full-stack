@@ -1,9 +1,11 @@
 """Tests for the D1 staging ownership marker (RDS tag) and RDS tag helpers."""
 
 import json
-from datetime import timedelta
+import re
+from datetime import UTC, datetime, timedelta
 
 import pytest
+from botocore.exceptions import ClientError
 from conftest import client_error
 from fakes_staging import DB_INSTANCE, MARKER_TAG_KEY, FakeRds, marker_tag_value
 
@@ -64,33 +66,55 @@ def test_db_instance_arn_missing_fails():
         db_instance_arn({"DBInstanceIdentifier": "x"})
 
 
-def _marker_json(**overrides):
-    payload = json.loads(marker_tag_value())
-    payload.update(overrides)
-    return json.dumps(payload)
-
-
 def test_read_marker_absent_when_tag_missing():
     assert staging_marker.read_marker(FakeRds(), ARN) is None
 
 
 def test_read_marker_parses_valid_value():
-    fake = FakeRds(tags={MARKER_TAG_KEY: _marker_json()})
+    fake = FakeRds(tags={MARKER_TAG_KEY: marker_tag_value()})
     marker = staging_marker.read_marker(fake, ARN)
     assert marker.operationId == "stg-4712-2"
     assert marker.workflowRunId == 4712
 
 
 def test_read_marker_malformed_value_is_error_not_absence():
-    fake = FakeRds(tags={MARKER_TAG_KEY: "not json"})
+    fake = FakeRds(tags={MARKER_TAG_KEY: "not-a-marker"})
     with pytest.raises(ValidationError):
         staging_marker.read_marker(fake, ARN)
 
 
 def test_read_marker_wrong_shape_is_error_not_absence():
-    fake = FakeRds(tags={MARKER_TAG_KEY: _marker_json(expiresAt="tomorrow")})
+    fake = FakeRds(tags={MARKER_TAG_KEY: "v1:stg-4712-2:4712:2:tester:1:tomorrow"})
     with pytest.raises(ValidationError):
         staging_marker.read_marker(fake, ARN)
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "v1:stg-1-1:1:1:tester:1",
+        "v1:stg-1-1:1:1:tester:1:2:extra",
+        "v1:stg-1-1:0:1:tester:1:2",
+        "v1:stg-1-1:1:+1:tester:1:2",
+        "v1:stg-1-1:1:1:tester:0:2",
+        f"v1:stg-1-1:1:1:tester:{'9' * 100}:2",
+        "v1:not-an-operation:1:1:tester:1:2",
+    ],
+)
+def test_parse_marker_rejects_malformed_values(value):
+    with pytest.raises(ValidationError):
+        staging_marker.parse_marker(value)
+
+
+def test_parse_marker_rejects_unsupported_version():
+    with pytest.raises(ValidationError, match="unsupported marker version"):
+        staging_marker.parse_marker("v2:stg-1-1:1:1:tester:1:2")
+
+
+def test_parse_marker_rejects_too_long_value():
+    value = f"v1:stg-{'1' * 240}-1:1:1:tester:1:2"
+    with pytest.raises(ValidationError, match="256"):
+        staging_marker.parse_marker(value)
 
 
 def test_acquire_marker_when_absent():
@@ -102,20 +126,20 @@ def test_acquire_marker_when_absent():
 
 
 def test_acquire_marker_conflicts_with_active_marker():
-    fake = FakeRds(tags={MARKER_TAG_KEY: _marker_json()})
+    fake = FakeRds(tags={MARKER_TAG_KEY: marker_tag_value()})
     marker = staging_marker.build_marker("stg-9-9", 9, 9, "intruder")
     with pytest.raises(StagingMarkerConflict):
         staging_marker.acquire_marker(fake, ARN, marker)
     # never stolen
-    assert json.loads(fake.tags[MARKER_TAG_KEY])["operationId"] == "stg-4712-2"
+    assert staging_marker.parse_marker(fake.tags[MARKER_TAG_KEY]).operationId == "stg-4712-2"
 
 
 def test_acquire_marker_overwrites_expired_marker():
-    expired = _marker_json(expiresAt="2020-01-01T00:00:00Z")
+    expired = marker_tag_value(expires_in=timedelta(hours=-1))
     fake = FakeRds(tags={MARKER_TAG_KEY: expired})
     marker = staging_marker.build_marker("stg-9-9", 9, 9, "tester")
     staging_marker.acquire_marker(fake, ARN, marker)
-    assert json.loads(fake.tags[MARKER_TAG_KEY])["operationId"] == "stg-9-9"
+    assert staging_marker.parse_marker(fake.tags[MARKER_TAG_KEY]).operationId == "stg-9-9"
 
 
 def test_marker_is_active_respects_expiry():
@@ -128,7 +152,7 @@ def test_marker_is_active_respects_expiry():
 
 
 def test_release_marker_removes_and_verifies():
-    fake = FakeRds(tags={MARKER_TAG_KEY: _marker_json()})
+    fake = FakeRds(tags={MARKER_TAG_KEY: marker_tag_value()})
     staging_marker.release_marker(fake, ARN)
     assert MARKER_TAG_KEY not in fake.tags
 
@@ -158,10 +182,41 @@ def test_assert_marker_owned_by_rejects_foreign_operation():
         staging_marker.assert_marker_owned_by(marker, record)
 
 
-def test_marker_value_is_canonical_and_contains_no_secrets():
-    marker = staging_marker.build_marker("stg-1-1", 1, 1, "tester")
+def test_marker_value_is_aws_safe_and_round_trips_exactly():
+    marker = staging_marker.OwnershipMarker(
+        operationId="stg-4712-2",
+        workflowRunId=4712,
+        workflowRunAttempt=2,
+        owner="test.user@example",
+        acquiredAt=datetime(2026, 8, 16, 10, 11, 12, tzinfo=UTC),
+        expiresAt=datetime(2026, 8, 16, 13, 11, 12, tzinfo=UTC),
+    )
     value = staging_marker.marker_value(marker)
-    assert value == json.dumps(marker.model_dump(mode="json"), separators=(",", ":"))
+    assert value == "v1:stg-4712-2:4712:2:test.user@example:1786875072:1786885872"
+    assert len(value) <= 256
+    assert re.fullmatch(r"[A-Za-z0-9_.:/=+@-]+", value)
+    assert staging_marker.parse_marker(value) == marker
+
+
+def test_marker_value_rejects_too_long_value():
+    marker = staging_marker.build_marker(f"stg-{'1' * 240}-1", 1, 1, "tester")
+    with pytest.raises(ValidationError, match="256"):
+        staging_marker.marker_value(marker)
+
+
+def test_marker_value_rejects_unsafe_operation_id():
+    marker = staging_marker.build_marker("stg-1-1", 1, 1, "tester").model_copy(
+        update={"operationId": "stg-{1}-1"}
+    )
+    with pytest.raises(ValidationError):
+        staging_marker.marker_value(marker)
+
+
+def test_fake_rds_rejects_raw_json_tag_value_like_aws():
+    fake = FakeRds()
+    with pytest.raises(ClientError) as error:
+        fake.add_tags_to_resource(ARN, [{"Key": MARKER_TAG_KEY, "Value": '{"owner":"x"}'}])
+    assert error.value.response["Error"]["Code"] == "InvalidParameterValue"
 
 
 def _record() -> StagingOperationRecord:

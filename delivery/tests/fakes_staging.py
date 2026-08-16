@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import json
+import re
 from datetime import UTC, datetime, timedelta
 
 from conftest import client_error
 
 from delivery.errors import ValidationError
-from delivery.serialization import canonical_json
+from delivery.models import OwnershipMarker
+from delivery.staging_marker import marker_value
 
 ACCOUNT = "799111666795"
 REGION = "eu-north-1"
@@ -20,6 +22,7 @@ SERVICES = [
 ]
 DB_INSTANCE = "onlineshop-staging-postgres"
 MARKER_TAG_KEY = "onlineshop:staging-owner"
+AWS_TAG_VALUE_PATTERN = re.compile(r"^[A-Za-z0-9_.:/=+@-]{0,256}$")
 
 DIGEST_A = f"sha256:{'a' * 64}"
 DIGEST_B = f"sha256:{'b' * 64}"
@@ -141,6 +144,11 @@ class FakeRds:
     def add_tags_to_resource(self, ResourceName, Tags):
         self._check("add_tags_to_resource")
         for tag in Tags:
+            if AWS_TAG_VALUE_PATTERN.fullmatch(tag["Value"]) is None:
+                raise client_error(
+                    "InvalidParameterValue",
+                    "tag value contains forbidden characters or exceeds 256 characters",
+                )
             self.tags[tag["Key"]] = tag["Value"]
 
     def remove_tags_from_resource(self, ResourceName, TagKeys):
@@ -156,17 +164,16 @@ def marker_tag_value(
     owner: str = "tester",
     expires_in: timedelta = timedelta(hours=1),
 ):
-    now = datetime.now(UTC)
-    return canonical_json(
-        {
-            "schemaVersion": "1.0",
-            "operationId": operation_id,
-            "workflowRunId": run_id,
-            "workflowRunAttempt": run_attempt,
-            "owner": owner,
-            "acquiredAt": now.isoformat().replace("+00:00", "Z"),
-            "expiresAt": (now + expires_in).isoformat().replace("+00:00", "Z"),
-        }
+    now = datetime.now(UTC).replace(microsecond=0)
+    return marker_value(
+        OwnershipMarker(
+            operationId=operation_id,
+            workflowRunId=run_id,
+            workflowRunAttempt=run_attempt,
+            owner=owner,
+            acquiredAt=now,
+            expiresAt=now + expires_in,
+        )
     )
 
 

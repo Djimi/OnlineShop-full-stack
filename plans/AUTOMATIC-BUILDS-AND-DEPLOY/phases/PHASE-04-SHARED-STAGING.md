@@ -70,7 +70,7 @@ reconcile-staging.yml (cron */15 + workflow_dispatch)
 | Rule | How it's enforced |
 |---|---|
 | Exact run/attempt authority | Dispatch inputs are digits-regex-validated; the engine revalidates the exact run/attempt through the GitHub API and the four `-<run>-<attempt>` artifact names (CT-CAND-03); ECR digest read-back proves the images still exist |
-| Ownership marker (D1) | RDS tag `onlineshop:staging-owner` (canonical JSON, TTL 3h) on the staging DB; acquire fails closed on any valid owner; release read-back must prove absence |
+| Ownership marker (D1) | RDS tag `onlineshop:staging-owner` (`v1:<operation>:<run>:<attempt>:<owner>:<acquired-epoch>:<expires-epoch>`, TTL 3h) on the staging DB; the compact value is validated against the AWS charset and 256-character limit before mutation; acquire fails closed on any valid owner; release read-back must prove absence |
 | Record is visibility only (CT-STG-02) | Continuation re-reads the live marker and asserts operation/run/attempt identity before any second-invocation mutation; the record never grants ownership |
 | Two-invocation machine | Invocation 1 runs through E2E(pending) and emits the E2E URL; invocation 2 records the real conclusion, cleans up, completes; a decided E2E conclusion is never overwritten |
 | Digest-pinned deployment | Image-only container replacement (the diff is proven image-only), register + update-service, bounded waiter, running digests compared to the candidate's |

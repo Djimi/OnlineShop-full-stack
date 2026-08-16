@@ -34,6 +34,7 @@ from delivery.cli import main
 from delivery.commands.staging import _content_checksum
 from delivery.serialization import sha256_hex
 from delivery.serving import JourneyResult
+from delivery.staging_marker import parse_marker
 
 RUN_ID = 4712
 RUN_ATTEMPT = 2
@@ -242,10 +243,10 @@ def test_lifecycle_first_invocation_happy_path(runner, capsys):
     assert runner.rds.status == "available"
     assert all(runner.ecs.desired_counts[s] == 1 for s in SERVICES)
     # ownership marker acquired with the right identity
-    marker = json.loads(runner.rds.tags[MARKER_TAG_KEY])
-    assert marker["operationId"] == OPERATION_ID
-    assert marker["workflowRunId"] == RUN_ID
-    assert marker["workflowRunAttempt"] == RUN_ATTEMPT
+    marker = parse_marker(runner.rds.tags[MARKER_TAG_KEY])
+    assert marker.operationId == OPERATION_ID
+    assert marker.workflowRunId == RUN_ID
+    assert marker.workflowRunAttempt == RUN_ATTEMPT
     # reset plan ran with schema/seed/grants/connectivity/negative steps
     steps = runner.sql_steps[0]
     assert len(steps) == 12
@@ -330,7 +331,7 @@ def test_lifecycle_continuation_foreign_marker_fails_closed(runner, capsys):
     record = runner.record()
     # the foreign environment was not touched: cleanup skipped, marker intact
     assert "skipped" in record["failure"]["cleanupConclusion"]
-    assert json.loads(runner.rds.tags[MARKER_TAG_KEY])["operationId"] == "stg-9999-9"
+    assert parse_marker(runner.rds.tags[MARKER_TAG_KEY]).operationId == "stg-9999-9"
     assert runner.rds.status == "available"
 
 
@@ -354,7 +355,7 @@ def test_lifecycle_marker_conflict_fails_closed_without_mutation(runner, capsys)
     assert record["failure"]["mutationBegan"] is False
     assert "skipped" in record["failure"]["cleanupConclusion"]
     # never stole the marker, never started the DB, never touched services
-    assert json.loads(runner.rds.tags[MARKER_TAG_KEY])["operationId"] == "stg-4712-2"
+    assert parse_marker(runner.rds.tags[MARKER_TAG_KEY]).operationId == "stg-4712-2"
     assert "start_db_instance" not in runner.rds.calls
     assert all(runner.ecs.desired_counts[s] == 1 for s in SERVICES)
     assert not any(
@@ -365,8 +366,8 @@ def test_lifecycle_marker_conflict_fails_closed_without_mutation(runner, capsys)
 def test_lifecycle_expired_marker_is_reacquired(runner):
     runner.rds.tags[MARKER_TAG_KEY] = marker_tag_value(expires_in=timedelta(hours=-1))
     assert main(runner.lifecycle_argv()) == 0
-    marker = json.loads(runner.rds.tags[MARKER_TAG_KEY])
-    assert marker["operationId"] == OPERATION_ID
+    marker = parse_marker(runner.rds.tags[MARKER_TAG_KEY])
+    assert marker.operationId == OPERATION_ID
 
 
 def test_lifecycle_ecr_digest_missing_fails_before_ecs_mutation(runner, capsys):

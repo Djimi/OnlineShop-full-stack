@@ -87,17 +87,18 @@ class JourneyConclusion(StrictRecord):
 
 
 class OwnershipMarker(StrictRecord):
-    """D1 ownership marker stored as a canonical-JSON RDS tag value.
+    """D1 ownership marker stored as a compact versioned RDS tag value.
 
-    The tag key is ``onlineshop:staging-owner``; the value is the canonical
-    serialization of this record. A marker is only valid while ``expiresAt``
-    is in the future; the TTL is a generous bound on one staging lifecycle
-    (3h), chosen so the 15-minute reconcile can reclaim a genuinely lost run
-    without ever stealing from a live owner.
+    The tag key is ``onlineshop:staging-owner``; the value uses the AWS-safe
+    ``v1:<operation>:<run>:<attempt>:<owner>:<acquired-epoch>:<expires-epoch>``
+    encoding. A marker is only valid while ``expiresAt`` is in the future; the
+    TTL is a generous bound on one staging lifecycle (3h), chosen so the
+    15-minute reconcile can reclaim a genuinely lost run without ever stealing
+    from a live owner.
     """
 
     schemaVersion: str = "1.0"
-    operationId: str
+    operationId: str = Field(pattern=r"^stg-[1-9][0-9]*-[1-9][0-9]*$")
     workflowRunId: PositiveInt
     workflowRunAttempt: PositiveInt
     owner: str = Field(pattern=r"^[A-Za-z0-9@._-]{1,39}$")
