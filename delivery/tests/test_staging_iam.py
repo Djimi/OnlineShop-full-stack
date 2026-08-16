@@ -158,9 +158,9 @@ def test_policy_run_task_scoped_to_staging_cluster_only():
     ]
     assert len(run_statements) == 1
     statement = run_statements[0]
-    assert statement["Resource"] == STAGING_CLUSTER_ARN
+    assert statement["Resource"] == STAGING_TD_RESOURCES[1]
     assert statement["Effect"] == "Allow"
-    assert "Condition" not in statement
+    assert statement["Condition"] == {"ArnEquals": {"ecs:cluster": STAGING_CLUSTER_ARN}}
 
 
 def test_policy_scopes_supported_td_actions_to_staging_families():

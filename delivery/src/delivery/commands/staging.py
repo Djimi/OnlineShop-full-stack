@@ -588,8 +588,13 @@ class _StagingMachine:
 
     def _stop_db(self, rds_client, identifier: str) -> dict:
         instance = describe_db_instance(rds_client, identifier)
-        if instance.get("DBInstanceStatus") == "stopped":
+        status = instance.get("DBInstanceStatus")
+        if status == "stopped":
             return instance
+        if status == "stopping":
+            return _wait_for_db_status(rds_client, identifier, "stopped", RDS_STOP_TIMEOUT)
+        if status != "available":
+            _wait_for_db_status(rds_client, identifier, "available", RDS_START_TIMEOUT)
         rds_client.stop_db_instance(DBInstanceIdentifier=identifier)
         return _wait_for_db_status(rds_client, identifier, "stopped", RDS_STOP_TIMEOUT)
 

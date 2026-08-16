@@ -436,3 +436,11 @@ scripts/ecs-run-sql.sh --database <db> --file <schema.sql> --verify "\dt"
   snapshot or 10–20 minutes with one. These are operational guidance, not hard
   timeouts—AWS capacity, image pulls, JVM health checks, and RDS control-plane
   load can extend them.
+## ECS RunTask and RDS cleanup
+
+`ecs:RunTask` is authorized against the task-definition ARN, not the cluster
+ARN. Scope the resource to the staging SQL-runner family and constrain the
+cluster with `ArnEquals` on `ecs:cluster`. For cleanup, RDS accepts
+`StopDBInstance` only from `available`; wait through transient start or
+configuration states, and if the instance is already `stopping`, wait for
+`stopped` without issuing a duplicate stop.

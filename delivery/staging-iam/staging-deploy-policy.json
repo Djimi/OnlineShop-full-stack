@@ -39,7 +39,12 @@
       "Sid": "RunStagingSqlRunnerOnly",
       "Effect": "Allow",
       "Action": "ecs:RunTask",
-      "Resource": "arn:aws:ecs:eu-north-1:799111666795:cluster/onlineshop-staging-cluster"
+      "Resource": "arn:aws:ecs:eu-north-1:799111666795:task-definition/onlineshop-staging-sql-runner:*",
+      "Condition": {
+        "ArnEquals": {
+          "ecs:cluster": "arn:aws:ecs:eu-north-1:799111666795:cluster/onlineshop-staging-cluster"
+        }
+      }
     },
     {
       "Sid": "ValidateIsolatedStagingNetwork",

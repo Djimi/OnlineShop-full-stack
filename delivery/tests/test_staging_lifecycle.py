@@ -31,7 +31,7 @@ from fakes_staging import (
 )
 
 from delivery.cli import main
-from delivery.commands.staging import _content_checksum
+from delivery.commands.staging import _content_checksum, _StagingMachine
 from delivery.serialization import sha256_hex
 from delivery.serving import JourneyResult
 from delivery.staging_marker import parse_marker
@@ -43,6 +43,72 @@ CANDIDATE_ID = f"cand-{RUN_ID}-{RUN_ATTEMPT}-{SHA[:12]}"
 OPERATION_ID = f"stg-{RUN_ID}-{RUN_ATTEMPT}"
 
 FRONTEND_CHECKSUM = f"{'d' * 64}"
+
+
+def _machine_without_init() -> _StagingMachine:
+    return object.__new__(_StagingMachine)
+
+
+def test_stop_db_returns_when_already_stopped(monkeypatch):
+    rds = FakeRds(status="stopped")
+    monkeypatch.setattr(
+        "delivery.commands.staging._wait_for_db_status",
+        lambda *args: pytest.fail("waiter must not run for an already stopped DB"),
+    )
+
+    observed = _machine_without_init()._stop_db(rds, "onlineshop-staging-postgres")
+
+    assert observed["DBInstanceStatus"] == "stopped"
+    assert "stop_db_instance" not in rds.calls
+
+
+def test_stop_db_waits_when_stop_is_already_in_progress(monkeypatch):
+    rds = FakeRds(status="stopping")
+
+    def wait(client, identifier, expected, timeout):
+        assert expected == "stopped"
+        client.status = "stopped"
+        return client.describe_db_instances(DBInstanceIdentifier=identifier)["DBInstances"][0]
+
+    monkeypatch.setattr("delivery.commands.staging._wait_for_db_status", wait)
+
+    observed = _machine_without_init()._stop_db(rds, "onlineshop-staging-postgres")
+
+    assert observed["DBInstanceStatus"] == "stopped"
+    assert "stop_db_instance" not in rds.calls
+
+
+def test_stop_db_waits_for_transient_state_before_stopping(monkeypatch):
+    rds = FakeRds(status="configuring-enhanced-monitoring", stop_result="stopping")
+    expected_states = iter(("available", "stopped"))
+
+    def wait(client, identifier, expected, timeout):
+        assert expected == next(expected_states)
+        client.status = expected
+        return client.describe_db_instances(DBInstanceIdentifier=identifier)["DBInstances"][0]
+
+    monkeypatch.setattr("delivery.commands.staging._wait_for_db_status", wait)
+
+    observed = _machine_without_init()._stop_db(rds, "onlineshop-staging-postgres")
+
+    assert observed["DBInstanceStatus"] == "stopped"
+    assert rds.calls.count("stop_db_instance") == 1
+
+
+def test_stop_db_stops_available_database_once(monkeypatch):
+    rds = FakeRds(status="available", stop_result="stopping")
+
+    def wait(client, identifier, expected, timeout):
+        assert expected == "stopped"
+        client.status = "stopped"
+        return client.describe_db_instances(DBInstanceIdentifier=identifier)["DBInstances"][0]
+
+    monkeypatch.setattr("delivery.commands.staging._wait_for_db_status", wait)
+
+    observed = _machine_without_init()._stop_db(rds, "onlineshop-staging-postgres")
+
+    assert observed["DBInstanceStatus"] == "stopped"
+    assert rds.calls.count("stop_db_instance") == 1
 
 # The reset SQL sources live in the repository checkout; the CLI takes the
 # checkout as --repo-path (the wheel-installed engine has no source tree).
