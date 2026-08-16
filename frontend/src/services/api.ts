@@ -1,5 +1,6 @@
 import axios, { AxiosError } from 'axios';
 import type { AxiosInstance } from 'axios';
+import toast from 'react-hot-toast';
 import { useAuthStore } from '../store/authStore';
 
 const API_BASE_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:10000';
@@ -44,6 +45,11 @@ api.interceptors.response.use(
       window.location.href = '/login';
       // Page is about to unload; suppress downstream error handling
       return Promise.reject(new axios.CanceledError('Redirecting to login'));
+    }
+
+    if (error.response?.status === 429) {
+      toast.error('Too many requests. Please wait a moment and try again.');
+      return Promise.reject(error);
     }
 
     // Log error details

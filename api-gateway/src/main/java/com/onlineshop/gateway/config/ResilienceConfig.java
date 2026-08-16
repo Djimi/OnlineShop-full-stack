@@ -79,7 +79,7 @@ public class ResilienceConfig {
     }
 
     @Bean
-    public Retry authServiceRetry() {
+    public RetryRegistry authServiceRetry() {
         RetryConfig config = RetryConfig.custom()
                 .maxAttempts(3)
                 .waitDuration(Duration.ofMillis(500))
@@ -88,7 +88,8 @@ public class ResilienceConfig {
                 .build();
 
         RetryRegistry registry = RetryRegistry.of(config);
-        return registry.retry("authService");
+        registry.retry("authService");
+        return registry;
     }
 
     @Bean

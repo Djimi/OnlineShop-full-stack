@@ -63,6 +63,21 @@ public class GlobalExceptionHandler {
         return new ResponseEntity<>(errorResponse, HttpStatus.BAD_REQUEST);
     }
 
+    @ExceptionHandler(IllegalStateException.class)
+    public ResponseEntity<ErrorResponse> handleIllegalStateException(
+            IllegalStateException ex,
+            WebRequest request) {
+        ErrorResponse errorResponse = ErrorResponse.builder()
+                .type("https://api.example.com/errors/bad-request")
+                .title("Bad Request")
+                .status(HttpStatus.BAD_REQUEST.value())
+                .detail(ex.getMessage())
+                .instance(request.getDescription(false).replace("uri=", ""))
+                .build();
+
+        return new ResponseEntity<>(errorResponse, HttpStatus.BAD_REQUEST);
+    }
+
     @ExceptionHandler(MissingServletRequestParameterException.class)
     public ResponseEntity<ErrorResponse> handleMissingServletRequestParameterException(
             MissingServletRequestParameterException ex,

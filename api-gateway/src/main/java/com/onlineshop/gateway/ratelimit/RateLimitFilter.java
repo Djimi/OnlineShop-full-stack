@@ -44,8 +44,8 @@ public class RateLimitFilter extends OncePerRequestFilter {
 
         String path = request.getRequestURI();
 
-        // Skip rate limiting for health checks
-        if (path.startsWith("/actuator")) {
+        // Skip rate limiting for health checks and CORS preflights
+        if (path.startsWith("/actuator") || "OPTIONS".equalsIgnoreCase(request.getMethod())) {
             filterChain.doFilter(request, response);
             return;
         }

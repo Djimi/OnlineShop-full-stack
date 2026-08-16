@@ -16,6 +16,7 @@ import org.springframework.mock.web.MockHttpServletRequest;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -88,10 +89,10 @@ class RateLimitServiceTest {
     void untrustedProxyKeysOnRemoteAddress() {
         RateLimitService service = buildService(bucketBuilderReturning(mock(BucketProxy.class)));
         MockHttpServletRequest request = new MockHttpServletRequest("GET", "/items");
-        request.setRemoteAddr("10.0.0.5");
-        request.addHeader("X-Forwarded-For", "203.0.113.9");
+        request.setRemoteAddr("203.0.113.9");
+        request.addHeader("X-Forwarded-For", "198.51.100.23");
 
-        assertThat(service.resolveClientIp(request)).isEqualTo("10.0.0.5");
+        assertThat(service.resolveClientIp(request)).isEqualTo("203.0.113.9");
     }
 
     @Test
@@ -108,6 +109,29 @@ class RateLimitServiceTest {
         request.addHeader("X-Forwarded-For", "198.51.100.23, 203.0.113.7");
 
         assertThat(service.resolveClientIp(request)).isEqualTo("198.51.100.23");
+    }
+
+    @Test
+    void privateProxyIsTrustedWithoutConfiguration() {
+        RateLimitService service = buildService(bucketBuilderReturning(mock(BucketProxy.class)));
+        MockHttpServletRequest request = new MockHttpServletRequest("GET", "/items");
+        request.setRemoteAddr("10.0.0.4");
+        request.addHeader("X-Forwarded-For", "198.51.100.42");
+
+        assertThat(service.resolveClientIp(request)).isEqualTo("198.51.100.42");
+    }
+
+    @Test
+    void failedAuthBucketUsesSeparateKey() {
+        BucketProxy bucket = mock(BucketProxy.class);
+        RemoteBucketBuilder<String> remoteBuilder = bucketBuilderReturning(bucket);
+        RateLimitService service = buildService(remoteBuilder);
+        MockHttpServletRequest request = new MockHttpServletRequest("GET", "/items");
+        request.setRemoteAddr("127.0.0.1");
+
+        service.tryConsumeFailedAuth(request);
+
+        verify(remoteBuilder).build(eq("failed:ip:127.0.0.1"), any(Supplier.class));
     }
 
     @Test

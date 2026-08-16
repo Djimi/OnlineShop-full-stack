@@ -49,6 +49,7 @@ export default function Register() {
       });
 
       toast.success(`Welcome ${response.username}. Please sign in.`);
+      sessionStorage.removeItem('onlineshop_redirect_from');
       navigate('/login');
     } catch (error: unknown) {
       const errorMessage = getApiErrorMessage(error, 'Registration failed. Please try again.');

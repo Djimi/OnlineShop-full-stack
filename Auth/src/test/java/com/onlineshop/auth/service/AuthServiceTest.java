@@ -110,6 +110,24 @@ class AuthServiceTest {
                 .isInstanceOf(UserAlreadyExistsException.class);
     }
 
+    @Test
+    void register_whenUsernameTooLong_throwsIllegalArgumentException() {
+        RegisterRequest request = new RegisterRequest("u".repeat(51), "password123");
+
+        assertThatThrownBy(() -> authService.register(request))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("Username");
+    }
+
+    @Test
+    void register_whenPasswordTooShort_throwsIllegalArgumentException() {
+        RegisterRequest request = new RegisterRequest("testuser", "123");
+
+        assertThatThrownBy(() -> authService.register(request))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("Password");
+    }
+
     // ==================== login() tests ====================
 
     @Test

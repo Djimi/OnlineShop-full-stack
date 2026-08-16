@@ -33,20 +33,42 @@ public class RateLimitService {
         return tryConsume("ip:" + resolveClientIp(request), createAnonymousConfig());
     }
 
+    public boolean tryConsumeFailedAuth(HttpServletRequest request) {
+        return tryConsume("failed:ip:" + resolveClientIp(request), createAnonymousConfig());
+    }
+
     public boolean tryConsumeAuthenticated(String userId) {
         return tryConsume("user:" + userId, createAuthenticatedConfig());
     }
 
     public String resolveClientIp(HttpServletRequest request) {
         String remoteAddr = request.getRemoteAddr();
-        List<String> trustedProxies = rateLimitConfigProperties.trustedProxies();
-        if (trustedProxies != null && trustedProxies.contains(remoteAddr)) {
+        if (isTrustedProxy(remoteAddr)) {
             String xForwardedFor = request.getHeader("X-Forwarded-For");
             if (xForwardedFor != null && !xForwardedFor.isEmpty()) {
                 return xForwardedFor.split(",")[0].trim();
             }
         }
         return remoteAddr;
+    }
+
+    private boolean isTrustedProxy(String remoteAddr) {
+        List<String> trustedProxies = rateLimitConfigProperties.trustedProxies();
+        if (trustedProxies != null && trustedProxies.contains(remoteAddr)) {
+            return true;
+        }
+        return isPrivateAddress(remoteAddr);
+    }
+
+    private boolean isPrivateAddress(String address) {
+        try {
+            java.net.InetAddress inetAddress = java.net.InetAddress.getByName(address);
+            return inetAddress.isSiteLocalAddress()
+                    || inetAddress.isLinkLocalAddress()
+                    || inetAddress.isLoopbackAddress();
+        } catch (java.net.UnknownHostException e) {
+            return false;
+        }
     }
 
     private boolean tryConsume(String key, BucketConfiguration config) {

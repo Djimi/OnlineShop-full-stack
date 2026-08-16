@@ -1,4 +1,4 @@
-import { BrowserRouter } from 'react-router';
+import { BrowserRouter, useLocation } from 'react-router';
 import { Navbar } from './components/layout/Navbar';
 import { AppRoutes } from './routes';
 import { Toaster } from 'react-hot-toast';
@@ -21,15 +21,22 @@ if (useAuthStore.getState().isAuthenticated) {
     });
 }
 
+function RouteErrorBoundary() {
+  const location = useLocation();
+  return (
+    <ErrorBoundary key={location.pathname}>
+      <AppRoutes />
+    </ErrorBoundary>
+  );
+}
+
 function App() {
 
   return (
     <BrowserRouter>
       <div className="min-h-screen bg-[#f4f1ea] text-[#1f1a14]">
         <Navbar />
-        <ErrorBoundary>
-          <AppRoutes />
-        </ErrorBoundary>
+        <RouteErrorBoundary />
         <Toaster
           position="top-right"
           toastOptions={{

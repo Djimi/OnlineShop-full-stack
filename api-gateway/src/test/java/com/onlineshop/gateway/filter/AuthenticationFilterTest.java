@@ -10,6 +10,7 @@ import org.springframework.mock.web.MockHttpServletResponse;
 
 import com.onlineshop.gateway.dto.ValidateResponse;
 import com.onlineshop.gateway.exception.GatewayTimeoutException;
+import com.onlineshop.gateway.metrics.GatewayMetrics;
 import com.onlineshop.gateway.ratelimit.RateLimitService;
 import com.onlineshop.gateway.service.AuthValidationService;
 import com.onlineshop.gateway.validation.TokenSanitizer;
@@ -36,7 +37,8 @@ class AuthenticationFilterTest {
                 authValidationService,
                 JsonMapper.builder().build(),
                 mock(TokenSanitizer.class),
-                providerReturning(rateLimitService));
+                providerReturning(rateLimitService),
+                mock(GatewayMetrics.class));
     }
 
     @SuppressWarnings("unchecked")
@@ -70,7 +72,7 @@ class AuthenticationFilterTest {
         MockHttpServletResponse response = new MockHttpServletResponse();
         FilterChain filterChain = mock(FilterChain.class);
 
-        when(rateLimitService.tryConsumeAnonymous(any())).thenReturn(true);
+        when(rateLimitService.tryConsumeFailedAuth(any())).thenReturn(true);
         when(authValidationService.validateToken("invalid-token"))
                 .thenReturn(ValidateResponse.builder().valid(false).build());
 
@@ -87,7 +89,7 @@ class AuthenticationFilterTest {
         MockHttpServletResponse response = new MockHttpServletResponse();
         FilterChain filterChain = mock(FilterChain.class);
 
-        when(rateLimitService.tryConsumeAnonymous(any())).thenReturn(false);
+        when(rateLimitService.tryConsumeFailedAuth(any())).thenReturn(false);
         when(authValidationService.validateToken("invalid-token"))
                 .thenReturn(ValidateResponse.builder().valid(false).build());
 
@@ -103,7 +105,7 @@ class AuthenticationFilterTest {
         MockHttpServletResponse response = new MockHttpServletResponse();
         FilterChain filterChain = mock(FilterChain.class);
 
-        when(rateLimitService.tryConsumeAnonymous(any())).thenReturn(false);
+        when(rateLimitService.tryConsumeFailedAuth(any())).thenReturn(false);
 
         authenticationFilter.doFilter(request, response, filterChain);
 

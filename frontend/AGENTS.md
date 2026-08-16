@@ -106,7 +106,6 @@ This allows direct navigation to routes like `/login` and `/items` without serve
 
 - `axios` — HTTP client
 - `zustand` — State management (auth store)
-- `@tanstack/react-query` — Server state management
 - `react-router` — Client-side routing
 - `react-hook-form` + `zod` — Form handling and validation
 

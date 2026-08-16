@@ -77,7 +77,7 @@ gateway:
     authenticated:
       requests-per-minute: 5
       burst: 50
-    # In production the gateway sits behind an ALB; list the ALB IPs here so the
-    # X-Forwarded-For first value (the real client) is used for per-IP limits.
+    # Direct peers in private/link-local/loopback ranges are automatically trusted
+    # (the ALB case); add explicitly trusted proxy IPs here when needed.
     trusted-proxies: []
 

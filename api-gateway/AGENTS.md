@@ -131,20 +131,24 @@ api-gateway/
 
 ## Rate Limiting Behavior
 
-- All paths except `/actuator` are limited. `/auth/**` (login/register/validate) is
-  limited per IP with the anonymous bucket, so brute-force attempts are throttled.
+- All paths except `/actuator` and CORS preflight OPTIONS are limited. `/auth/**`
+  (login/register/validate) is limited per IP with the anonymous bucket, so
+  brute-force attempts are throttled.
 - `RateLimitFilter` runs after `AuthenticationFilter`, so authenticated `/items/**`
   requests are keyed per user (`user:<id>`) while anonymous requests are keyed per
   IP (`ip:<addr>`).
 - Failed authentications (missing/invalid/expired tokens) are additionally throttled
-  per IP in `AuthenticationFilter` itself (429 instead of 401 once the anonymous
-  bucket is exhausted), because those requests are rejected before the rate-limit
-  filter ever sees them.
+  per IP in `AuthenticationFilter` itself under a separate `failed:ip:<addr>` bucket
+  (429 instead of 401 once it is exhausted), because those requests are rejected
+  before the rate-limit filter ever sees them. The separate bucket keeps a user's
+  failed retries from exhausting the anonymous bucket that their own login uses.
 - Bucket capacity comes from `burst`; refill is greedy at `requests-per-minute`.
-- `trusted-proxies` (default empty) lists the direct peers whose
-  `X-Forwarded-For` first value is trusted as the client IP. In production the
-  ALB IP(s) must be listed there or every client shares the ALB's IP bucket.
-  When empty, `getRemoteAddr()` is used.
+- `resolveClientIp` trusts the `X-Forwarded-For` first value when the direct peer
+  is a configured `trusted-proxies` entry OR a private/link-local/loopback address
+  (the ALB case in production). Otherwise `getRemoteAddr()` is used. A spoofed
+  XFF value can only exhaust that specific IP's anonymous bucket for at most one
+  refill window; without this trust the whole site behind the ALB would share a
+  single IP bucket.
 - Rate limiting fails open when Redis is unavailable.
 
 ## Development Notes

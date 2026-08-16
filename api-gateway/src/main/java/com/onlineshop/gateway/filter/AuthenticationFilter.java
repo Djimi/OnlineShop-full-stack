@@ -7,6 +7,7 @@ import com.onlineshop.gateway.exception.GatewayTimeoutException;
 import com.onlineshop.gateway.exception.InvalidTokenFormatException;
 import com.onlineshop.gateway.exception.ServiceUnavailableException;
 import com.onlineshop.gateway.service.AuthValidationService;
+import com.onlineshop.gateway.metrics.GatewayMetrics;
 import com.onlineshop.gateway.ratelimit.RateLimitService;
 import com.onlineshop.gateway.util.CorsHeaders;
 import com.onlineshop.gateway.validation.TokenSanitizer;
@@ -41,6 +42,7 @@ public class AuthenticationFilter extends OncePerRequestFilter {
     private final ObjectMapper objectMapper;
     private final TokenSanitizer tokenSanitizer;
     private final ObjectProvider<RateLimitService> rateLimitServiceProvider;
+    private final GatewayMetrics metrics;
 
     private static final String AUTHORIZATION_HEADER = "Authorization";
     private static final String BEARER_PREFIX = "Bearer ";
@@ -49,11 +51,13 @@ public class AuthenticationFilter extends OncePerRequestFilter {
             AuthValidationService authValidationService,
             ObjectMapper objectMapper,
             TokenSanitizer tokenSanitizer,
-            ObjectProvider<RateLimitService> rateLimitServiceProvider) {
+            ObjectProvider<RateLimitService> rateLimitServiceProvider,
+            GatewayMetrics metrics) {
         this.authValidationService = authValidationService;
         this.objectMapper = objectMapper;
         this.tokenSanitizer = tokenSanitizer;
         this.rateLimitServiceProvider = rateLimitServiceProvider;
+        this.metrics = metrics;
     }
 
     @Override
@@ -162,9 +166,10 @@ public class AuthenticationFilter extends OncePerRequestFilter {
     private void sendThrottledUnauthorizedResponse(HttpServletRequest request, HttpServletResponse response,
                                                    String detail, String path) throws IOException {
         RateLimitService rateLimitService = rateLimitServiceProvider.getIfAvailable();
-        if (rateLimitService == null || rateLimitService.tryConsumeAnonymous(request)) {
+        if (rateLimitService == null || rateLimitService.tryConsumeFailedAuth(request)) {
             sendUnauthorizedResponse(request, response, detail, path);
         } else {
+            metrics.incrementRateLimitRejections();
             log.warn("Too many failed authentication attempts for client: {}",
                     rateLimitService.resolveClientIp(request));
             sendTooManyRequestsResponse(request, response, "Rate limit exceeded. Please try again later.", path);
@@ -174,9 +179,10 @@ public class AuthenticationFilter extends OncePerRequestFilter {
     private void sendThrottledBadRequestResponse(HttpServletRequest request, HttpServletResponse response,
                                                  String detail, String path) throws IOException {
         RateLimitService rateLimitService = rateLimitServiceProvider.getIfAvailable();
-        if (rateLimitService == null || rateLimitService.tryConsumeAnonymous(request)) {
+        if (rateLimitService == null || rateLimitService.tryConsumeFailedAuth(request)) {
             sendBadRequestResponse(request, response, detail, path);
         } else {
+            metrics.incrementRateLimitRejections();
             sendTooManyRequestsResponse(request, response, "Rate limit exceeded. Please try again later.", path);
         }
     }
