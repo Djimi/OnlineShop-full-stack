@@ -979,3 +979,26 @@ def test_execute_result_validates_against_model(env, capsys):
     assert parsed.outcome == "completed"
     assert parsed.fromReleaseId == CURRENT_RELEASE
     assert parsed.releaseId == TARGET_RELEASE
+
+
+def test_execute_invalid_produced_result_fails_before_write(env, capsys):
+    from delivery.commands import rollback as rollback_module
+
+    env.run_preflight()
+    captured = {}
+
+    def rejecting_validate(record):
+        if isinstance(record, RollbackResult):
+            captured["record"] = record
+            return ["crafted: rollback result is invalid"]
+        return []
+
+    env.monkeypatch.setattr(rollback_module, "validate_record", rejecting_validate)
+    code = main(env.execute_argv())
+    assert code == 1
+    assert isinstance(captured["record"], RollbackResult)
+    assert captured["record"].outcome == "completed"
+    err = capsys.readouterr().err
+    assert "ERROR VALIDATION" in err
+    assert "produced rollback result is invalid" in err
+    assert not (env.tmp_path / "rollback-result.json").exists()

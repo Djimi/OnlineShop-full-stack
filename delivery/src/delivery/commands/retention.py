@@ -4,12 +4,13 @@ audit (read-only, OP-RET-01): verify the current plus up to three previous
 complete releases against their official manifests — every backend ECR
 ``release-<NNNN>`` tag resolves to the manifest's exact digest (tags are
 retention/operator anchors, never deployment inputs), the immutable frontend
-prefix marker exists in production S3, and each release's
-compatibilityFingerprint still matches the current runtime fingerprint from
-the live production snapshot. Missing/mismatched/read-error state fails
-closed (distinct per-entry failure kinds, never silent drift); incomplete
-older sets are historical and not audited. The report is printed as
-machine-readable JSON and the command exits 0 only when the window is
+prefix marker exists in production S3 AND its content is identity-equivalent
+to the official marker derivable from the release manifest, and each
+release's compatibilityFingerprint still matches the current runtime
+fingerprint from the live production snapshot. Missing/mismatched/read-error
+state fails closed (distinct per-entry failure kinds, never silent drift);
+incomplete older sets are historical and not audited. The report is printed
+as machine-readable JSON and the command exits 0 only when the window is
 complete and consistent.
 
 preview (read-only, OP-RET-03): after a successful window audit, resolve the
@@ -24,13 +25,17 @@ a retention simulator: a live preview is always used whenever the applied
 policy equals the resolved policy.
 
 apply (OP-RET-02/03): requires ``--apply`` AND
-``DELIVERY_RETENTION_LIVE_APPLY=1`` (set explicitly by the live pass). The
-full audit + preview must pass first, then the policy is put on the three
-backend repositories — each put immediately followed by a byte-for-byte
+``DELIVERY_RETENTION_LIVE_APPLY=1`` (set explicitly by the live pass).
+``--reference-date`` is rejected on a real apply (ECR's evaluator uses its
+own clock; the flag is honored by ``preview`` and ``apply --dry-run`` only).
+The full audit + preview must pass first, then the policy is put on the
+three backend repositories — each put immediately followed by a byte-for-byte
 get-lifecycle-policy read-back (fail-closed drift); an already identical
-policy is left unchanged. A post-apply window audit is recorded. Never
-deletes images itself: ECR lifecycle handles delayed expiration, we only
-configure.
+policy is left unchanged. A mid-loop failure writes the partial apply report
+(repositories processed so far plus the failed repository) to ``--out FILE``
+before re-raising, so a partial application is never silent. A post-apply
+window audit is recorded. Never deletes images itself: ECR lifecycle handles
+delayed expiration, we only configure.
 """
 
 from __future__ import annotations
@@ -42,8 +47,10 @@ import re
 from datetime import UTC, datetime
 from uuid import uuid4
 
+from botocore.exceptions import ClientError
 from pydantic import ValidationError as PydanticValidationError
 
+from .. import live_marker
 from .. import retention as retention_engine
 from ..aws import context as aws_context
 from ..aws import (
@@ -59,6 +66,7 @@ from ..aws.waiters import bounded_waiter
 from ..errors import (
     AbsentResourceError,
     LiveApplyRefused,
+    MutationVerificationError,
     PreviewDisagreement,
     ProtectedImageExpiring,
     ReadError,
@@ -76,7 +84,7 @@ from ..models import (
     RetentionPreviewRepo,
     RetentionPreviewReport,
 )
-from ..records import load_snapshot
+from ..records import load_snapshot, read_s3_text, write_json
 from ..serialization import canonical_json
 from ..validation import validate as validate_record
 
@@ -93,6 +101,7 @@ def audit(args: argparse.Namespace) -> int:
     """Audit the four-release complete rollback window (read-only, OP-RET-01)."""
     ctx, ids, api, snapshot = _read_only_context(args)
     report = _audit_window(ctx, ids, api, snapshot)
+    _fail_invalid_record(report, "retention audit report")
     print(canonical_json(report.model_dump(mode="json")))
     if getattr(args, "human", False):
         print(_human_audit(report))
@@ -117,6 +126,7 @@ def preview(args: argparse.Namespace) -> int:
     report = _preview_window(
         ctx, ids, audit_report, policy_text, policy, policy_kind, _reference_datetime(args)
     )
+    _fail_invalid_record(report, "retention preview report")
     print(canonical_json(report.model_dump(mode="json")))
     _fail_preview(report)
     return 0
@@ -126,6 +136,13 @@ def apply(args: argparse.Namespace) -> int:
     """Apply the lifecycle policy to the three backend repositories."""
     if getattr(args, "dry_run", False):
         return preview(args)
+    if getattr(args, "reference_date", None) is not None:
+        raise ValidationError(
+            "--reference-date is not honored by `retention apply`: a real apply "
+            "configures the live policy and ECR's lifecycle evaluator uses its own "
+            "clock. Use `retention preview --reference-date ISO` or "
+            "`retention apply --dry-run --reference-date ISO` for a modeled evaluation"
+        )
     if os.environ.get(_LIVE_APPLY_ENV) != "1":
         raise LiveApplyRefused(
             f"apply requires {_LIVE_APPLY_ENV}=1 (set explicitly by the live pass)"
@@ -140,25 +157,57 @@ def apply(args: argparse.Namespace) -> int:
     preview_report = _preview_window(
         ctx, ids, pre_audit, policy_text, policy, policy_kind, datetime.now(UTC)
     )
+    _fail_invalid_record(preview_report, "retention preview report")
     _fail_preview(preview_report)
     ecr_client = aws_context.client_for(ctx, "ecr")
     repositories = []
-    for key in _SERVICE_KEYS:
-        repository = ids["ecrRepositories"][key]
-        try:
-            current = get_lifecycle_policy(ecr_client, repository)
-        except AbsentResourceError:
-            current = None
-        if current == policy_text:
+    try:
+        for key in _SERVICE_KEYS:
+            repository = ids["ecrRepositories"][key]
+            try:
+                current = get_lifecycle_policy(ecr_client, repository)
+            except AbsentResourceError:
+                current = None
+            if current == policy_text:
+                repositories.append(
+                    RetentionApplyRepo(
+                        repository=repository, action="unchanged", readBackVerified=True
+                    )
+                )
+                continue
+            put_lifecycle_policy(ecr_client, repository, policy_text)
             repositories.append(
-                RetentionApplyRepo(repository=repository, action="unchanged", readBackVerified=True)
+                RetentionApplyRepo(repository=repository, action="put", readBackVerified=True)
             )
-            continue
-        put_lifecycle_policy(ecr_client, repository, policy_text)
-        repositories.append(
-            RetentionApplyRepo(repository=repository, action="put", readBackVerified=True)
+    except (ReadError, MutationVerificationError, ClientError) as error:
+        failed_entry = RetentionApplyRepo(
+            repository=repository,
+            action="failed",
+            readBackVerified=False,
+            failureDetail=f"{type(error).__name__}: {error}",
         )
+        _emit_apply_report(args, policy_kind, [*repositories, failed_entry], pre_audit, False)
+        raise
     post_audit = _audit_window(ctx, ids, api, snapshot)
+    _emit_apply_report(args, policy_kind, repositories, pre_audit, post_audit.windowComplete)
+    if not post_audit.windowComplete:
+        raise WindowIncompleteError("post-apply rollback window audit incomplete")
+    return 0
+
+
+def _fail_invalid_record(record, label: str) -> None:
+    errors = validate_record(record)
+    if errors:
+        raise ValidationError(f"produced {label} is invalid: {'; '.join(errors)}")
+
+
+def _emit_apply_report(
+    args: argparse.Namespace,
+    policy_kind: str,
+    repositories: list[RetentionApplyRepo],
+    pre_audit: RetentionAuditReport,
+    post_audit_window_complete: bool,
+) -> None:
     report = RetentionApplyReport(
         reportId=f"ret-{uuid4().hex[:16]}",
         producedAt=datetime.now(UTC),
@@ -166,12 +215,13 @@ def apply(args: argparse.Namespace) -> int:
         policyKind=policy_kind,
         repositories=repositories,
         preAuditWindowComplete=pre_audit.windowComplete,
-        postAuditWindowComplete=post_audit.windowComplete,
+        postAuditWindowComplete=post_audit_window_complete,
     )
+    _fail_invalid_record(report, "retention apply report")
     print(canonical_json(report.model_dump(mode="json")))
-    if not post_audit.windowComplete:
-        raise WindowIncompleteError("post-apply rollback window audit incomplete")
-    return 0
+    out = getattr(args, "out", None)
+    if out:
+        write_json(out, report)
 
 
 # ---------------------------------------------------------------------------
@@ -231,7 +281,7 @@ def _audit_window(ctx, ids: dict, api: GitHubApi, snapshot) -> RetentionAuditRep
     ][:3]
     window_ids = [current] + [release["tag_name"] for release in previous]
     entries = [
-        audit_entry(ctx, ids, api, release_id, snapshot, official)
+        audit_entry(ctx, ids, api, release_id, snapshot, official, verify_marker_content=True)
         for release_id in window_ids
     ]
     window_complete = all(entry.complete for entry in entries)
@@ -262,7 +312,14 @@ def _audit_window(ctx, ids: dict, api: GitHubApi, snapshot) -> RetentionAuditRep
 
 
 def audit_entry(
-    ctx, ids: dict, api: GitHubApi, release_id: str, snapshot, releases
+    ctx,
+    ids: dict,
+    api: GitHubApi,
+    release_id: str,
+    snapshot,
+    releases,
+    *,
+    verify_marker_content: bool = False,
 ) -> RetentionAuditEntry:
     """Verify one release against its official manifest; read errors fail closed.
 
@@ -270,6 +327,13 @@ def audit_entry(
     (OP-REC-03): the rollback target must be a complete retained release per
     exactly these checks — ECR ``release-<NNNN>`` tag-to-digest anchors,
     frontend prefix marker existence, and the compatibility fingerprint.
+
+    ``verify_marker_content`` additionally reads and parses the prefix marker
+    and requires identity-equivalence with the official marker derivable from
+    the release manifest (OP-RET-01); a wrong-content marker fails with
+    ``PREFIX_MARKER_MISMATCH``, distinct from absence and read errors. The
+    rollback preflight keeps it off because it performs its own marker-content
+    assertion with a tailored error after the completeness audit.
     """
     failures: list[RetentionAuditFailure] = []
     manifest: ReleaseManifest | None = None
@@ -360,11 +424,14 @@ def audit_entry(
                 )
     s3_client = aws_context.client_for(ctx, "s3")
     prefix = f"{ids['frontendReleasesPrefix']}{release_id}/"
-    if not object_exists(s3_client, ids["frontendBucket"], f"{prefix}{_PREFIX_MARKER}"):
+    marker_key = f"{prefix}{_PREFIX_MARKER}"
+    if verify_marker_content and manifest is not None:
+        _verify_prefix_marker_content(failures, s3_client, ids, marker_key, manifest, release_id)
+    elif not object_exists(s3_client, ids["frontendBucket"], marker_key):
         failures.append(
             RetentionAuditFailure(
                 kind="PREFIX_MARKER_NOT_FOUND",
-                message=f"immutable frontend prefix marker missing: {prefix}{_PREFIX_MARKER}",
+                message=f"immutable frontend prefix marker missing: {marker_key}",
             )
         )
     detail = (
@@ -380,6 +447,58 @@ def audit_entry(
         failures=failures,
         detail=detail,
     )
+
+
+def _official_marker_for(manifest: ReleaseManifest, release_id: str) -> live_marker.LiveMarker:
+    """The official marker derivable from the release manifest (CT-PROD-02)."""
+    return live_marker.build_official_marker(
+        live_marker.build_candidate_marker(
+            candidate_id=manifest.candidateId,
+            source_sha=manifest.source.fullSha,
+            frontend_sha256=manifest.artifacts.frontend.checksum,
+        ),
+        release_id,
+    )
+
+
+def _verify_prefix_marker_content(
+    failures: list[RetentionAuditFailure],
+    s3_client,
+    ids: dict,
+    marker_key: str,
+    manifest: ReleaseManifest,
+    release_id: str,
+) -> None:
+    """Read the prefix marker and require identity-equivalent content (OP-RET-01)."""
+    try:
+        raw = read_s3_text(
+            s3_client, ids["frontendBucket"], marker_key, "immutable frontend prefix marker"
+        ).strip()
+        parsed = live_marker.parse_live_marker(raw)
+    except AbsentResourceError as error:
+        failures.append(
+            RetentionAuditFailure(kind="PREFIX_MARKER_NOT_FOUND", message=str(error))
+        )
+        return
+    except ReadError as error:
+        failures.append(RetentionAuditFailure(kind="READ_ERROR", message=str(error)))
+        return
+    except ValidationError as error:
+        failures.append(
+            RetentionAuditFailure(kind="PREFIX_MARKER_MISMATCH", message=str(error))
+        )
+        return
+    expected = _official_marker_for(manifest, release_id)
+    if parsed is None or not live_marker.markers_identity_equivalent(parsed, expected):
+        failures.append(
+            RetentionAuditFailure(
+                kind="PREFIX_MARKER_MISMATCH",
+                message=(
+                    f"immutable frontend prefix marker {marker_key} does not name the "
+                    f"official {release_id} identity"
+                ),
+            )
+        )
 
 
 def _human_audit(report: RetentionAuditReport) -> str:

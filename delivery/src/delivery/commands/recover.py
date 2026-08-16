@@ -9,9 +9,14 @@ backends auth|items|gateway  re-register the snapshot's exact digest-pinned
                               the service, bound the deployment waiter, and
                               verify observed running digests equal the
                               snapshot digests.
-frontend                      rewrite the live marker from the snapshot
-                              frontend identity (checksum proven BEFORE the
-                              write), invalidate CloudFront, read back both.
+frontend                      restore the live-root dist files from the
+                              snapshot release's retained immutable prefix
+                              (aggregate content checksum proven BEFORE the
+                              live switch; index.html last), restore the
+                              live marker, invalidate CloudFront, and read
+                              back. A missing prefix or a checksum mismatch
+                              fails closed with evidence — never reporting
+                              completion for a hybrid frontend.
 
 Ambiguous input — inconsistent snapshot internals, missing restore fields,
 or AWS read errors — stops with evidence and never guesses; a read error is
@@ -36,7 +41,6 @@ from ..aws import (
     describe_services,
     describe_task_definition,
     get_object_sha256,
-    put_object,
     register_task_definition,
     update_service,
     wait_for_deployment,
@@ -50,14 +54,16 @@ from ..errors import (
     ValidationError,
 )
 from ..models import ComponentRecovery, ProductionSnapshot, RecoveryResult
-from ..records import load_snapshot, read_s3_text, write_json
+from ..records import load_snapshot, write_json
 from ..serialization import sha256_hex
+from ..validation import validate as validate_record
 from .deploy_support import (
     DEPLOYMENT_TIMEOUT,
     DIGEST_VERIFY_INTERVAL,
     DIGEST_VERIFY_TIMEOUT,
     assert_full_arn_secrets,
     deployment_for_revision,
+    restore_frontend_from_retained_prefix,
     verify_running_digests,
 )
 
@@ -125,10 +131,12 @@ def recover(args: argparse.Namespace) -> int:
                 )
             )
         if args.out:
+            _fail_invalid_record(result, "recovery result")
             write_json(args.out, result)
         raise
     result.completedAt = datetime.now(UTC)
     if args.out:
+        _fail_invalid_record(result, "recovery result")
         write_json(args.out, result)
     _print_summary(result)
     return 0
@@ -329,25 +337,56 @@ def _pinned_digest(td: dict, repository: str, key: str, td_arn: str) -> str:
 
 
 def _restore_frontend(ctx, ids: dict, snapshot: ProductionSnapshot) -> str:
+    """Restore the live root from the snapshot release's retained prefix.
+
+    The snapshot release identity gives the retained immutable prefix; the
+    aggregate content checksum of its dist files must match the recorded
+    frontend checksum (carried by the snapshot's integrity-verified live
+    marker as ``frontendSha256``) BEFORE anything in the live root is
+    touched. The live marker is restored from the snapshot identity and
+    CloudFront is invalidated. A missing prefix, an absent official release
+    identity, or a checksum mismatch fails closed with evidence — a hybrid
+    frontend is never reported as completed.
+    """
     s3_client = aws_context.client_for(ctx, "s3")
     bucket = ids["frontendBucket"]
-    marker_key = ids["frontendLiveMarker"]
-    body = snapshot.frontend.immutableIdentity.encode()
-    put_object(s3_client, bucket, marker_key, body)
-    current = read_s3_text(s3_client, bucket, marker_key, "frontend live marker").strip()
-    if current != snapshot.frontend.immutableIdentity:
-        raise MutationVerificationError(
-            "live marker read-back does not match the snapshot identity"
+    release = snapshot.release
+    if release.status != "official" or release.releaseId is None:
+        raise AmbiguousStateError(
+            "the snapshot records no official release identity; the retained frontend "
+            "prefix for the pre-mutation live root cannot be derived, so the frontend "
+            "cannot be restored automatically (never report completed for a hybrid "
+            "frontend)"
         )
-    if get_object_sha256(s3_client, bucket, marker_key) != snapshot.frontend.checksum:
+    marker = live_marker.parse_live_marker(snapshot.frontend.immutableIdentity)
+    if marker is None:
+        raise AmbiguousStateError(
+            "snapshot frontend immutableIdentity is not a live marker document; the "
+            "recorded frontend content checksum cannot be derived from it"
+        )
+    prefix = f"{ids['frontendReleasesPrefix']}{release.releaseId}/"
+    restore_frontend_from_retained_prefix(
+        s3_client,
+        bucket=bucket,
+        prefix=prefix,
+        expected_checksum=marker.frontendSha256,
+        live_marker_key=ids["frontendLiveMarker"],
+        marker_doc=snapshot.frontend.immutableIdentity,
+        release_label=release.releaseId,
+    )
+    observed_marker_checksum = get_object_sha256(
+        s3_client, bucket, ids["frontendLiveMarker"]
+    )
+    if observed_marker_checksum != snapshot.frontend.checksum:
         raise MutationVerificationError(
             "live marker checksum read-back does not match the snapshot"
         )
     cloudfront_client = aws_context.client_for(ctx, "cloudfront")
     create_invalidation(cloudfront_client, ids["cloudfrontDistributionId"], ["/*"])
     return (
-        f"live marker s3://{bucket}/{marker_key} restored to the snapshot identity; "
-        "CloudFront invalidation issued"
+        f"frontend live root s3://{bucket}/ restored from the retained prefix {prefix} "
+        "(aggregate content checksum proven before the live switch); live marker "
+        "restored to the snapshot identity; CloudFront invalidation issued"
     )
 
 
@@ -356,13 +395,29 @@ def _restore_frontend(ctx, ids: dict, snapshot: ProductionSnapshot) -> str:
 # ---------------------------------------------------------------------------
 
 
+def _fail_invalid_record(record, label: str) -> None:
+    errors = validate_record(record)
+    if errors:
+        raise ValidationError(f"produced {label} is invalid: {'; '.join(errors)}")
+
+
 def _print_dry_run_plan(component: str, snapshot: ProductionSnapshot, ids: dict) -> None:
     if component == "frontend":
-        print(
-            "frontend: would restore the live marker "
-            f"s3://{ids['frontendBucket']}/{ids['frontendLiveMarker']} to the snapshot "
-            f"identity (checksum {snapshot.frontend.checksum}) and invalidate CloudFront /*"
-        )
+        release_id = snapshot.release.releaseId
+        if snapshot.release.status == "official" and release_id is not None:
+            print(
+                "frontend: would restore the live-root dist files from the retained "
+                f"prefix {ids['frontendReleasesPrefix']}{release_id}/ (aggregate content "
+                f"checksum {snapshot.frontend.checksum} proven before the live switch, "
+                "index.html last), restore the live marker to the snapshot identity, and "
+                "invalidate CloudFront /*"
+            )
+        else:
+            print(
+                "frontend: would FAIL CLOSED — the snapshot records no official release "
+                "identity, so the retained prefix for the pre-mutation live root cannot "
+                "be derived"
+            )
         return
     observation = snapshot.services[component]
     print(

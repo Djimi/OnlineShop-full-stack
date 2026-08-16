@@ -25,6 +25,7 @@ from fakes_production import (
     FakeS3,
     FakeSts,
     default_task_definition_arns,
+    make_frontend_archive,
     production_identifiers,
     write_identifiers,
     write_snapshot,
@@ -39,13 +40,6 @@ PROMOTED_DIGESTS = {
     "onlineshop-items": f"sha256:{'2' * 64}",
     "onlineshop-api-gateway": f"sha256:{'3' * 64}",
 }
-OFFICIAL_MARKER = live_marker.LiveMarker(
-    releaseId="release-0001",
-    candidateId="cand-old-000000000000",
-    sourceSha="a" * 40,
-    frontendSha256="b" * 64,
-)
-OFFICIAL_MARKER_DOC = live_marker.marker_document(OFFICIAL_MARKER)
 PROMOTED_MARKER_DOC = live_marker.marker_document(
     live_marker.build_candidate_marker(
         candidate_id="cand-new-000000000000",
@@ -53,6 +47,15 @@ PROMOTED_MARKER_DOC = live_marker.marker_document(
         frontend_sha256="d" * 64,
     )
 )
+
+
+def _official_marker(content_checksum: str) -> live_marker.LiveMarker:
+    return live_marker.LiveMarker(
+        releaseId="release-0001",
+        candidateId="cand-old-000000000000",
+        sourceSha="a" * 40,
+        frontendSha256=content_checksum,
+    )
 
 
 def _td_body(family: str, arn: str, image: str) -> dict:
@@ -195,11 +198,18 @@ class RecoverEnv:
         self.tmp_path = tmp_path
         self.ids = production_identifiers()
         self.identifiers_file = write_identifiers(tmp_path, self.ids)
+        _archive, _digest, self.content_checksum = make_frontend_archive(tmp_path)
+        dist = tmp_path / "frontend-dist"
+        self.index_bytes = (dist / "index.html").read_bytes()
+        self.app_bytes = (dist / "assets" / "app.js").read_bytes()
+        self.official_marker = _official_marker(self.content_checksum)
+        self.official_marker_doc = live_marker.marker_document(self.official_marker)
+        self.prefix = f"{self.ids['frontendReleasesPrefix']}release-0001/"
         self.snapshot = write_snapshot(
             tmp_path,
             self.ids,
             digests=SNAPSHOT_DIGESTS,
-            marker_doc=OFFICIAL_MARKER_DOC,
+            marker_doc=self.official_marker_doc,
             release_id="release-0001",
             task_definition_arns=default_task_definition_arns(),
         )
@@ -208,7 +218,13 @@ class RecoverEnv:
         self.sts = FakeSts()
         self.ecs = RecoveryEcs()
         self.s3 = FakeS3(
-            {self.ids["frontendLiveMarker"]: PROMOTED_MARKER_DOC.encode()}
+            {
+                self.ids["frontendLiveMarker"]: PROMOTED_MARKER_DOC.encode(),
+                f"{self.prefix}index.html": self.index_bytes,
+                f"{self.prefix}assets/app.js": self.app_bytes,
+                f"{self.prefix}frontend.tar.gz": b"bundle-bytes",
+                f"{self.prefix}release.json": self.official_marker_doc.encode(),
+            }
         )
         self.cf = FakeCloudFront()
         self._install()
@@ -297,10 +313,21 @@ def test_recover_gateway_restores_snapshot_revision(env, capsys):
     assert env.result()["outcome"] == "completed"
 
 
-def test_recover_frontend_restores_marker_and_invalidates(env, capsys):
+def test_recover_frontend_restores_live_root_from_retained_prefix(env, capsys):
     code = main(env.argv(["frontend"]))
     assert code == 0, capsys.readouterr().err
-    assert env.s3.objects[env.ids["frontendLiveMarker"]].decode() == OFFICIAL_MARKER_DOC
+    # live-root dist files restored from the retained prefix
+    assert env.s3.objects["index.html"] == env.index_bytes
+    assert env.s3.objects["assets/app.js"] == env.app_bytes
+    # index.html last among dist files, marker after index.html
+    put_keys = list(env.s3.put_calls)
+    assert put_keys == [
+        "assets/app.js",
+        "index.html",
+        env.ids["frontendLiveMarker"],
+    ]
+    # official marker restored from the snapshot identity
+    assert env.s3.objects[env.ids["frontendLiveMarker"]].decode() == env.official_marker_doc
     assert env.cf.invalidations == [
         {
             "Paths": {"Quantity": 1, "Items": ["/*"]},
@@ -309,11 +336,97 @@ def test_recover_frontend_restores_marker_and_invalidates(env, capsys):
     ]
     result = env.result()
     assert result["outcome"] == "completed"
-    assert result["components"][0] == {
-        "component": "frontend",
-        "conclusion": "restored",
-        "detail": result["components"][0]["detail"],
-    }
+    assert result["components"][0]["component"] == "frontend"
+    assert result["components"][0]["conclusion"] == "restored"
+    assert "restored from the retained prefix" in result["components"][0]["detail"]
+
+
+def test_recover_frontend_checksum_mismatch_fails_before_live_switch(env, capsys):
+    env.s3.objects[f"{env.prefix}index.html"] = b"tampered-bytes"
+    original_marker = env.s3.objects[env.ids["frontendLiveMarker"]]
+    code = main(env.argv(["frontend"]))
+    assert code == 1
+    err = capsys.readouterr().err
+    assert "ERROR VALIDATION" in err
+    assert "live entry point was NOT switched" in err
+    # no partial live switch: no dist file copied, marker untouched, no
+    # invalidation, and the outcome is honestly failed (never completed)
+    assert env.s3.put_calls == []
+    assert env.s3.objects[env.ids["frontendLiveMarker"]] == original_marker
+    assert "index.html" not in env.s3.objects
+    assert env.cf.invalidations == []
+    result = env.result()
+    assert result["outcome"] == "failed"
+    assert result["components"][0]["conclusion"] == "failed"
+    assert "NOT switched" in result["failureDetail"]
+
+
+def test_recover_frontend_missing_prefix_fails_closed(env, capsys):
+    for key in list(env.s3.objects):
+        if key.startswith(env.prefix):
+            del env.s3.objects[key]
+    original_marker = env.s3.objects[env.ids["frontendLiveMarker"]]
+    code = main(env.argv(["frontend"]))
+    assert code == 1
+    err = capsys.readouterr().err
+    assert "ERROR VALIDATION" in err
+    assert "no index.html" in err
+    assert env.s3.put_calls == []
+    assert env.s3.objects[env.ids["frontendLiveMarker"]] == original_marker
+    assert env.cf.invalidations == []
+    assert env.result()["outcome"] == "failed"
+
+
+def test_recover_frontend_without_official_release_fails_closed(env, capsys):
+    import hashlib
+
+    candidate_marker_doc = live_marker.marker_document(
+        live_marker.build_candidate_marker(
+            candidate_id="cand-old-000000000000",
+            source_sha="a" * 40,
+            frontend_sha256=env.content_checksum,
+        )
+    )
+    raw = json.loads(env.snapshot.read_text())
+    raw["release"] = {"status": "none", "releaseId": None, "manifestSha256": None}
+    raw["frontend"]["immutableIdentity"] = candidate_marker_doc
+    raw["frontend"]["checksum"] = hashlib.sha256(candidate_marker_doc.encode()).hexdigest()
+    env.snapshot.write_text(json.dumps(raw))
+    code = main(env.argv(["frontend"]))
+    assert code == 1
+    err = capsys.readouterr().err
+    assert "ERROR AMBIGUOUS" in err
+    assert "no official release identity" in err
+    assert env.s3.put_calls == []
+    assert env.cf.invalidations == []
+    assert env.result()["outcome"] == "failed"
+
+
+def test_recover_frontend_failure_never_hides_backend_restores(env, capsys):
+    # the frontend restore fails closed while backends before it are still
+    # restored and reported honestly per component
+    import hashlib
+
+    candidate_marker_doc = live_marker.marker_document(
+        live_marker.build_candidate_marker(
+            candidate_id="cand-old-000000000000",
+            source_sha="a" * 40,
+            frontend_sha256=env.content_checksum,
+        )
+    )
+    raw = json.loads(env.snapshot.read_text())
+    raw["release"] = {"status": "none", "releaseId": None, "manifestSha256": None}
+    raw["frontend"]["immutableIdentity"] = candidate_marker_doc
+    raw["frontend"]["checksum"] = hashlib.sha256(candidate_marker_doc.encode()).hexdigest()
+    env.snapshot.write_text(json.dumps(raw))
+    code = main(env.argv(["auth", "frontend"]))
+    assert code == 1
+    assert capsys.readouterr().err
+    result = env.result()
+    assert result["outcome"] == "failed"
+    conclusions = {c["component"]: c["conclusion"] for c in result["components"]}
+    assert conclusions["auth"] == "restored"
+    assert conclusions["frontend"] == "failed"
 
 
 def test_recover_all_components_canonical_order(env, capsys):
@@ -472,9 +585,9 @@ def test_recover_ambiguous_snapshot_marker_release_mismatch_stops(env, capsys):
     raw["frontend"]["immutableIdentity"] = live_marker.marker_document(
         live_marker.LiveMarker(
             releaseId="release-0009",
-            candidateId=OFFICIAL_MARKER.candidateId,
-            sourceSha=OFFICIAL_MARKER.sourceSha,
-            frontendSha256=OFFICIAL_MARKER.frontendSha256,
+            candidateId=env.official_marker.candidateId,
+            sourceSha=env.official_marker.sourceSha,
+            frontendSha256=env.official_marker.frontendSha256,
         )
     )
     import hashlib
@@ -605,7 +718,8 @@ def test_recover_dry_run_plans_without_mutation(env, capsys):
     assert code == 0, capsys.readouterr().err
     out = capsys.readouterr().out
     assert "would re-register the snapshot revision" in out
-    assert "would restore the live marker" in out
+    assert "would restore the live-root dist files" in out
+    assert "would restore the live marker" not in out
     assert env.ecs.register_calls == []
     assert env.ecs.update_calls == []
     assert env.s3.put_calls == []
@@ -623,3 +737,26 @@ def test_recover_failure_result_is_written_for_evidence(env, capsys):
     assert result["components"][0]["conclusion"] == "failed"
     assert result["components"][1]["conclusion"] == "not-attempted"
     assert result["completedAt"] is not None
+
+
+def test_recover_invalid_produced_result_fails_before_write(env, capsys):
+    from delivery.commands import recover as recover_module
+    from delivery.models import RecoveryResult
+
+    captured = {}
+
+    def rejecting_validate(record):
+        if isinstance(record, RecoveryResult):
+            captured["record"] = record
+            return ["crafted: outcome must be completed or failed"]
+        return []
+
+    env.monkeypatch.setattr(recover_module, "validate_record", rejecting_validate)
+    code = main(env.argv(["auth"]))
+    assert code == 1
+    assert isinstance(captured["record"], RecoveryResult)
+    assert captured["record"].outcome == "completed"
+    err = capsys.readouterr().err
+    assert "ERROR VALIDATION" in err
+    assert "produced recovery result is invalid" in err
+    assert not (env.tmp_path / "recovery-result.json").exists()

@@ -57,7 +57,6 @@ from datetime import UTC, datetime
 from pathlib import Path
 from uuid import uuid4
 
-from botocore.exceptions import ClientError
 from pydantic import ValidationError as PydanticValidationError
 
 from .. import live_marker
@@ -67,8 +66,6 @@ from ..aws import (
     describe_services,
     describe_task_definition,
     get_object_sha256,
-    list_objects,
-    put_object,
     register_task_definition,
     replace_container_images,
     task_definition_images,
@@ -105,6 +102,7 @@ from .deploy_support import (
     DIGEST_VERIFY_TIMEOUT,
     assert_full_arn_secrets,
     deployment_for_revision,
+    restore_frontend_from_retained_prefix,
     verify_running_digests,
 )
 from .retention import audit_entry
@@ -117,7 +115,6 @@ _REPOSITORY = re.compile(r"^[A-Za-z0-9@_.-]+/[A-Za-z0-9@_.-]+$")
 _RUN_NUMBER = re.compile(r"^[0-9]+$")
 _MANIFEST_ASSET = "release-manifest.json"
 _PREFIX_MARKER = "release.json"
-_BUNDLE = "frontend.tar.gz"
 _ROLLBACK_WINDOW = 3  # current + up to three previous releases (OP-RET-01)
 
 # Historical module-level names: rollback's tests monkeypatch these.
@@ -612,6 +609,7 @@ def execute(args: argparse.Namespace) -> int:
             RollbackComponent(component=name, conclusion=progress[name])
             for name in _CHANGED_COMPONENTS
         ]
+        _fail_invalid_record(result, "rollback result")
         write_json(args.out, result)
         raise
     result.completedAt = datetime.now(UTC)
@@ -619,6 +617,7 @@ def execute(args: argparse.Namespace) -> int:
         RollbackComponent(component=name, conclusion=progress[name])
         for name in _CHANGED_COMPONENTS
     ]
+    _fail_invalid_record(result, "rollback result")
     write_json(args.out, result)
     _print_result_summary(result)
     return 0
@@ -699,6 +698,12 @@ def _print_execute_plan(ids: dict, manifest: ReleaseManifest, digests: dict[str,
     )
     print("  then: read-only production verification against the release manifest")
     print("dry-run complete; no mutation performed")
+
+
+def _fail_invalid_record(record, label: str) -> None:
+    errors = validate_record(record)
+    if errors:
+        raise ValidationError(f"produced {label} is invalid: {'; '.join(errors)}")
 
 
 def _print_result_summary(result: RollbackResult) -> None:
@@ -845,76 +850,19 @@ def _restore_frontend_from_prefix(
             f"the retained prefix {expected_prefix!r}"
         )
     _assert_live_marker_matches_snapshot(ctx, ids, snapshot)
-    files = _retained_dist_files(s3_client, bucket, prefix, manifest.releaseId)
-    observed_checksum = _aggregate_checksum(s3_client, bucket, prefix, files)
-    if observed_checksum != manifest.artifacts.frontend.checksum:
-        raise ValidationError(
-            f"retained frontend prefix content checksum {observed_checksum} does not "
-            f"match release {manifest.releaseId} checksum "
-            f"{manifest.artifacts.frontend.checksum}; the live entry point was NOT switched"
-        )
     marker_doc = live_marker.marker_document(_official_marker(manifest))
-    ordered = sorted(files, key=lambda rel: (rel == "index.html", rel))
-    for rel in ordered:
-        body = _read_object_bytes(s3_client, bucket, f"{prefix}{rel}", manifest.releaseId)
-        put_object(s3_client, bucket, rel, body)
-    put_object(s3_client, bucket, ids["frontendLiveMarker"], marker_doc.encode())
-    current = read_s3_text(
-        s3_client, bucket, ids["frontendLiveMarker"], "frontend live marker"
-    ).strip()
-    if current != marker_doc:
-        raise MutationVerificationError(
-            "live marker read-back does not name the target release"
-        )
+    restore_frontend_from_retained_prefix(
+        s3_client,
+        bucket=bucket,
+        prefix=prefix,
+        expected_checksum=manifest.artifacts.frontend.checksum,
+        live_marker_key=ids["frontendLiveMarker"],
+        marker_doc=marker_doc,
+        release_label=manifest.releaseId,
+    )
     cloudfront_client = aws_context.client_for(ctx, "cloudfront")
     create_invalidation(cloudfront_client, ids["cloudfrontDistributionId"], ["/*"])
     print(f"frontend live entry point restored to official release {manifest.releaseId}")
-
-
-def _retained_dist_files(
-    s3_client, bucket: str, prefix: str, release_id: str
-) -> list[str]:
-    """List the retained dist files (bundle and prefix marker excluded)."""
-    entries = list_objects(s3_client, bucket, prefix)
-    files: list[str] = []
-    allowed_extras = {f"{prefix}{_BUNDLE}", f"{prefix}{_PREFIX_MARKER}"}
-    for entry in entries:
-        if not isinstance(entry, dict):
-            raise ReadError(f"prefix listing for {release_id} has a malformed entry")
-        key = entry.get("Key")
-        if not isinstance(key, str) or not key or not key.startswith(prefix):
-            raise ReadError(f"prefix listing for {release_id} has an unsafe key")
-        if key in allowed_extras:
-            continue
-        rel = key[len(prefix) :]
-        if not rel or rel in (_BUNDLE, _PREFIX_MARKER) or ".." in rel.split("/"):
-            raise ReadError(f"unexpected retained object {key!r} for {release_id}")
-        files.append(rel)
-    if "index.html" not in files:
-        raise ValidationError(
-            f"retained frontend prefix {prefix} for {release_id} has no index.html"
-        )
-    return files
-
-
-def _aggregate_checksum(s3_client, bucket: str, prefix: str, files: list[str]) -> str:
-    lines = []
-    for rel in sorted(files):
-        observed = get_object_sha256(s3_client, bucket, f"{prefix}{rel}")
-        lines.append(f"{observed}  ./{rel}\n")
-    return sha256_hex("".join(lines).encode())
-
-
-def _read_object_bytes(s3_client, bucket: str, key: str, release_id: str) -> bytes:
-    try:
-        body = s3_client.get_object(Bucket=bucket, Key=key).get("Body")
-    except ClientError as error:
-        raise ReadError(
-            f"cannot read retained object s3://{bucket}/{key} for {release_id}"
-        ) from error
-    if body is None:
-        raise ReadError(f"retained object s3://{bucket}/{key} for {release_id} has no body")
-    return body.read()
 
 
 # ---------------------------------------------------------------------------

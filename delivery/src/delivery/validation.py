@@ -7,9 +7,14 @@ from datetime import UTC, datetime, timedelta
 
 from .models.candidate import CandidateManifest
 from .models.evidence import EvidenceRecord
-from .models.promotion import PreflightReport, VerificationReport
+from .models.promotion import FinalizationReport, PreflightReport, VerificationReport
 from .models.recovery import RecoveryResult
 from .models.release import ReleaseManifest
+from .models.retention import (
+    RetentionApplyReport,
+    RetentionAuditReport,
+    RetentionPreviewReport,
+)
 from .models.rollback import RollbackPreflightReport, RollbackResult
 from .models.snapshot import ProductionSnapshot
 from .models.staging import StagingOperationRecord
@@ -58,6 +63,14 @@ def validate(record) -> list[str]:
         return _validate_recovery(record)
     if isinstance(record, RollbackPreflightReport):
         return _validate_rollback_preflight(record)
+    if isinstance(record, RetentionAuditReport):
+        return _validate_retention_audit(record)
+    if isinstance(record, RetentionPreviewReport):
+        return _validate_retention_preview(record)
+    if isinstance(record, RetentionApplyReport):
+        return _validate_retention_apply(record)
+    if isinstance(record, FinalizationReport):
+        return _validate_finalization(record)
     return [f"unsupported record type: {type(record).__name__}"]
 
 
@@ -71,6 +84,70 @@ def _validate_rollback_preflight(record: RollbackPreflightReport) -> list[str]:
         )
     if record.releaseId == record.snapshotReleaseId:
         errors.append("rollback preflight report target must differ from the current release")
+    return errors
+
+
+def _validate_retention_audit(record: RetentionAuditReport) -> list[str]:
+    errors = _schema_version_error(record, "retention audit report")
+    if not _HEX64.fullmatch(record.currentFingerprint):
+        errors.append("retention audit report currentFingerprint must be 64 lowercase hex")
+    in_window = [entry for entry in record.releases if entry.inWindow]
+    if record.currentReleaseId not in {entry.releaseId for entry in in_window}:
+        errors.append("retention audit report currentReleaseId must be an in-window release")
+    if record.windowComplete != all(entry.complete for entry in in_window):
+        errors.append(
+            "retention audit report windowComplete must match the in-window entry completeness"
+        )
+    return errors
+
+
+def _validate_retention_preview(record: RetentionPreviewReport) -> list[str]:
+    errors = _schema_version_error(record, "retention preview report")
+    if not record.windowComplete:
+        errors.append("retention preview report requires a complete rollback window")
+    if not record.protectedReleases:
+        errors.append("retention preview report protectedReleases must be non-empty")
+    if not record.repositories:
+        errors.append("retention preview report must contain at least one repository")
+    return errors
+
+
+def _validate_retention_apply(record: RetentionApplyReport) -> list[str]:
+    errors = _schema_version_error(record, "retention apply report")
+    if not record.repositories:
+        errors.append("retention apply report must contain at least one repository")
+    for entry in record.repositories:
+        if entry.action == "failed" and not entry.failureDetail:
+            errors.append(
+                f"retention apply repository {entry.repository} must carry a failureDetail"
+            )
+        if entry.action != "failed" and not entry.readBackVerified:
+            errors.append(
+                f"retention apply repository {entry.repository} must be read-back verified"
+            )
+    return errors
+
+
+def _validate_finalization(record: FinalizationReport) -> list[str]:
+    errors = _schema_version_error(record, "finalization report")
+    if not _RELEASE_ID.fullmatch(record.releaseId):
+        errors.append("finalization report releaseId must match release-NNNN")
+    if not record.steps:
+        errors.append("finalization report steps must be non-empty")
+    for step in record.steps:
+        if not step.name:
+            errors.append("finalization report step names must be non-empty")
+        if step.action == "failed" and not step.conclusion:
+            errors.append(
+                f"finalization step {step.name or '<unnamed>'} must carry a "
+                "conclusion when failed"
+            )
+    if not record.window:
+        errors.append("finalization report window must contain at least the current release")
+    if record.rollbackCapableAtPublication != all(entry.complete for entry in record.window):
+        errors.append(
+            "finalization report rollbackCapableAtPublication must match the window entries"
+        )
     return errors
 
 

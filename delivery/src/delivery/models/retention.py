@@ -18,6 +18,7 @@ class RetentionAuditFailure(StrictRecord):
         "ECR_TAG_NOT_FOUND",
         "ECR_DIGEST_MISMATCH",
         "PREFIX_MARKER_NOT_FOUND",
+        "PREFIX_MARKER_MISMATCH",
         "FINGERPRINT_MISMATCH",
         "READ_ERROR",
     ]
@@ -68,8 +69,9 @@ class RetentionPreviewReport(StrictRecord):
 
 class RetentionApplyRepo(StrictRecord):
     repository: str
-    action: Literal["put", "unchanged"]
+    action: Literal["put", "unchanged", "failed"]
     readBackVerified: bool
+    failureDetail: str = ""
 
 
 class RetentionApplyReport(StrictRecord):

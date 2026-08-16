@@ -567,17 +567,16 @@ def _add_verify(subparsers: argparse._SubParsersAction) -> None:
         "--manifest", metavar="FILE", help="official release manifest JSON file"
     )
     group.add_argument("--candidate", metavar="FILE", help="candidate manifest JSON file")
+    group.add_argument(
+        "--snapshot",
+        metavar="FILE",
+        help="pre-mutation production snapshot JSON file (post-compensation, OP-REC-02)",
+    )
     production.add_argument(
         "--out", required=True, metavar="FILE", help="output verification report JSON file"
     )
     _add_aws_flags(production)
     production.set_defaults(func=verify.production, context_builder=build_context)
-    staging = sub.add_parser("staging", help="verify staging against a candidate")
-    staging.add_argument(
-        "--candidate", required=True, metavar="FILE", help="candidate manifest JSON file"
-    )
-    _add_aws_flags(staging)
-    staging.set_defaults(func=verify.staging, context_builder=build_context)
 
 
 def _add_finalize(subparsers: argparse._SubParsersAction) -> None:
@@ -796,6 +795,12 @@ def _add_retention(subparsers: argparse._SubParsersAction) -> None:
     apply.add_argument("--policy", metavar="FILE", help="lifecycle policy JSON file")
     apply.add_argument(
         "--reference-date", type=_iso_datetime, metavar="ISO", help="evaluation reference date"
+    )
+    apply.add_argument(
+        "--out",
+        metavar="FILE",
+        help="write the apply report JSON to FILE (a partial report is written "
+        "before re-raising when a repository put fails mid-loop)",
     )
     apply.add_argument(
         "--snapshot",

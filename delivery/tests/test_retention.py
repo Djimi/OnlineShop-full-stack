@@ -19,6 +19,7 @@ from fakes_production import (
     write_snapshot,
 )
 
+from delivery import live_marker
 from delivery import retention as engine
 from delivery.cli import main
 from delivery.errors import PolicyTagPrefixMulti
@@ -202,6 +203,19 @@ class ErrorEcr(FakeEcr):
         raise client_error("InternalError")
 
 
+class ErrorS3(FakeS3):
+    def __init__(self, error):
+        super().__init__()
+        self.error = error
+
+
+class FailItemsPutEcr(FakeEcr):
+    def put_lifecycle_policy(self, repositoryName, lifecyclePolicyText):
+        if repositoryName == REPOSITORIES["items"]:
+            raise client_error("InternalError")
+        return super().put_lifecycle_policy(repositoryName, lifecyclePolicyText)
+
+
 class RetentionEnv:
     def __init__(self, monkeypatch, tmp_path, current="release-0005"):
         self.monkeypatch = monkeypatch
@@ -297,9 +311,17 @@ class RetentionEnv:
             for key in ("auth", "items", "gateway"):
                 self.ecr.tags[(key, release_id)] = manifest["artifacts"][key]["digest"]
         if prefix:
-            self.s3.objects[f"_releases/{release_id}/release.json"] = json.dumps(
-                {"releaseId": release_id}
-            ).encode()
+            marker = live_marker.build_official_marker(
+                live_marker.build_candidate_marker(
+                    candidate_id=f"cand-{release_id}",
+                    source_sha="1" * 40,
+                    frontend_sha256="d" * 64,
+                ),
+                release_id,
+            )
+            self.s3.objects[f"_releases/{release_id}/release.json"] = (
+                live_marker.marker_document(marker).encode()
+            )
 
     def seed_window(self) -> None:
         for release_id in (
@@ -380,6 +402,63 @@ def test_audit_missing_frontend_prefix_fails_closed(env, capsys):
     entry = next(e for e in report["releases"] if e["releaseId"] == "release-0002")
     kinds = {failure["kind"] for failure in entry["failures"]}
     assert kinds == {"PREFIX_MARKER_NOT_FOUND"}
+
+
+def test_audit_prefix_marker_identity_equivalent_content_passes(env, capsys):
+    env.seed_window()
+    marker = live_marker.build_official_marker(
+        live_marker.build_candidate_marker(
+            candidate_id="cand-release-0004",
+            source_sha="1" * 40,
+            frontend_sha256="d" * 64,
+        ),
+        "release-0004",
+    )
+    env.s3.objects["_releases/release-0004/release.json"] = (
+        live_marker.marker_document(marker).encode()
+    )
+    assert main(env.argv("audit")) == 0
+    report = _report(capsys)
+    entry = next(e for e in report["releases"] if e["releaseId"] == "release-0004")
+    assert entry["complete"] is True
+
+
+def test_audit_prefix_marker_wrong_content_fails_closed(env, capsys):
+    env.seed_window()
+    wrong = live_marker.build_official_marker(
+        live_marker.build_candidate_marker(
+            candidate_id="cand-tampered",
+            source_sha="9" * 40,
+            frontend_sha256="e" * 64,
+        ),
+        "release-0003",
+    )
+    env.s3.objects["_releases/release-0003/release.json"] = (
+        live_marker.marker_document(wrong).encode()
+    )
+    assert main(env.argv("audit")) == 1
+    output = capsys.readouterr()
+    assert "ERROR WINDOW_INCOMPLETE" in output.err
+    report = json.loads(output.out)
+    entry = next(e for e in report["releases"] if e["releaseId"] == "release-0003")
+    kinds = {failure["kind"] for failure in entry["failures"]}
+    assert kinds == {"PREFIX_MARKER_MISMATCH"}
+
+
+def test_audit_prefix_marker_read_error_is_distinct(env, capsys, monkeypatch):
+    env.seed_window()
+    error_s3 = ErrorS3(client_error("InternalError"))
+    monkeypatch.setattr(
+        "delivery.aws.context.client_for",
+        lambda ctx, service: {"sts": env.sts, "ecr": env.ecr, "s3": error_s3}[service],
+    )
+    assert main(env.argv("audit")) == 1
+    output = capsys.readouterr()
+    assert "ERROR WINDOW_INCOMPLETE" in output.err
+    report = json.loads(output.out)
+    entry = next(e for e in report["releases"] if e["releaseId"] == "release-0005")
+    kinds = {failure["kind"] for failure in entry["failures"]}
+    assert kinds == {"READ_ERROR"}
 
 
 def test_audit_fingerprint_mismatch_fails_closed(env, capsys):
@@ -644,6 +723,57 @@ def test_apply_requires_complete_window(env, capsys, monkeypatch):
     assert main(env.argv("apply", "--apply")) == 1
     assert "ERROR WINDOW_INCOMPLETE" in capsys.readouterr().err
     assert env.ecr.lifecycle_put_calls == []
+
+
+def test_apply_rejects_reference_date(env, capsys, monkeypatch):
+    env.seed_window()
+    monkeypatch.setenv("DELIVERY_RETENTION_LIVE_APPLY", "1")
+    assert (
+        main(env.argv("apply", "--apply", "--reference-date", "2026-08-01T00:00:00Z"))
+        == 1
+    )
+    output = capsys.readouterr()
+    assert "ERROR VALIDATION" in output.err
+    assert "--reference-date" in output.err
+    assert env.ecr.lifecycle_put_calls == []
+
+
+def test_apply_dry_run_reference_date_reaches_preview(env, capsys, monkeypatch):
+    env.seed_window()
+    monkeypatch.delenv("DELIVERY_RETENTION_LIVE_APPLY", raising=False)
+    assert (
+        main(env.argv("apply", "--dry-run", "--reference-date", "2026-08-01T00:00:00Z"))
+        == 0
+    )
+    report = _report(capsys)
+    assert report["referenceDate"] == "2026-08-01T00:00:00Z"
+    assert env.ecr.lifecycle_put_calls == []
+
+
+def test_apply_mid_loop_failure_writes_partial_report(env, capsys, monkeypatch):
+    env.seed_window()
+    monkeypatch.setenv("DELIVERY_RETENTION_LIVE_APPLY", "1")
+    failing_ecr = FailItemsPutEcr(digests=DIGESTS)
+    failing_ecr.tags = dict(env.ecr.tags)
+    monkeypatch.setattr(
+        "delivery.aws.context.client_for",
+        lambda ctx, service: {"sts": env.sts, "ecr": failing_ecr, "s3": env.s3}[service],
+    )
+    out = env.tmp_path / "apply-report.json"
+    assert main(env.argv("apply", "--apply", "--out", str(out))) == 1
+    assert "ERROR READ_ERROR" in capsys.readouterr().err
+    assert out.exists()
+    report = json.loads(out.read_text())
+    by_repo = {entry["repository"]: entry for entry in report["repositories"]}
+    assert sorted(by_repo) == sorted([REPOSITORIES["auth"], REPOSITORIES["items"]])
+    assert by_repo[REPOSITORIES["auth"]]["action"] == "put"
+    assert by_repo[REPOSITORIES["auth"]]["readBackVerified"] is True
+    assert by_repo[REPOSITORIES["items"]]["action"] == "failed"
+    assert by_repo[REPOSITORIES["items"]]["failureDetail"]
+    assert report["preAuditWindowComplete"] is True
+    assert failing_ecr.lifecycle_put_calls == [REPOSITORIES["auth"]]
+    # the first repository put really happened: its policy was stored
+    assert failing_ecr.lifecycle_policies[REPOSITORIES["auth"]] == _desired_text()
 
 
 # env fixture -----------------------------------------------------------

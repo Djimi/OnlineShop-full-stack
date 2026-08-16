@@ -25,6 +25,7 @@ from fakes_production import (
     write_snapshot,
 )
 
+from delivery import live_marker
 from delivery.cli import main
 from delivery.live_marker import LiveMarker, marker_document
 
@@ -235,6 +236,70 @@ def env(monkeypatch, tmp_path):
     return FinalizeEnv(monkeypatch, tmp_path)
 
 
+def _previous_manifest() -> dict:
+    return {
+        "schemaVersion": "1.0",
+        "releaseId": "release-0001",
+        "candidateId": "cand-old",
+        "source": {"fullSha": "1" * 40, "branch": "main"},
+        "previousReleaseId": None,
+        "promotedAt": "2026-08-15T10:00:00Z",
+        "requester": "owner",
+        "approval": {"evidence": "env", "workflowUrl": "https://github.com/x/y"},
+        "artifacts": {
+            "auth": {"repository": "onlineshop-auth", "digest": f"sha256:{'a' * 64}"},
+            "items": {"repository": "onlineshop-items", "digest": f"sha256:{'b' * 64}"},
+            "gateway": {"repository": "onlineshop-api-gateway", "digest": f"sha256:{'c' * 64}"},
+            "frontend": {"immutableIdentity": "_releases/release-0001/", "checksum": "d" * 64},
+            "sbom": {
+                component: {"assetName": f"{component}.spdx.json", "sha256": "e" * 64}
+                for component in ("auth", "items", "gateway", "frontend")
+            },
+        },
+        "compatibilityFingerprint": "f" * 64,
+        "staging": {"evidenceIdentity": "staging-record-1-1", "conclusion": "passed"},
+        "productionVerification": {"evidenceIdentity": "vrf-1", "conclusion": "passed"},
+        "rollbackCapableAtPublication": True,
+    }
+
+
+def _previous_marker_doc() -> str:
+    return marker_document(
+        live_marker.build_official_marker(
+            live_marker.build_candidate_marker(
+                candidate_id="cand-old",
+                source_sha="1" * 40,
+                frontend_sha256="d" * 64,
+            ),
+            "release-0001",
+        )
+    )
+
+
+def _seed_previous_release(
+    env, *, marker_doc: str | None = None, ecr_tags: bool = True
+) -> dict:
+    manifest = _previous_manifest()
+    asset_url = "https://example.com/assets/release-0001-release-manifest.json"
+    env.github.releases = [
+        {
+            "tag_name": "release-0001",
+            "id": 1,
+            "assets": [{"name": "release-manifest.json", "url": asset_url}],
+        }
+    ]
+    env.github._assets["asset://release-0001-release-manifest.json"] = (
+        json.dumps(manifest).encode()
+    )
+    if ecr_tags:
+        for key in ("auth", "items", "gateway"):
+            env.ecr.tags[(key, "release-0001")] = manifest["artifacts"][key]["digest"]
+    env.s3.objects["_releases/release-0001/release.json"] = (
+        _previous_marker_doc() if marker_doc is None else marker_doc
+    ).encode()
+    return manifest
+
+
 def test_finalize_full_sequence(env, capsys):
     code = main(env.argv())
     assert code == 0, capsys.readouterr().err
@@ -351,41 +416,8 @@ def test_finalize_incomplete_previous_window_fails_after_publication(env, capsys
     env.provisional = "release-0002"
     env._populate_prefix()
     env.s3.objects[env.ids["frontendLiveMarker"]] = env.candidate_marker_doc.encode()
-    previous_manifest = {
-        "schemaVersion": "1.0",
-        "releaseId": "release-0001",
-        "candidateId": "cand-old",
-        "source": {"fullSha": "1" * 40, "branch": "main"},
-        "previousReleaseId": None,
-        "promotedAt": "2026-08-15T10:00:00Z",
-        "requester": "owner",
-        "approval": {"evidence": "env", "workflowUrl": "https://github.com/x/y"},
-        "artifacts": {
-            "auth": {"repository": "onlineshop-auth", "digest": f"sha256:{'a' * 64}"},
-            "items": {"repository": "onlineshop-items", "digest": f"sha256:{'b' * 64}"},
-            "gateway": {"repository": "onlineshop-api-gateway", "digest": f"sha256:{'c' * 64}"},
-            "frontend": {"immutableIdentity": "_releases/release-0001/", "checksum": "d" * 64},
-            "sbom": {
-                component: {"assetName": f"{component}.spdx.json", "sha256": "e" * 64}
-                for component in ("auth", "items", "gateway", "frontend")
-            },
-        },
-        "compatibilityFingerprint": "f" * 64,
-        "staging": {"evidenceIdentity": "staging-record-1-1", "conclusion": "passed"},
-        "productionVerification": {"evidenceIdentity": "vrf-1", "conclusion": "passed"},
-        "rollbackCapableAtPublication": True,
-    }
-    env.github.releases = [
-        {
-            "tag_name": "release-0001",
-            "id": 1,
-            "assets": [
-                {"name": "release-manifest.json", "url": "https://example.com/assets/release-manifest.json"}
-            ],
-        }
-    ]
-    env.github._assets["asset://release-manifest.json"] = json.dumps(previous_manifest).encode()
     # the previous release's ECR tags are missing -> incomplete window
+    _seed_previous_release(env, ecr_tags=False)
     code = main(env.argv())
     assert code == 1
     err = capsys.readouterr().err
@@ -402,44 +434,9 @@ def test_finalize_previous_release_window_complete(env, capsys):
     env.provisional = "release-0002"
     env._populate_prefix()
     env.s3.objects[env.ids["frontendLiveMarker"]] = env.candidate_marker_doc.encode()
-    previous_manifest = {
-        "schemaVersion": "1.0",
-        "releaseId": "release-0001",
-        "candidateId": "cand-old",
-        "source": {"fullSha": "1" * 40, "branch": "main"},
-        "previousReleaseId": None,
-        "promotedAt": "2026-08-15T10:00:00Z",
-        "requester": "owner",
-        "approval": {"evidence": "env", "workflowUrl": "https://github.com/x/y"},
-        "artifacts": {
-            "auth": {"repository": "onlineshop-auth", "digest": f"sha256:{'a' * 64}"},
-            "items": {"repository": "onlineshop-items", "digest": f"sha256:{'b' * 64}"},
-            "gateway": {"repository": "onlineshop-api-gateway", "digest": f"sha256:{'c' * 64}"},
-            "frontend": {"immutableIdentity": "_releases/release-0001/", "checksum": "d" * 64},
-            "sbom": {
-                component: {"assetName": f"{component}.spdx.json", "sha256": "e" * 64}
-                for component in ("auth", "items", "gateway", "frontend")
-            },
-        },
-        "compatibilityFingerprint": "f" * 64,
-        "staging": {"evidenceIdentity": "staging-record-1-1", "conclusion": "passed"},
-        "productionVerification": {"evidenceIdentity": "vrf-1", "conclusion": "passed"},
-        "rollbackCapableAtPublication": True,
-    }
-    env.github.releases = [
-        {
-            "tag_name": "release-0001",
-            "id": 1,
-            "assets": [
-                {"name": "release-manifest.json", "url": "https://example.com/assets/release-manifest.json"}
-            ],
-        }
-    ]
-    env.github._assets["asset://release-manifest.json"] = json.dumps(previous_manifest).encode()
-    # previous ECR tags resolve + prefix marker exists
-    for key in ("auth", "items", "gateway"):
-        env.ecr.tags[(key, "release-0001")] = previous_manifest["artifacts"][key]["digest"]
-    env.s3.objects["_releases/release-0001/release.json"] = b'{"releaseId":"release-0001"}'
+    # previous ECR tags resolve + the prefix marker is identity-equivalent
+    # to the manifest-derived official marker -> strong audit passes
+    _seed_previous_release(env)
     code = main(env.argv())
     assert code == 0, capsys.readouterr().err
     report = env.report()
@@ -448,6 +445,37 @@ def test_finalize_previous_release_window_complete(env, capsys):
         "release-0002",
         "release-0001",
     ]
+
+
+def test_finalize_previous_release_with_wrong_prefix_marker_fails_at_publication(
+    env, capsys
+):
+    env.provisional = "release-0002"
+    env._populate_prefix()
+    env.s3.objects[env.ids["frontendLiveMarker"]] = env.candidate_marker_doc.encode()
+    # a wrong-content marker previously passed the existence-only check; the
+    # strong shared audit now fails closed at publication time
+    wrong = marker_document(
+        live_marker.build_official_marker(
+            live_marker.build_candidate_marker(
+                candidate_id="cand-tampered",
+                source_sha="9" * 40,
+                frontend_sha256="e" * 64,
+            ),
+            "release-0001",
+        )
+    )
+    _seed_previous_release(env, marker_doc=wrong)
+    code = main(env.argv())
+    assert code == 1
+    err = capsys.readouterr().err
+    assert "incomplete at publication time" in err
+    # the release itself WAS published (honest failure, evidence preserved)
+    assert env.github.created_releases == ["release-0002"]
+    report = env.report()
+    assert report["rollbackCapableAtPublication"] is False
+    assert report["window"][1]["complete"] is False
+    assert "PREFIX_MARKER_MISMATCH" in report["window"][1]["detail"]
 
 
 def test_finalize_dry_run_mutates_nothing(env, capsys):
@@ -553,3 +581,25 @@ def test_finalize_manifest_write_failure_never_publishes(env, capsys):
     code = main(env.argv())
     assert code == 0, capsys.readouterr().err
     assert env.github.created_releases == ["release-0001"]
+
+
+def test_finalize_invalid_produced_report_fails_before_write(env, capsys):
+    from delivery.commands import finalize as finalize_module
+    from delivery.models import FinalizationReport
+
+    captured = {}
+
+    def rejecting_validate(record):
+        if isinstance(record, FinalizationReport):
+            captured["record"] = record
+            return ["crafted: steps must be non-empty"]
+        return []
+
+    env.monkeypatch.setattr(finalize_module, "validate_record", rejecting_validate)
+    code = main(env.argv())
+    assert code == 1
+    assert isinstance(captured["record"], FinalizationReport)
+    err = capsys.readouterr().err
+    assert "ERROR VALIDATION" in err
+    assert "produced finalization report is invalid" in err
+    assert not (env.tmp_path / "finalize-report.json").exists()

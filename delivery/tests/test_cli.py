@@ -86,7 +86,6 @@ MISSING_ARGS_CASES = [
     ["deploy", "frontend"],
     ["verify"],
     ["verify", "production"],
-    ["verify", "staging"],
     ["finalize"],
     ["recover"],
     ["rollback"],
@@ -96,10 +95,6 @@ MISSING_ARGS_CASES = [
     ["retention", "audit"],
     ["retention", "preview"],
     ["retention", "apply"],
-]
-
-NOT_IMPLEMENTED_CASES = [
-    (["verify", "staging"], ["--candidate", "cand.json"]),
 ]
 
 AWS_FLAGS = ["--environment", "production", "--identifiers", "identifiers.json"]
@@ -230,12 +225,6 @@ def test_missing_required_args_exit_usage(capsys, command):
     assert main(command) == 2
 
 
-@pytest.mark.parametrize("command,flags", NOT_IMPLEMENTED_CASES)
-def test_not_implemented_commands_fail_closed(capsys, command, flags):
-    assert main(list(command) + flags + AWS_FLAGS) == 1
-    assert "ERROR NOT_IMPLEMENTED" in capsys.readouterr().err
-
-
 @pytest.mark.parametrize(
     "value",
     ["1.2.3", "release-12", "release-12345", "release-abc", "release-", "main", "sha256:abc"],
@@ -250,6 +239,25 @@ def test_retention_apply_requires_mode(capsys):
 
 def test_retention_preview_rejects_bad_reference_date(capsys):
     assert main(["retention", "preview", "--reference-date", "not-a-date", *AWS_FLAGS]) == 2
+
+
+def test_retention_apply_rejects_reference_date(capsys):
+    code = main(
+        [
+            "retention",
+            "apply",
+            "--apply",
+            "--reference-date",
+            "2026-08-15T10:00:00Z",
+            "--snapshot",
+            "snap.json",
+            *AWS_FLAGS,
+        ]
+    )
+    assert code == 1
+    err = capsys.readouterr().err
+    assert "ERROR VALIDATION" in err
+    assert "--reference-date" in err
 
 
 @pytest.mark.parametrize(

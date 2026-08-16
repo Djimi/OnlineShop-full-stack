@@ -334,3 +334,118 @@ def test_compensate_build_changed_never_includes_ambiguous_components(tmp_path: 
     assert result.returncode == 0, result.stdout + result.stderr
     changed = json.loads((tmp_path / "changed.json").read_text())
     assert changed == ["auth", "items"]
+
+
+# ---------------------------------------------------------------------------
+# Phase 6 compensation outcome report + post-recovery verification (F2)
+# ---------------------------------------------------------------------------
+
+# the report script embeds GitHub template expressions; substitute trusted
+# values before executing it locally (the expressions are resolved by GitHub,
+# never by the shell)
+REPORT_SCRIPT = (
+    _named_step(
+        WORKFLOW,
+        "Report the original failure and the recovery outcome",
+        job_name="compensate",
+    )["run"]
+    .replace("${{ needs.rollback.result }}", "failure")
+    .replace("${{ github.run_id }}", "4713")
+)
+
+VERIFY_SCRIPT = _named_step(
+    WORKFLOW,
+    "Verify the restored production state read-only",
+    job_name="compensate",
+)["run"]
+
+
+def test_report_step_prints_both_outcomes_on_success(tmp_path: Path) -> None:
+    (tmp_path / "recovery-result.json").write_text(
+        json.dumps({"outcome": "completed", "components": [], "originalFailure": "x"})
+    )
+    (tmp_path / "recovery-verification.json").write_text(
+        json.dumps({"conclusion": "passed"})
+    )
+    result = _bash(REPORT_SCRIPT, cwd=tmp_path)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "ORIGINAL FAILURE" in result.stdout
+    assert "VERIFICATION OUTCOME: passed" in result.stdout
+    assert "RECOVERY OUTCOME" in result.stdout
+
+
+def test_report_step_fails_when_recovery_failed(tmp_path: Path) -> None:
+    (tmp_path / "recovery-result.json").write_text(
+        json.dumps(
+            {
+                "outcome": "failed",
+                "components": [],
+                "originalFailure": "rollback failed",
+                "failureDetail": "READ_ERROR: boom",
+            }
+        )
+    )
+    result = _bash(REPORT_SCRIPT, cwd=tmp_path)
+    assert result.returncode == 1
+    assert "ORIGINAL FAILURE" in result.stdout
+    assert "UNRESOLVED" in result.stderr
+    assert "READ_ERROR: boom" in result.stderr
+
+
+def test_report_step_fails_when_no_result_exists(tmp_path: Path) -> None:
+    result = _bash(REPORT_SCRIPT, cwd=tmp_path)
+    assert result.returncode == 1
+    assert "UNRESOLVED" in result.stderr
+
+
+def test_report_step_fails_when_verification_missing(tmp_path: Path) -> None:
+    (tmp_path / "recovery-result.json").write_text(
+        json.dumps({"outcome": "completed", "components": [], "originalFailure": "x"})
+    )
+    result = _bash(REPORT_SCRIPT, cwd=tmp_path)
+    assert result.returncode == 1
+    assert "post-recovery verification produced no report" in result.stderr
+    assert "NOT confirmed" in result.stderr
+
+
+def test_report_step_fails_when_verification_failed(tmp_path: Path) -> None:
+    (tmp_path / "recovery-result.json").write_text(
+        json.dumps({"outcome": "completed", "components": [], "originalFailure": "x"})
+    )
+    (tmp_path / "recovery-verification.json").write_text(
+        json.dumps({"conclusion": "failed"})
+    )
+    result = _bash(REPORT_SCRIPT, cwd=tmp_path)
+    assert result.returncode == 1
+    assert "post-recovery verification FAILED" in result.stderr
+    assert "NOT confirmed" in result.stderr
+
+
+def test_verify_step_runs_production_verification_against_the_snapshot(
+    tmp_path: Path,
+) -> None:
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    argv_file = tmp_path / "python-argv.txt"
+    shim = bin_dir / "python"
+    shim.write_text(
+        "#!/usr/bin/env bash\n"
+        "set -euo pipefail\n"
+        'printf "%s\\n" "$@" > "$SHIM_ARGS"\n'
+    )
+    shim.chmod(0o755)
+    result = _bash(
+        VERIFY_SCRIPT,
+        {"PATH": f"{bin_dir}:{os.environ['PATH']}", "SHIM_ARGS": str(argv_file)},
+        cwd=tmp_path,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    argv = argv_file.read_text().splitlines()
+    assert argv[0] == "-m"
+    assert argv[1] == "delivery.cli"
+    assert argv[2] == "verify"
+    assert argv[3] == "production"
+    assert "--snapshot" in argv
+    assert argv[argv.index("--snapshot") + 1] == "rollback-snapshot/production-snapshot.json"
+    assert "--out" in argv
+    assert argv[argv.index("--out") + 1] == "recovery-verification.json"

@@ -67,6 +67,7 @@ from ..serialization import canonical_json, sha256_hex
 from ..serving import _fetch
 from ..validation import validate as validate_record
 from ..validation import validate_release_against_candidate
+from .retention import audit_entry
 
 _SERVICE_KEYS = ("auth", "items", "gateway")
 _SBOM_FILES = {
@@ -116,12 +117,11 @@ def finalize(args: argparse.Namespace) -> int:
         _mint_ecr_tags(ecr_client, ids, candidate, release_id, dry_run=args.dry_run)
     )
     steps.append(_protect_frontend(ctx, ids, prefix, candidate_marker))
-    previous_releases = _window_previous_releases(api, release_id)
     if args.dry_run:
         pre_window_complete, _window = False, []
     else:
         pre_window_complete, _window = _window_audit(
-            ctx, ids, api, previous_releases, release_id, candidate
+            ctx, ids, api, api.list_releases(), release_id, candidate, snapshot
         )
     intended = _build_manifest(
         candidate=candidate,
@@ -164,8 +164,7 @@ def finalize(args: argparse.Namespace) -> int:
     steps.append(_switch_official_marker(ctx, ids, prefix, official_marker))
     steps.append(_publish_release(api, release_id, intended, intended_bytes, sboms, candidate))
     post_window_complete, post_window = _window_audit(
-        ctx, ids, api, _window_previous_releases(api, release_id),
-        release_id, candidate,
+        ctx, ids, api, api.list_releases(), release_id, candidate, snapshot
     )
     steps.append(
         FinalizationStep(
@@ -183,6 +182,7 @@ def finalize(args: argparse.Namespace) -> int:
         rollbackCapableAtPublication=post_window_complete,
         window=post_window,
     )
+    _fail_invalid_record(report, "finalization report")
     write_json(args.out, report)
     print(f"finalize: {release_id} published; report written to {args.out}")
     if not post_window_complete:
@@ -196,6 +196,12 @@ def finalize(args: argparse.Namespace) -> int:
 # ---------------------------------------------------------------------------
 # input validation
 # ---------------------------------------------------------------------------
+
+
+def _fail_invalid_record(record, label: str) -> None:
+    errors = validate_record(record)
+    if errors:
+        raise ValidationError(f"produced {label} is invalid: {'; '.join(errors)}")
 
 
 def _validated_staging_gate(args, candidate) -> StagingOperationRecord:
@@ -452,40 +458,56 @@ def _build_manifest(
     )
 
 
-def _window_previous_releases(api: GitHubApi, release_id: str) -> list[dict]:
-    releases = api.list_releases()
-    official = [
+def _window_audit(
+    ctx,
+    ids: dict,
+    api: GitHubApi,
+    releases: list[dict],
+    release_id: str,
+    candidate,
+    snapshot,
+) -> tuple[bool, list[RollbackWindowEntry]]:
+    """Read-only rollback-window audit (OP-RET-01).
+
+    ``current`` (the release being finalized) is complete when its ECR tags
+    and immutable frontend prefix exist — a bespoke check because the release
+    being published has no GitHub Release yet. Each previous release reuses
+    ``retention.audit_entry`` with prefix-marker content verification: the
+    same strong shared audit the retention command and the rollback preflight
+    use (manifest asset parses and validates, its id matches the tag, its
+    fingerprint matches the snapshot, its three ECR ``release-*`` tags resolve
+    to the manifest digests, and the immutable prefix marker is
+    identity-equivalent to the manifest-derived official marker). Full
+    retention policy enforcement is Phase 6; this audit only proves the
+    window is complete at publication.
+    """
+    entries: list[RollbackWindowEntry] = []
+    current_complete = _current_window_entry(ctx, ids, release_id, candidate)
+    entries.append(current_complete)
+    previous = [
         release
         for release in releases
         if re.fullmatch(r"release-\d{4}", release["tag_name"])
         and release["tag_name"] != release_id
     ]
-    official.sort(key=lambda release: release["tag_name"], reverse=True)
-    return official[:3]
-
-
-def _window_audit(
-    ctx,
-    ids: dict,
-    api: GitHubApi,
-    previous_releases: list[dict],
-    release_id: str,
-    candidate,
-) -> tuple[bool, list[RollbackWindowEntry]]:
-    """Read-only rollback-window audit (OP-RET-01, Phase 5 scope).
-
-    ``current`` (the release being finalized) is complete when its ECR tags
-    and immutable frontend prefix exist. Each previous release is complete
-    when its manifest asset parses and validates AND its three ECR
-    ``release-*`` tags resolve to the manifest digests AND its immutable
-    frontend prefix marker exists. Full retention policy enforcement is
-    Phase 6; this audit only proves the window is complete at publication.
-    """
-    entries: list[RollbackWindowEntry] = []
-    current_complete = _current_window_entry(ctx, ids, release_id, candidate)
-    entries.append(current_complete)
-    for release in previous_releases:
-        entries.append(_previous_window_entry(ctx, ids, api, release["tag_name"]))
+    previous.sort(key=lambda release: release["tag_name"], reverse=True)
+    for release in previous[:3]:
+        strong = audit_entry(
+            ctx,
+            ids,
+            api,
+            release["tag_name"],
+            snapshot,
+            releases,
+            verify_marker_content=True,
+        )
+        entries.append(
+            RollbackWindowEntry(
+                releaseId=strong.releaseId,
+                complete=strong.complete,
+                detail=strong.detail,
+            )
+        )
     return all(entry.complete for entry in entries), entries
 
 
@@ -514,56 +536,6 @@ def _current_window_entry(ctx, ids, release_id, candidate) -> RollbackWindowEntr
         releaseId=release_id,
         complete=not failures,
         detail="; ".join(failures) if failures else "current release bytes verified",
-    )
-
-
-def _previous_window_entry(ctx, ids, api: GitHubApi, release_id: str) -> RollbackWindowEntry:
-    failures: list[str] = []
-    releases = [release for release in api.list_releases() if release["tag_name"] == release_id]
-    if not releases:
-        return RollbackWindowEntry(
-            releaseId=release_id, complete=False, detail="GitHub Release not found"
-        )
-    assets = {asset["name"]: asset["url"] for asset in releases[0]["assets"]}
-    if _MANIFEST_ASSET not in assets:
-        return RollbackWindowEntry(
-            releaseId=release_id, complete=False, detail="release manifest asset missing"
-        )
-    try:
-        manifest_raw = api.download_asset(assets[_MANIFEST_ASSET]).decode("utf-8")
-        manifest = ReleaseManifest.model_validate(json.loads(manifest_raw))
-    except (UnicodeDecodeError, json.JSONDecodeError, PydanticValidationError) as error:
-        return RollbackWindowEntry(
-            releaseId=release_id, complete=False, detail=f"manifest unreadable: {error}"
-        )
-    errors = validate_record(manifest)
-    if errors:
-        return RollbackWindowEntry(
-            releaseId=release_id, complete=False, detail="; ".join(errors)
-        )
-    ecr_client = aws_context.client_for(ctx, "ecr")
-    for key in _SERVICE_KEYS:
-        repository = ids["ecrRepositories"][key]
-        expected = getattr(manifest.artifacts, key).digest
-        try:
-            observed = ecr_client.batch_get_image(
-                repositoryName=repository, imageIds=[{"imageTag": release_id}]
-            )
-            images = observed.get("images") or []
-            if not images or images[0].get("imageDigest") != expected:
-                failures.append(f"ECR tag {repository}:{release_id} mismatch")
-        except ClientError as error:
-            failures.append(f"ECR read error for {repository}:{release_id}: {error}")
-    s3_client = aws_context.client_for(ctx, "s3")
-    prefix = f"{ids['frontendReleasesPrefix']}{release_id}/"
-    try:
-        s3_client.head_object(Bucket=ids["frontendBucket"], Key=f"{prefix}{_PREFIX_MARKER}")
-    except ClientError as error:
-        failures.append(f"frontend prefix marker missing for {release_id}: {error}")
-    return RollbackWindowEntry(
-        releaseId=release_id,
-        complete=not failures,
-        detail="; ".join(failures) if failures else "complete release verified",
     )
 
 

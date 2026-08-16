@@ -7,8 +7,12 @@ from delivery.models import (
     CandidateArtifacts,
     CandidateManifest,
     EvidenceRecord,
+    FinalizationReport,
     ProductionSnapshot,
     ReleaseManifest,
+    RetentionApplyReport,
+    RetentionAuditReport,
+    RetentionPreviewReport,
     RollbackResult,
     StagingOperationRecord,
 )
@@ -374,3 +378,180 @@ def test_evidence_requires_positive_run_identity():
     errors = validate(record)
     assert any("workflowRunId" in error for error in errors)
     assert any("workflowRunAttempt" in error for error in errors)
+
+
+def _audit_report() -> RetentionAuditReport:
+    return RetentionAuditReport.model_validate(
+        {
+            "schemaVersion": "1.0",
+            "reportId": "ret-1",
+            "producedAt": "2026-08-16T10:00:00Z",
+            "environment": "production",
+            "currentReleaseId": "release-0002",
+            "currentFingerprint": "f" * 64,
+            "windowComplete": True,
+            "releases": [
+                {
+                    "releaseId": "release-0002",
+                    "inWindow": True,
+                    "complete": True,
+                    "detail": "verified",
+                }
+            ],
+        }
+    )
+
+
+def test_retention_audit_report_passes_validation():
+    assert validate(_audit_report()) == []
+
+
+def test_retention_audit_window_complete_must_match_entries():
+    record = _audit_report()
+    record.releases[0].complete = False
+    errors = validate(record)
+    assert any("windowComplete" in error for error in errors)
+
+
+def test_retention_audit_current_release_must_be_in_window():
+    record = _audit_report()
+    record.currentReleaseId = "release-0003"
+    errors = validate(record)
+    assert any("currentReleaseId" in error for error in errors)
+
+
+def _preview_report() -> RetentionPreviewReport:
+    return RetentionPreviewReport.model_validate(
+        {
+            "schemaVersion": "1.0",
+            "reportId": "ret-1",
+            "producedAt": "2026-08-16T10:00:00Z",
+            "environment": "production",
+            "policyKind": "desired",
+            "referenceDate": "2026-08-16T10:00:00Z",
+            "windowComplete": True,
+            "protectedReleases": ["release-0002"],
+            "repositories": [
+                {
+                    "repository": "onlineshop-auth",
+                    "kind": "modeled",
+                    "reason": "no policy applied",
+                    "protectedTags": ["release-0002"],
+                }
+            ],
+        }
+    )
+
+
+def test_retention_preview_report_passes_validation():
+    assert validate(_preview_report()) == []
+
+
+def test_retention_preview_requires_complete_window():
+    record = _preview_report()
+    record.windowComplete = False
+    errors = validate(record)
+    assert any("complete rollback window" in error for error in errors)
+
+
+def test_retention_preview_requires_protected_releases():
+    record = _preview_report()
+    record.protectedReleases = []
+    errors = validate(record)
+    assert any("protectedReleases" in error for error in errors)
+
+
+def _apply_report() -> RetentionApplyReport:
+    return RetentionApplyReport.model_validate(
+        {
+            "schemaVersion": "1.0",
+            "reportId": "ret-1",
+            "producedAt": "2026-08-16T10:00:00Z",
+            "environment": "production",
+            "policyKind": "desired",
+            "repositories": [
+                {"repository": "onlineshop-auth", "action": "put", "readBackVerified": True}
+            ],
+            "preAuditWindowComplete": True,
+            "postAuditWindowComplete": True,
+        }
+    )
+
+
+def test_retention_apply_report_passes_validation():
+    assert validate(_apply_report()) == []
+
+
+def test_retention_apply_failed_repo_requires_failure_detail():
+    record = _apply_report()
+    record.repositories[0].action = "failed"
+    record.repositories[0].readBackVerified = False
+    errors = validate(record)
+    assert any("failureDetail" in error for error in errors)
+
+
+def test_retention_apply_non_failed_repo_requires_read_back():
+    record = _apply_report()
+    record.repositories[0].readBackVerified = False
+    errors = validate(record)
+    assert any("read-back verified" in error for error in errors)
+
+
+def _finalization_report() -> FinalizationReport:
+    return FinalizationReport.model_validate(
+        {
+            "schemaVersion": "1.0",
+            "reportId": "fin-1",
+            "producedAt": "2026-08-16T10:00:00Z",
+            "releaseId": "release-0001",
+            "resumed": False,
+            "steps": [
+                {"name": "ecr-release-tags", "action": "created", "conclusion": "ok"},
+                {"name": "github-release", "action": "created", "conclusion": "ok"},
+            ],
+            "rollbackCapableAtPublication": True,
+            "window": [
+                {"releaseId": "release-0001", "complete": True, "detail": "verified"}
+            ],
+        }
+    )
+
+
+def test_finalization_report_passes_validation():
+    assert validate(_finalization_report()) == []
+
+
+def test_finalization_report_requires_steps():
+    record = _finalization_report()
+    record.steps = []
+    errors = validate(record)
+    assert any("steps must be non-empty" in error for error in errors)
+
+
+def test_finalization_report_requires_window():
+    record = _finalization_report()
+    record.window = []
+    errors = validate(record)
+    assert any("window must contain" in error for error in errors)
+
+
+def test_finalization_report_rollback_capable_must_match_window():
+    record = _finalization_report()
+    record.window[0].complete = False
+    errors = validate(record)
+    assert any("rollbackCapableAtPublication must match" in error for error in errors)
+
+
+def test_finalization_report_failed_step_requires_conclusion():
+    record = _finalization_report()
+    record.steps[0].action = "failed"
+    record.steps[0].conclusion = ""
+    errors = validate(record)
+    assert any("must carry a conclusion when failed" in error for error in errors)
+
+
+def test_finalization_report_release_id_pattern():
+    record = _finalization_report()
+    record.releaseId = "release-00001"
+    errors = validate(record)
+    assert any("releaseId must match release-NNNN" in error for error in errors)

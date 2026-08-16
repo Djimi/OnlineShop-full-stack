@@ -1,8 +1,9 @@
 """verify production: read-only CT-PROD-01..04 verification (OP-DEP-04).
 
 Verifies the observed production state against an expected identity set —
-either an official release manifest (post-finalization, rollback, recovery)
-or a candidate manifest (post-deployment, pre-finalization):
+an official release manifest (post-finalization, rollback, recovery), a
+candidate manifest (post-deployment, pre-finalization), or a pre-mutation
+production snapshot (post-compensation, OP-REC-02):
 
 - every backend service: PRIMARY deployment health plus observed running-task
   digests equal to the expected digest (never task-definition text alone);
@@ -32,25 +33,26 @@ from ..aws import (
     running_digests,
 )
 from ..aws.waiters import bounded_waiter
-from ..errors import NotImplementedPhaseError, ReadError, ValidationError
+from ..errors import AmbiguousStateError, ReadError, ValidationError
 from ..models import (
     CandidateManifest,
     ReleaseManifest,
     VerificationJourney,
     VerificationReport,
 )
-from ..records import load_candidate, load_release_manifest, read_s3_text, write_json
+from ..records import (
+    load_candidate,
+    load_release_manifest,
+    load_snapshot,
+    read_s3_text,
+    write_json,
+)
 from ..serialization import sha256_hex
 from ..serving import _fetch
 
 _SERVICE_KEYS = ("auth", "items", "gateway")
 _PUBLIC_MARKER_TIMEOUT = 240
 _FRONTEND_INDEX_TIMEOUT = 60
-
-
-def staging(args: argparse.Namespace) -> int:
-    """Verify staging against a candidate (not implemented until phase 6)."""
-    raise NotImplementedPhaseError("verify staging: implemented in phase 6")
 
 
 class _Expected:
@@ -166,7 +168,53 @@ def _load_expected(args: argparse.Namespace) -> _Expected:
             },
             marker=marker,
         )
-    raise ValidationError("exactly one of --manifest or --candidate is required")
+    if (
+        args.snapshot is not None
+        and args.manifest is None
+        and args.candidate is None
+    ):
+        return _expected_from_snapshot(args)
+    raise ValidationError(
+        "exactly one of --manifest, --candidate, or --snapshot is required"
+    )
+
+
+def _expected_from_snapshot(args: argparse.Namespace) -> _Expected:
+    """Expected identity from the pre-mutation snapshot (post-compensation).
+
+    Digests come from the snapshot's recorded running digests (exactly one
+    per service — an ambiguous snapshot fails closed) and the marker is the
+    snapshot's recorded frontend identity, whose recorded checksum must
+    match the marker bytes.
+    """
+    snapshot = load_snapshot(args.snapshot, require_environment="production")
+    digests: dict[str, str] = {}
+    for key in _SERVICE_KEYS:
+        if key not in snapshot.services:
+            raise AmbiguousStateError(
+                f"snapshot has no observation for service {key}; cannot verify "
+                "production against an incomplete snapshot"
+            )
+        running = snapshot.services[key].runningDigests
+        if len(running) != 1:
+            raise AmbiguousStateError(
+                f"snapshot service {key} records {len(running)} running digests; "
+                "cannot verify production against an ambiguous snapshot"
+            )
+        digests[key] = running[0]
+    identity = snapshot.frontend.immutableIdentity
+    marker = live_marker.parse_live_marker(identity)
+    if marker is None:
+        raise AmbiguousStateError(
+            "snapshot frontend immutableIdentity is not a live marker document; "
+            "cannot verify production against an inconsistent snapshot"
+        )
+    if sha256_hex(identity.encode()) != snapshot.frontend.checksum:
+        raise AmbiguousStateError(
+            "snapshot frontend identity checksum does not match the recorded marker "
+            "bytes; the snapshot is inconsistent"
+        )
+    return _Expected(digests=digests, marker=marker)
 
 
 def _verify_frontend(ctx, ids: dict, expected: _Expected) -> tuple[dict, list[str]]:

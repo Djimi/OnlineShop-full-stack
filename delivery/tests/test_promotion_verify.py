@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import pytest
 from conftest import client_error
@@ -19,6 +20,7 @@ from fakes_production import (
     make_frontend_archive,
     production_identifiers,
     write_identifiers,
+    write_snapshot,
 )
 
 from delivery.cli import main
@@ -120,6 +122,31 @@ class VerifyEnv:
 
     def report(self) -> dict:
         return json.loads((self.tmp_path / "verification-report.json").read_text())
+
+    def snapshot_file(self, *, digests=None, marker_doc=None, release_id=None) -> str:
+        return str(
+            write_snapshot(
+                self.tmp_path,
+                self.ids,
+                digests=digests or DIGESTS,
+                marker_doc=marker_doc or self.marker_doc,
+                release_id=release_id,
+            )
+        )
+
+    def snapshot_argv(self, snapshot: str) -> list[str]:
+        return [
+            "verify",
+            "production",
+            "--snapshot",
+            snapshot,
+            "--environment",
+            "production",
+            "--identifiers",
+            str(self.identifiers_file),
+            "--out",
+            str(self.tmp_path / "verification-report.json"),
+        ]
 
 
 @pytest.fixture
@@ -306,3 +333,128 @@ def test_verify_failed_rollout_state_fails(env, capsys):
     assert report["conclusion"] == "failed"
     for key in ("auth", "items", "gateway"):
         assert report["services"][key]["health"] == "FAILED"
+
+
+# ---------------------------------------------------------------------------
+# verify production --snapshot (post-compensation, OP-REC-02)
+# ---------------------------------------------------------------------------
+
+
+def test_verify_snapshot_happy_path(env, capsys):
+    env.pass_all_journeys()
+    code = main(env.snapshot_argv(env.snapshot_file()))
+    assert code == 0, capsys.readouterr().err
+    report = env.report()
+    assert report["conclusion"] == "passed"
+    for key in ("auth", "items", "gateway"):
+        assert report["services"][key]["match"] is True
+        assert report["services"][key]["expectedDigest"] == DIGESTS[key]
+    assert all(journey["conclusion"] == "passed" for journey in report["journeys"])
+
+
+def test_verify_snapshot_official_marker_happy_path(env, capsys):
+    official = LiveMarker(
+        releaseId="release-0001",
+        candidateId=env.candidate_raw["candidateId"],
+        sourceSha=CANDIDATE_SHA,
+        frontendSha256=env.content_checksum,
+    )
+    env.marker_doc = marker_document(official)
+    env.s3.objects[env.ids["frontendLiveMarker"]] = env.marker_doc.encode()
+    env.pass_all_journeys()
+    snapshot = env.snapshot_file(marker_doc=env.marker_doc, release_id="release-0001")
+    code = main(env.snapshot_argv(snapshot))
+    assert code == 0, capsys.readouterr().err
+    assert env.report()["conclusion"] == "passed"
+
+
+def test_verify_snapshot_running_digest_mismatch_fails(env, capsys):
+    env.pass_all_journeys()
+    env.ecs.digests = {
+        "onlineshop-auth": f"sha256:{'9' * 64}",
+        "onlineshop-items": DIGESTS["items"],
+        "onlineshop-api-gateway": DIGESTS["gateway"],
+    }
+    code = main(env.snapshot_argv(env.snapshot_file()))
+    assert code == 1
+    assert "running digests" in capsys.readouterr().err
+    report = env.report()
+    assert report["conclusion"] == "failed"
+    assert report["services"]["auth"]["match"] is False
+
+
+def test_verify_snapshot_marker_mismatch_fails(env, capsys):
+    env.pass_all_journeys()
+    env.s3.objects[env.ids["frontendLiveMarker"]] = b'{"wrong": true}'
+    code = main(env.snapshot_argv(env.snapshot_file()))
+    assert code == 1
+    assert "live marker content mismatch" in capsys.readouterr().err
+    assert env.report()["conclusion"] == "failed"
+
+
+def test_verify_snapshot_public_marker_mismatch_fails(env, capsys):
+    env.pass_all_journeys()
+    env.responses[f"https://{env.cf.domain_name}/release.json"] = (
+        200,
+        {"Content-Type": "application/json"},
+        b'{"candidateId":"other","sourceSha":"' + b"1" * 40 + b'","frontendSha256":"'
+        + b"1" * 64
+        + b'"}',
+    )
+    code = main(env.snapshot_argv(env.snapshot_file()))
+    assert code == 1
+    report = env.report()
+    assert report["conclusion"] == "failed"
+    marker_journey = next(
+        journey for journey in report["journeys"] if journey["name"] == "frontend-marker-public"
+    )
+    assert marker_journey["conclusion"] == "failed"
+
+
+def test_verify_snapshot_ambiguous_running_digests_fails_closed(env, capsys):
+    snapshot = env.tmp_path / "ambiguous-snapshot.json"
+    raw = json.loads(Path(env.snapshot_file()).read_text())
+    raw["services"]["auth"]["runningDigests"] = [DIGESTS["auth"], f"sha256:{'9' * 64}"]
+    snapshot.write_text(json.dumps(raw))
+    code = main(env.snapshot_argv(str(snapshot)))
+    assert code == 1
+    err = capsys.readouterr().err
+    assert "ERROR AMBIGUOUS" in err
+    assert "ambiguous snapshot" in err
+    assert not (env.tmp_path / "verification-report.json").exists()
+
+
+def test_verify_snapshot_missing_service_observation_fails_closed(env, capsys):
+    snapshot = env.tmp_path / "incomplete-snapshot.json"
+    raw = json.loads(Path(env.snapshot_file()).read_text())
+    del raw["services"]["items"]
+    snapshot.write_text(json.dumps(raw))
+    code = main(env.snapshot_argv(str(snapshot)))
+    assert code == 1
+    err = capsys.readouterr().err
+    assert "ERROR AMBIGUOUS" in err
+    assert "no observation" in err
+
+
+def test_verify_snapshot_checksum_inconsistency_fails_closed(env, capsys):
+    snapshot = env.tmp_path / "tampered-snapshot.json"
+    raw = json.loads(Path(env.snapshot_file()).read_text())
+    raw["frontend"]["checksum"] = "0" * 64
+    snapshot.write_text(json.dumps(raw))
+    code = main(env.snapshot_argv(str(snapshot)))
+    assert code == 1
+    err = capsys.readouterr().err
+    assert "ERROR AMBIGUOUS" in err
+    assert "checksum does not match" in err
+
+
+def test_verify_snapshot_rejects_staging_snapshot(env, capsys):
+    snapshot = env.tmp_path / "staging-snapshot.json"
+    raw = json.loads(Path(env.snapshot_file()).read_text())
+    raw["environment"] = "staging"
+    snapshot.write_text(json.dumps(raw))
+    code = main(env.snapshot_argv(str(snapshot)))
+    assert code == 1
+    err = capsys.readouterr().err
+    assert "ERROR VALIDATION" in err
+    assert "expected 'production'" in err

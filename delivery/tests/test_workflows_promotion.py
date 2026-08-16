@@ -549,6 +549,31 @@ def test_compensate_uploads_recovery_result_with_14_day_retention() -> None:
     assert upload["with"]["name"] == (
         "recovery-result-${{ github.run_id }}-${{ github.run_attempt }}"
     )
+    assert "recovery-result.json" in upload["with"]["path"]
+    assert "recovery-verification.json" in upload["with"]["path"]
+
+
+def test_compensate_verifies_restored_state_before_outcome_report() -> None:
+    # F2 (OP-REC-02 "repeat OP-DEP-04"): after recover, the compensate job
+    # re-runs the read-only production verification against the SAME snapshot
+    # recover consumed, and the verification precedes the outcome report.
+    workflow = _load(PROMOTE_WORKFLOW)
+    compensate = workflow["jobs"]["compensate"]
+    names = [step.get("name") for step in _steps(compensate)]
+    restore = names.index("Restore the pre-mutation snapshot (automatic recovery)")
+    verify = names.index("Verify the restored production state read-only")
+    report = names.index("Report the original failure and the recovery outcome")
+    assert restore < verify < report
+    step = _steps(compensate)[verify]
+    run = step["run"]
+    assert "python -m delivery.cli verify production" in run
+    assert "--snapshot promotion-snapshot/production-snapshot.json" in run
+    assert "--out recovery-verification.json" in run
+    assert "--environment production" in run
+    assert "scripts/config/production-identifiers.json" in run
+    # the verify step never uses the candidate or a release manifest
+    assert "--manifest" not in run
+    assert "--candidate" not in run
 
 
 def test_compensate_reports_both_outcomes_and_fails_on_recovery_failure() -> None:
@@ -565,7 +590,12 @@ def test_compensate_reports_both_outcomes_and_fails_on_recovery_failure() -> Non
     assert "needs.promote.result" in run
     assert "RECOVERY OUTCOME" in run or "recovery-result.json" in run
     assert "the original failure is UNRESOLVED" in run
-    assert run.count("exit 1") == 2
+    # a failed recovery, a missing verification report, and a failed
+    # verification each flip the job outcome
+    assert run.count("exit 1") == 4
+    assert "VERIFICATION OUTCOME" in run
+    assert "post-recovery verification" in run
+    assert "NOT confirmed" in run
 
 
 def test_compensate_job_permissions_are_job_scoped() -> None:
