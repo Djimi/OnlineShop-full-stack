@@ -107,8 +107,11 @@ def _validate_snapshot_environment(args: argparse.Namespace) -> None:
         label = command
     elif command == "promote" and getattr(args, "subcommand", None) == "preflight":
         label = "promote preflight"
-    elif command == "rollback" and getattr(args, "subcommand", None) == "execute":
-        label = "rollback execute"
+    elif command == "rollback" and getattr(args, "subcommand", None) in (
+        "preflight",
+        "execute",
+    ):
+        label = f"rollback {args.subcommand}"
     if label is None:
         return
     path = args.snapshot
@@ -670,13 +673,38 @@ def _add_rollback(subparsers: argparse._SubParsersAction) -> None:
         help="target official release id (e.g. release-0002)",
     )
     preflight.add_argument(
+        "--snapshot",
+        required=True,
+        metavar="FILE",
+        help="fresh production snapshot JSON file (the current live release identity)",
+    )
+    preflight.add_argument(
         "--schema-change", choices=("present", "absent"), help="schema change guard input"
     )
     preflight.add_argument(
         "--migration-reviewed", choices=("true", "false"), help="migration review guard input"
     )
+    preflight.add_argument(
+        "--repository",
+        metavar="OWNER/NAME",
+        help="GitHub repository (default: $GITHUB_REPOSITORY)",
+    )
+    preflight.add_argument(
+        "--previous-report",
+        metavar="FILE",
+        help="pre-approval preflight report for post-approval drift comparison",
+    )
+    preflight.add_argument(
+        "--out", required=True, metavar="FILE", help="output preflight report JSON file"
+    )
+    preflight.add_argument(
+        "--manifest-out",
+        required=True,
+        metavar="FILE",
+        help="write the validated official release manifest to FILE",
+    )
     _add_aws_flags(preflight)
-    preflight.set_defaults(func=rollback.preflight)
+    preflight.set_defaults(func=rollback.preflight, context_builder=build_context)
     execute = sub.add_parser("execute", help="deploy the approved rollback target")
     execute.add_argument(
         "--manifest",
@@ -690,9 +718,39 @@ def _add_rollback(subparsers: argparse._SubParsersAction) -> None:
         metavar="FILE",
         help="pre-rollback production snapshot JSON file",
     )
+    execute.add_argument(
+        "--preflight-report",
+        metavar="FILE",
+        help="pre-approval rollback preflight report (re-preflight identity match)",
+    )
+    execute.add_argument(
+        "--approval",
+        metavar="FILE",
+        help="approval evidence JSON file (approver, requester, workflow URL, timestamp)",
+    )
+    execute.add_argument(
+        "--workflow-run-id",
+        type=int,
+        metavar="RUN_ID",
+        help="workflow run id for the rollback result (default: $GITHUB_RUN_ID)",
+    )
+    execute.add_argument(
+        "--workflow-run-attempt",
+        type=int,
+        metavar="ATTEMPT",
+        help="workflow run attempt for the rollback result (default: $GITHUB_RUN_ATTEMPT)",
+    )
+    execute.add_argument(
+        "--repository",
+        metavar="OWNER/NAME",
+        help="GitHub repository (default: $GITHUB_REPOSITORY)",
+    )
+    execute.add_argument(
+        "--out", metavar="FILE", help="output rollback result JSON file"
+    )
     execute.add_argument("--dry-run", action="store_true", help="resolve and plan without mutating")
     _add_aws_flags(execute)
-    execute.set_defaults(func=rollback.execute)
+    execute.set_defaults(func=rollback.execute, context_builder=build_context)
 
 
 def _add_retention(subparsers: argparse._SubParsersAction) -> None:

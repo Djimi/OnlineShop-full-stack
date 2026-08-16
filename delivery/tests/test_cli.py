@@ -100,11 +100,6 @@ MISSING_ARGS_CASES = [
 
 NOT_IMPLEMENTED_CASES = [
     (["verify", "staging"], ["--candidate", "cand.json"]),
-    (["rollback", "preflight"], ["--release-id", "release-0002"]),
-    (
-        ["rollback", "execute"],
-        ["--manifest", "rel.json", "--snapshot", str(FIXTURES / "valid_snapshot.json")],
-    ),
 ]
 
 AWS_FLAGS = ["--environment", "production", "--identifiers", "identifiers.json"]

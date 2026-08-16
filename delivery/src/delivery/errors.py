@@ -71,3 +71,7 @@ class PolicyValidationError(ValidationError):
 
 class PolicyTagPrefixMulti(PolicyValidationError):
     code = "POLICY_TAGPREFIX_MULTI"
+
+
+class IncompatibleRollbackTarget(ValidationError):
+    code = "INCOMPATIBLE"

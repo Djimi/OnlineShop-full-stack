@@ -43,7 +43,12 @@ from .retention import (
     RetentionPreviewRepo,
     RetentionPreviewReport,
 )
-from .rollback import RollbackResult
+from .rollback import (
+    RollbackComponent,
+    RollbackComponentIdentity,
+    RollbackPreflightReport,
+    RollbackResult,
+)
 from .snapshot import FrontendObservation, ProductionSnapshot, ReleaseIdentity, ServiceObservation
 from .staging import (
     CleanupConclusion,
@@ -111,6 +116,9 @@ __all__ = [
     "RetentionAuditReport",
     "RetentionPreviewRepo",
     "RetentionPreviewReport",
+    "RollbackComponent",
+    "RollbackComponentIdentity",
+    "RollbackPreflightReport",
     "RollbackResult",
     "RollbackWindowEntry",
     "SbomAsset",

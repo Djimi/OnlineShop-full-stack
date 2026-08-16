@@ -10,7 +10,7 @@ from .models.evidence import EvidenceRecord
 from .models.promotion import PreflightReport, VerificationReport
 from .models.recovery import RecoveryResult
 from .models.release import ReleaseManifest
-from .models.rollback import RollbackResult
+from .models.rollback import RollbackPreflightReport, RollbackResult
 from .models.snapshot import ProductionSnapshot
 from .models.staging import StagingOperationRecord
 
@@ -56,7 +56,22 @@ def validate(record) -> list[str]:
         return _validate_verification(record)
     if isinstance(record, RecoveryResult):
         return _validate_recovery(record)
+    if isinstance(record, RollbackPreflightReport):
+        return _validate_rollback_preflight(record)
     return [f"unsupported record type: {type(record).__name__}"]
+
+
+def _validate_rollback_preflight(record: RollbackPreflightReport) -> list[str]:
+    errors = _schema_version_error(record, "rollback preflight report")
+    if not record.approvalSummary:
+        errors.append("rollback preflight report approvalSummary must be non-empty")
+    if record.schemaChange == "present":
+        errors.append(
+            "rollback preflight report must never record a schema-changing target (OP-DB-02)"
+        )
+    if record.releaseId == record.snapshotReleaseId:
+        errors.append("rollback preflight report target must differ from the current release")
+    return errors
 
 
 def _validate_preflight(record: PreflightReport) -> list[str]:

@@ -231,7 +231,7 @@ def _audit_window(ctx, ids: dict, api: GitHubApi, snapshot) -> RetentionAuditRep
     ][:3]
     window_ids = [current] + [release["tag_name"] for release in previous]
     entries = [
-        _audit_entry(ctx, ids, api, release_id, snapshot, official)
+        audit_entry(ctx, ids, api, release_id, snapshot, official)
         for release_id in window_ids
     ]
     window_complete = all(entry.complete for entry in entries)
@@ -261,10 +261,16 @@ def _audit_window(ctx, ids: dict, api: GitHubApi, snapshot) -> RetentionAuditRep
     )
 
 
-def _audit_entry(
+def audit_entry(
     ctx, ids: dict, api: GitHubApi, release_id: str, snapshot, releases
 ) -> RetentionAuditEntry:
-    """Verify one release against its official manifest; read errors fail closed."""
+    """Verify one release against its official manifest; read errors fail closed.
+
+    Shared between the four-release window audit and the rollback preflight
+    (OP-REC-03): the rollback target must be a complete retained release per
+    exactly these checks — ECR ``release-<NNNN>`` tag-to-digest anchors,
+    frontend prefix marker existence, and the compatibility fingerprint.
+    """
     failures: list[RetentionAuditFailure] = []
     manifest: ReleaseManifest | None = None
     matching = [release for release in releases if release["tag_name"] == release_id]
