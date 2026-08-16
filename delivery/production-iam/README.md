@@ -14,7 +14,7 @@ ARN; nothing here is claimed as applied live yet.
 | ECS | deploy scoped to the production cluster, the three production services, and the three task-definition families; read-only `DescribeTasks` additionally scoped to the task ARN `task/onlineshop-cluster/*` (ECS authorizes it against the task, not the cluster/service) |
 | RDS | read-only `DescribeDBInstances` on the production DB instance ARN only (snapshot compatibility-fingerprint input) |
 | IAM | `PassRole` to the ECS execution role only, with `iam:PassedToService=ecs-tasks.amazonaws.com` (task roles are not used: live task definitions have `taskRoleArn: null`) |
-| S3 | `PutObject`/`GetObject`/`HeadObject`/`ListBucket` on the frontend bucket only |
+| S3 | `PutObject`/`GetObject`/`ListBucket` on the frontend bucket only |
 | CloudFront | `CreateInvalidation`/`GetInvalidation`/`GetDistribution` on the production distribution only |
 | ELB | read-only `DescribeLoadBalancers`/`DescribeTargetHealth` for the read-only verification journeys |
 
