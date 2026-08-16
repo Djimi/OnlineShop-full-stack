@@ -37,6 +37,10 @@ api.interceptors.response.use(
 
     if (error.response?.status === 401 && !isPublicAuthRequest) {
       useAuthStore.getState().logout();
+      sessionStorage.setItem(
+        'onlineshop_redirect_from',
+        `${window.location.pathname}${window.location.search}${window.location.hash}`
+      );
       window.location.href = '/login';
       // Page is about to unload; suppress downstream error handling
       return Promise.reject(new axios.CanceledError('Redirecting to login'));

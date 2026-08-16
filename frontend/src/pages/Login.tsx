@@ -44,7 +44,8 @@ export default function Login() {
       const from = (location.state as { from?: { pathname?: string; search?: string; hash?: string } } | null)?.from;
       const destination = from?.pathname
         ? `${from.pathname}${from.search ?? ''}${from.hash ?? ''}`
-        : '/items';
+        : sessionStorage.getItem('onlineshop_redirect_from') ?? '/items';
+      sessionStorage.removeItem('onlineshop_redirect_from');
       navigate(destination, { replace: true });
     } catch (error: unknown) {
       const errorMessage = getApiErrorMessage(error, 'Login failed. Please check your credentials.');

@@ -129,6 +129,24 @@ api-gateway/
   of falling through to a generic 502.
 - Rate limiting can be disabled via `gateway.ratelimit.enabled=false` (useful for tests).
 
+## Rate Limiting Behavior
+
+- All paths except `/actuator` are limited. `/auth/**` (login/register/validate) is
+  limited per IP with the anonymous bucket, so brute-force attempts are throttled.
+- `RateLimitFilter` runs after `AuthenticationFilter`, so authenticated `/items/**`
+  requests are keyed per user (`user:<id>`) while anonymous requests are keyed per
+  IP (`ip:<addr>`).
+- Failed authentications (missing/invalid/expired tokens) are additionally throttled
+  per IP in `AuthenticationFilter` itself (429 instead of 401 once the anonymous
+  bucket is exhausted), because those requests are rejected before the rate-limit
+  filter ever sees them.
+- Bucket capacity comes from `burst`; refill is greedy at `requests-per-minute`.
+- `trusted-proxies` (default empty) lists the direct peers whose
+  `X-Forwarded-For` first value is trusted as the client IP. In production the
+  ALB IP(s) must be listed there or every client shares the ALB's IP bucket.
+  When empty, `getRemoteAddr()` is used.
+- Rate limiting fails open when Redis is unavailable.
+
 ## Development Notes
 
 - In this workspace, VS Code Spring Boot live-information auto-JMX is disabled via `.vscode/settings.json` so IDE launches do not compete with the gateway's HTTP port `10000`.

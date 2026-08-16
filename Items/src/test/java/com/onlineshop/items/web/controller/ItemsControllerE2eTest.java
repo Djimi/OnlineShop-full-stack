@@ -176,6 +176,25 @@ class ItemsControllerE2eTest {
     }
 
     @Test
+    void createItem_withNegativeQuantity_returns400() {
+        var createPayload = Map.of("name", "Negative", "quantity", -5, "description", "desc");
+        var createResponse = restTemplate.postForEntity(baseUrl, createPayload, ErrorResponse.class);
+        assertThat(createResponse.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+        assertThat(createResponse.getBody().getTitle()).isEqualTo("Bad Request");
+        assertThat(createResponse.getBody().getStatus()).isEqualTo(400);
+        assertThat(createResponse.getBody().getDetail()).contains("Quantity cannot be negative");
+    }
+
+    @Test
+    void searchItems_missingDescription_returns400() {
+        var response = restTemplate.getForEntity(baseUrl + "/search", ErrorResponse.class);
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+        assertThat(response.getBody().getTitle()).isEqualTo("Bad Request");
+        assertThat(response.getBody().getStatus()).isEqualTo(400);
+        assertThat(response.getBody().getDetail()).contains("description");
+    }
+
+    @Test
     void searchItems_noMatch_returnsEmptyList() {
         var searchUrl = baseUrl + "/search?description=NonExistentXYZ";
         var response = restTemplate.getForEntity(searchUrl, ItemResponse[].class);

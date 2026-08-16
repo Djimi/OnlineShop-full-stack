@@ -15,6 +15,8 @@ export default function ItemDetail() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    let isMounted = true;
+
     const fetchItem = async () => {
       if (!id) {
         setError('Item ID not found');
@@ -27,20 +29,27 @@ export default function ItemDetail() {
         setError(null);
         setItem(null);
         const data = await itemsService.getItemById(id);
-        setItem(data);
+        if (isMounted) {
+          setItem(data);
+        }
       } catch (error: unknown) {
         const errorMessage = getApiErrorMessage(error, 'Failed to load item details');
-        setError(errorMessage);
-        toast.error(errorMessage);
+        if (isMounted) {
+          setError(errorMessage);
+          toast.error(errorMessage);
+        }
         console.error('Error fetching item:', error);
       } finally {
-        setIsLoading(false);
+        if (isMounted) {
+          setIsLoading(false);
+        }
       }
     };
 
     fetchItem();
 
     return () => {
+      isMounted = false;
       toast.dismiss();
     };
   }, [id]);

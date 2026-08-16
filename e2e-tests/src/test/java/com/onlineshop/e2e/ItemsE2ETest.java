@@ -79,23 +79,22 @@ class ItemsE2ETest extends BaseTest {
 
         List<Map<String, Object>> items = allItemsResponse.jsonPath().getList("$");
         assertNotNull(items, "Items list should not be null");
+        assertFalse(items.isEmpty(), "Items list should not be empty - staging seeds items deterministically");
 
-        // Step 4: Get the first item from the list (if there are items)
-        if (!items.isEmpty()) {
-            String firstItemId = (String) items.get(0).get("id");
-            assertNotNull(firstItemId, "First item ID should not be null");
+        // Step 4: Get the first item from the list
+        String firstItemId = (String) items.get(0).get("id");
+        assertNotNull(firstItemId, "First item ID should not be null");
 
-            given()
-                    .spec(requestSpec)
-                    .header("Authorization", "Bearer " +token)
-                    .when()
-                    .get("/items/" + firstItemId)
-                    .then()
-                    .statusCode(200)
-                    .body("id", equalTo(firstItemId))
-                    .body("name", notNullValue())
-                    .body("quantity", notNullValue());
-        }
+        given()
+                .spec(requestSpec)
+                .header("Authorization", "Bearer " +token)
+                .when()
+                .get("/items/" + firstItemId)
+                .then()
+                .statusCode(200)
+                .body("id", equalTo(firstItemId))
+                .body("name", notNullValue())
+                .body("quantity", notNullValue());
     }
 
     @Test

@@ -3,8 +3,23 @@ import { Navbar } from './components/layout/Navbar';
 import { AppRoutes } from './routes';
 import { Toaster } from 'react-hot-toast';
 import { useAuthStore } from './store/authStore';
+import { ErrorBoundary } from './components/common/ErrorBoundary';
+import { authService } from './services/authService';
 
 useAuthStore.getState().loadFromStorage();
+
+if (useAuthStore.getState().isAuthenticated) {
+  authService
+    .validate()
+    .then((response) => {
+      if (!response.valid) {
+        useAuthStore.getState().logout();
+      }
+    })
+    .catch(() => {
+      // Network errors must not log the user out; the 401 interceptor handles expiry
+    });
+}
 
 function App() {
 
@@ -12,7 +27,9 @@ function App() {
     <BrowserRouter>
       <div className="min-h-screen bg-[#f4f1ea] text-[#1f1a14]">
         <Navbar />
-        <AppRoutes />
+        <ErrorBoundary>
+          <AppRoutes />
+        </ErrorBoundary>
         <Toaster
           position="top-right"
           toastOptions={{
