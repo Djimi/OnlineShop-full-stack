@@ -456,3 +456,8 @@ Staging retries can encounter a service task definition already pinned to the
 candidate digest after an earlier failure. Reuse that exact revision and
 continue start/verification; do not call the shared image-only transform with
 an empty diff. The shared transform remains fail-closed for production paths.
+
+Deployment-primary does not guarantee that every old task has drained under a
+100/200 rolling policy. Use the bounded running-digest waiter after the
+deployment waiter; tolerate only known old/new overlap and finish only when
+the observed digest set converges to the exact candidate digest.

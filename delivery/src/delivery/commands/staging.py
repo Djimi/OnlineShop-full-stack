@@ -53,11 +53,11 @@ from ..aws import (
     load_balancer_dns_name,
     register_task_definition,
     replace_container_images,
-    running_digests,
     scale_service,
     task_definition_images,
     update_service,
     wait_for_deployment,
+    wait_for_running_digests,
     wait_for_service_running_count,
 )
 from ..aws.readback import absent_or_read
@@ -940,12 +940,13 @@ class _StagingMachine:
                 deployment_id,
                 timeout_seconds=DEPLOYMENT_TIMEOUT,
             )
-            digests = running_digests(ecs_client, self.ids["cluster"], service)
-            if digests != [expected_digest]:
-                raise MutationVerificationError(
-                    f"service {service} running digests {digests} do not match "
-                    f"expected {[expected_digest]}"
-                )
+            wait_for_running_digests(
+                ecs_client,
+                self.ids["cluster"],
+                service,
+                expected_digest,
+                timeout_seconds=DEPLOYMENT_TIMEOUT,
+            )
             observed[key] = expected_digest
             self.mutation_began = True
         self.observed = ObservedArtifacts(

@@ -506,7 +506,8 @@ def test_lifecycle_ecr_read_error_is_error_not_absence(runner, capsys):
     assert "ERROR READ_ERROR" in capsys.readouterr().err
 
 
-def test_lifecycle_running_digest_mismatch_fails_and_cleans_up(runner, capsys):
+def test_lifecycle_running_digest_mismatch_fails_and_cleans_up(runner, capsys, monkeypatch):
+    monkeypatch.setattr("delivery.commands.staging.DEPLOYMENT_TIMEOUT", 0.6)
     runner.ecs.digests[SERVICES[1]] = f"sha256:{'f' * 64}"
     code = main(runner.lifecycle_argv())
     assert code == 1

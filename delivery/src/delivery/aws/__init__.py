@@ -40,6 +40,7 @@ from .ecs import (
     task_definition_images,
     update_service,
     wait_for_deployment,
+    wait_for_running_digests,
     wait_for_service_running_count,
     wait_for_tasks_stopped,
 )
@@ -112,6 +113,7 @@ __all__ = [
     "task_definition_images",
     "update_service",
     "wait_for_deployment",
+    "wait_for_running_digests",
     "wait_for_service_running_count",
     "wait_for_tasks_stopped",
     "with_retry",
