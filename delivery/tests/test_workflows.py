@@ -249,6 +249,20 @@ def test_publish_frontend_packaging_is_preceded_by_setup_node_24() -> None:
     assert steps.index(node_steps[0]) < steps.index(packaging)
 
 
+def test_publish_frontend_uses_canonical_content_only_checksum() -> None:
+    ci = _load(CI_WORKFLOW)
+    packaging = next(
+        step
+        for step in _steps(ci["jobs"]["publish"])
+        if step.get("name") == "Build and package frontend candidate"
+    )
+    expected = (
+        "CONTENT_CHECKSUM=$(find dist -type f -print0 | LC_ALL=C sort -z "
+        "| xargs -0 sha256sum | cut -d' ' -f1 | sha256sum | cut -d' ' -f1)"
+    )
+    assert expected in packaging["run"]
+
+
 def _tags_step() -> dict:
     ci = _load(CI_WORKFLOW)
     publish = ci["jobs"]["publish"]

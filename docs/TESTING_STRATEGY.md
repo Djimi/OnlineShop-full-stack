@@ -28,6 +28,10 @@ Tests for repository automation must also follow the story-oriented guidance in
 behavior, keep scenario setup explicit, and avoid mirroring implementation
 helpers or retaining coverage for removed modes.
 
+Aggregate frontend content checksums must be path-independent: hash
+newline-terminated per-file SHA-256 hex values sorted by canonical relative
+path, never tool output containing environment-specific path prefixes.
+
 **Test output must show clean (zero failures).** Warnings from libraries (Mockito self-attach, Jansi, etc.) are expected and can be ignored.
 
 ## Testing Philosophy

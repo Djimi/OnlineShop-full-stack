@@ -271,7 +271,12 @@ def test_stage_candidate_verifies_frontend_byte_identity() -> None:
     )
     assert "artifactDigest" in verify["run"]
     assert "contentChecksum" in verify["run"]
-    assert "sha256sum" in verify["run"]
+    expected = (
+        "CONTENT_CHECKSUM=$(cd candidate/frontend-dist && find . -type f -print0 "
+        "| LC_ALL=C sort -z | xargs -0 sha256sum | cut -d' ' -f1 | sha256sum "
+        "| cut -d' ' -f1)"
+    )
+    assert expected in verify["run"]
 
 
 def test_stage_candidate_uploads_record_with_14_day_retention() -> None:

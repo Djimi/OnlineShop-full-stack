@@ -52,18 +52,22 @@ def verify_frontend_archive(archive_path: str, manifest: CandidateManifest) -> P
 
 
 def content_checksum(dist_dir: Path) -> str:
-    """Aggregate checksum matching the publish-time pipeline exactly.
+    """Content-only aggregate checksum of the tree (path-independent).
 
-    Equivalent to ``find dist -type f -print0 | sort -z | xargs -0 sha256sum
-    | sha256sum``: every line is ``<hex>  ./<relative path>`` and the final
-    digest is the SHA-256 of the concatenation.
+    Equivalent to ``find dist -type f -print0 | LC_ALL=C sort -z | xargs -0
+    sha256sum | cut -d' ' -f1 | sha256sum``: every line is just the per-file
+    SHA-256 hex (no path prefix), ordered by relative path (byte-wise, so
+    ``LC_ALL=C`` in the shell pipeline), newline-terminated, and the aggregate
+    is the SHA-256 of that byte string. Identical content therefore hashes
+    identically regardless of the extraction directory or path base.
     """
     lines = []
-    for path in sorted(dist_dir.rglob("*")):
+    for path in sorted(
+        dist_dir.rglob("*"), key=lambda p: p.relative_to(dist_dir).as_posix()
+    ):
         if not path.is_file():
             continue
-        relative = path.relative_to(dist_dir).as_posix()
-        lines.append(f"{sha256_hex(path.read_bytes())}  ./{relative}\n")
+        lines.append(f"{sha256_hex(path.read_bytes())}\n")
     return sha256_hex("".join(lines).encode())
 
 

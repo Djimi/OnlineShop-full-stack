@@ -182,7 +182,7 @@ def _aggregate_checksum(s3_client, bucket: str, prefix: str, files: list[str]) -
     lines = []
     for rel in sorted(files):
         observed = get_object_sha256(s3_client, bucket, f"{prefix}{rel}")
-        lines.append(f"{observed}  ./{rel}\n")
+        lines.append(f"{observed}\n")
     return sha256_hex("".join(lines).encode())
 
 
