@@ -451,3 +451,8 @@ ECS injects Service Connect runtime containers named `ecs-service-connect-*`.
 They are not application task-definition containers and can omit
 `imageDigest`; running-image verification ignores only this managed prefix and
 still fails closed for every application or user-defined sidecar container.
+
+Staging retries can encounter a service task definition already pinned to the
+candidate digest after an earlier failure. Reuse that exact revision and
+continue start/verification; do not call the shared image-only transform with
+an empty diff. The shared transform remains fail-closed for production paths.

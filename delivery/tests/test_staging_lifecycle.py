@@ -350,6 +350,41 @@ def test_lifecycle_keeps_services_stopped_until_reset_finishes(runner, monkeypat
     assert all(runner.ecs.desired_counts[service] == 1 for service in SERVICES)
 
 
+def test_lifecycle_reuses_already_pinned_candidate_revisions(runner):
+    repositories = ("onlineshop-auth", "onlineshop-items", "onlineshop-api-gateway")
+    digests = (DIGEST_A, DIGEST_B, DIGEST_C)
+    for service, repository, digest in zip(SERVICES, repositories, digests, strict=True):
+        arn = (
+            f"arn:aws:ecs:eu-north-1:{ACCOUNT}:task-definition/"
+            f"{service}:2"
+        )
+        runner.ecs.td_store[service] = {
+            arn: {
+                "taskDefinitionArn": arn,
+                "revision": 2,
+                "status": "ACTIVE",
+                "family": service,
+                "networkMode": "awsvpc",
+                "requiresCompatibilities": ["FARGATE"],
+                "cpu": "256",
+                "memory": "512",
+                "executionRoleArn": f"arn:aws:iam::{ACCOUNT}:role/ecsTaskExecutionRole",
+                "containerDefinitions": [
+                    {
+                        "name": service,
+                        "image": f"{ACCOUNT}.dkr.ecr.eu-north-1.amazonaws.com/"
+                        f"{repository}@{digest}",
+                        "essential": True,
+                    }
+                ],
+            }
+        }
+
+    assert main(runner.lifecycle_argv()) == 0
+    assert runner.ecs.register_calls == []
+    assert all(runner.ecs.desired_counts[service] == 1 for service in SERVICES)
+
+
 def test_lifecycle_continuation_passed_completes(runner):
     assert main(runner.lifecycle_argv()) == 0
     code = main(runner.continue_argv("passed"))

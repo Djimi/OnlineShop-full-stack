@@ -919,11 +919,14 @@ class _StagingMachine:
                     f"service {service} must have exactly one container for "
                     f"repository {repository}, found {matches}"
                 )
-            revision_arn = register_task_definition(
-                ecs_client,
-                replace_container_images(td, {matches[0]: target}),
-            )
-            update_service(ecs_client, self.ids["cluster"], service, revision_arn)
+            if images[matches[0]] == target:
+                revision_arn = td_arn
+            else:
+                revision_arn = register_task_definition(
+                    ecs_client,
+                    replace_container_images(td, {matches[0]: target}),
+                )
+                update_service(ecs_client, self.ids["cluster"], service, revision_arn)
             if service_observed.get("desiredCount") == 0:
                 self._scale(ecs_client, service, 1)
             deployment_id = _primary_deployment_id(
