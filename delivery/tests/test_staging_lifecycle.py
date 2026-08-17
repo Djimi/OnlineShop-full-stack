@@ -220,7 +220,7 @@ class Runner:
             "ecs": self.ecs,
             "ecr": self.ecr,
             "rds": self.rds,
-            "elb": self.elb,
+            "elbv2": self.elb,
             "s3": self.s3,
             "secretsmanager": self.secrets,
             "logs": self.logs,

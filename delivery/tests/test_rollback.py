@@ -383,7 +383,7 @@ class RollbackEnv:
             "ecr": self.ecr,
             "s3": self.s3,
             "cloudfront": self.cf,
-            "elb": self.elb,
+            "elbv2": self.elb,
         }
         self.monkeypatch.setattr(
             "delivery.aws.context.client_for", lambda ctx, service: clients[service]

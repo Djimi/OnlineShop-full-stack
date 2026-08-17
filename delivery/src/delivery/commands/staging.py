@@ -969,7 +969,7 @@ class _StagingMachine:
                 raise ValidationError(f"e2eBaseUrl must be http(s), got {override!r}")
             self.e2e_url = override
             return override
-        elb_client = aws_context.client_for(self.ctx, "elb")
+        elb_client = aws_context.client_for(self.ctx, "elbv2")
         dns_name = load_balancer_dns_name(elb_client, self.ids["albName"])
         self.e2e_url = f"http://{dns_name}"
         return self.e2e_url
@@ -1133,7 +1133,7 @@ class _StagingMachine:
             diagnostics.errors.append(f"rds describe_db_instances: {capture_error}")
         target_group = self.ids.get("targetGroupArn")
         if target_group:
-            elb_client = aws_context.client_for(self.ctx, "elb")
+            elb_client = aws_context.client_for(self.ctx, "elbv2")
             try:
                 diagnostics.albTargetHealth = describe_target_health(elb_client, target_group)
             except Exception as capture_error:

@@ -259,7 +259,7 @@ def _resolve_base_url(ctx, ids: dict) -> str:
             "production identifiers carry neither gatewayBaseUrl nor albName; "
             "the read-only journeys cannot be resolved"
         )
-    elb_client = aws_context.client_for(ctx, "elb")
+    elb_client = aws_context.client_for(ctx, "elbv2")
     dns_name = describe_load_balancer(elb_client, alb_name).get("DNSName")
     if not isinstance(dns_name, str) or not dns_name:
         raise ReadError(f"load balancer {alb_name} has no DNSName")

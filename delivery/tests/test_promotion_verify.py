@@ -60,7 +60,7 @@ class VerifyEnv:
             "sts": self.sts,
             "ecs": self.ecs,
             "s3": self.s3,
-            "elb": self.elb,
+            "elbv2": self.elb,
             "cloudfront": self.cf,
         }
         self.monkeypatch.setattr(
