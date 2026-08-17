@@ -59,6 +59,7 @@ lc_init() {
   [ "$LC_REGION" = "eu-north-1" ] ||
     lc_die "LC_REGION must be eu-north-1 (got $LC_REGION); the region is not overridable"
   command -v aws >/dev/null || lc_die "aws CLI is required"
+  command -v jq >/dev/null || lc_die "jq is required"
   LC_AWS=(aws --profile "$LC_PROFILE" --region "$LC_REGION")
 }
 
@@ -288,6 +289,46 @@ lc_alb_dns() {
   local alb_arn="$1"
   "${LC_AWS[@]}" elbv2 describe-load-balancers --load-balancer-arns "$alb_arn" \
     --query 'LoadBalancers[0].DNSName' --output text
+}
+
+lc_repoint_cloudfront_alb_origin() {
+  # The ALB is disposable: every pause deletes it and every resume recreates it
+  # with a NEW DNS name. CloudFront's `alb-api` origin (the /auth* and /items*
+  # behaviors used by the live frontend) would silently keep pointing at the
+  # deleted ALB, so resume must re-point it to the current ALB DNS. No-op when
+  # the origin already matches; skip entirely when no distribution is
+  # configured (staging). Read-back verifies the update took effect.
+  local dns="$1" etag current
+  [ "$LC_ENVIRONMENT" = "production" ] || return 0
+  [ -n "${LC_CLOUDFRONT_DISTRIBUTION:-}" ] || return 0
+  lc_log "Verifying CloudFront $LC_CLOUDFRONT_DISTRIBUTION alb-api origin points at $dns."
+  etag=$("${LC_AWS[@]}" cloudfront get-distribution --id "$LC_CLOUDFRONT_DISTRIBUTION" \
+    --query 'ETag' --output text)
+  current=$("${LC_AWS[@]}" cloudfront get-distribution --id "$LC_CLOUDFRONT_DISTRIBUTION" \
+    --query "Distribution.DistributionConfig.Origins.Items[?Id=='alb-api'].DomainName | [0]" \
+    --output text)
+  if [ "$current" = "$dns" ]; then
+    lc_log "CloudFront alb-api origin already matches; no update needed."
+    return 0
+  fi
+  lc_log "Re-pointing CloudFront alb-api origin from $current to $dns; deploy takes 5–15 minutes."
+  "${LC_AWS[@]}" cloudfront get-distribution-config --id "$LC_CLOUDFRONT_DISTRIBUTION" \
+    --query 'DistributionConfig' --output json > /tmp/lc-cloudfront-config.json
+  jq --arg dns "$dns" \
+    '.Origins.Items |= map(if .Id == "alb-api" then .DomainName = $dns else . end)' \
+    /tmp/lc-cloudfront-config.json > /tmp/lc-cloudfront-config-new.json
+  "${LC_AWS[@]}" cloudfront update-distribution --id "$LC_CLOUDFRONT_DISTRIBUTION" \
+    --if-match "$etag" --distribution-config file:///tmp/lc-cloudfront-config-new.json \
+    --query 'Distribution.Status' --output text >/dev/null
+  "${LC_AWS[@]}" cloudfront wait distribution-deployed --id "$LC_CLOUDFRONT_DISTRIBUTION"
+  readback=$("${LC_AWS[@]}" cloudfront get-distribution --id "$LC_CLOUDFRONT_DISTRIBUTION" \
+    --query "Distribution.DistributionConfig.Origins.Items[?Id=='alb-api'].DomainName | [0]" \
+    --output text)
+  if [ "$readback" != "$dns" ]; then
+    lc_die "CloudFront alb-api origin read-back $readback != $dns"
+    return 1
+  fi
+  lc_log "CloudFront alb-api origin read-back confirms $dns."
 }
 
 lc_wait_http_unauthorized() {
