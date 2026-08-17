@@ -178,7 +178,7 @@ def test_running_digests_sorted_from_multiple_tasks():
     assert running_digests(fake, CLUSTER, SERVICE) == sorted([DIGEST_A, DIGEST_B])
 
 
-def test_running_digests_includes_every_container_of_every_task():
+def test_running_digests_includes_every_essential_container_of_every_task():
     fake = FakeEcs(
         services={"auth": _service()},
         tasks={
@@ -186,14 +186,50 @@ def test_running_digests_includes_every_container_of_every_task():
                 _task(
                     "arn:...:task/1",
                     containers=[
-                        {"name": "auth", "imageDigest": DIGEST_A},
-                        {"name": "sidecar", "imageDigest": DIGEST_B},
+                        {"name": "auth", "imageDigest": DIGEST_A, "essential": True},
+                        {"name": "sidecar", "imageDigest": DIGEST_B, "essential": True},
                     ],
                 )
             ]
         },
     )
     assert running_digests(fake, CLUSTER, SERVICE) == sorted([DIGEST_A, DIGEST_B])
+
+
+def test_running_digests_ignores_non_essential_sidecars():
+    fake = FakeEcs(
+        services={"auth": _service()},
+        tasks={
+            "auth": [
+                _task(
+                    "arn:...:task/1",
+                    containers=[
+                        {"name": "auth", "imageDigest": DIGEST_A, "essential": True},
+                        {"name": "redis-sidecar", "imageDigest": DIGEST_B, "essential": False},
+                    ],
+                )
+            ]
+        },
+    )
+    assert running_digests(fake, CLUSTER, SERVICE) == [DIGEST_A]
+
+
+def test_running_digests_rejects_task_with_only_non_essential_sidecars():
+    fake = FakeEcs(
+        services={"auth": _service()},
+        tasks={
+            "auth": [
+                _task(
+                    "arn:...:task/1",
+                    containers=[
+                        {"name": "redis-sidecar", "imageDigest": DIGEST_B, "essential": False}
+                    ],
+                )
+            ]
+        },
+    )
+    with pytest.raises(ReadError, match="no application containers"):
+        running_digests(fake, CLUSTER, SERVICE)
 
 
 def test_running_digests_ignores_ecs_managed_service_connect_proxy():

@@ -128,7 +128,7 @@ def wait_for_deployment(
 
 
 def running_digests(client: Any, cluster: str, service: str) -> list[str]:
-    """Return running application digests, excluding ECS-managed runtime proxies."""
+    """Return running application digests, excluding non-essential sidecars."""
     try:
         listed = client.list_tasks(cluster=cluster, serviceName=service)
     except ClientError as error:
@@ -159,6 +159,8 @@ def running_digests(client: Any, cluster: str, service: str) -> list[str]:
         for container in containers:
             name = container.get("name") or ""
             if name.startswith("ecs-service-connect-"):
+                continue
+            if container.get("essential", True) is False:
                 continue
             digest = container.get("imageDigest")
             if not digest:

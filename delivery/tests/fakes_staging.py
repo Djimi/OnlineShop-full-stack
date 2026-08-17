@@ -28,6 +28,7 @@ DIGEST_A = f"sha256:{'a' * 64}"
 DIGEST_B = f"sha256:{'b' * 64}"
 DIGEST_C = f"sha256:{'c' * 64}"
 DIGEST_D = f"sha256:{'d' * 64}"
+REDIS_DIGEST = f"sha256:{'e' * 64}"
 
 REGISTRY = f"{ACCOUNT}.dkr.ecr.{REGION}.amazonaws.com"
 REPOSITORIES = {
@@ -294,17 +295,23 @@ class FakeEcs:
         described = []
         for task_arn in tasks:
             service = task_arn.split("/")[-2]
-            described.append(
+            containers = [
                 {
-                    "taskArn": task_arn,
-                    "lastStatus": "RUNNING",
-                    "containers": [
-                        {
-                            "name": service,
-                            "imageDigest": self.digests[service],
-                        }
-                    ],
+                    "name": service,
+                    "imageDigest": self.digests[service],
+                    "essential": True,
                 }
+            ]
+            if service == "onlineshop-api-gateway-staging":
+                containers.append(
+                    {
+                        "name": "redis-sidecar",
+                        "imageDigest": REDIS_DIGEST,
+                        "essential": False,
+                    }
+                )
+            described.append(
+                {"taskArn": task_arn, "lastStatus": "RUNNING", "containers": containers}
             )
         return {"tasks": described}
 

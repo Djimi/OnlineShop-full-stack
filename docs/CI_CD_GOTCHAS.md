@@ -378,6 +378,7 @@ Learned during staging provisioning (2026-08-02). Full narrative: [AWS_COMMANDS_
 | `Invalid control character` parsing `--container-definitions` | Multi-line strings (SQL, JSON) inline in CLI params | Never inline complex JSON: build with python `json.dump` to a temp file, use `--cli-input-json file://` |
 | `The Systems Manager parameter name specified for secret ... is invalid` | `secrets[].valueFrom` with the `:json-key::` suffix requires the **full ARN** (name alone is treated as an SSM parameter) | Resolve names via `describe-secret --query ARN` before building TD JSON |
 | `Tags can not be empty` from `RegisterTaskDefinition` | `describe-task-definition --include TAGS` returns `tags: []`, but registration rejects an explicit empty tag list | Omit `tags` from the registration payload when the observed list is empty; preserve and pass it only when non-empty |
+| `running_digests` never converged on the gateway while auth/items passed | The gateway TD runs a non-essential `redis-sidecar` container whose digest is included in `describe-tasks` containers, so the observed digest set can never equal `{expected}` | `running_digests` skips containers with `essential: false` (sidecars) in addition to ECS-managed `ecs-service-connect-*` proxies — application digest sets are built from essential containers only |
 
 ### ECS anti-patterns
 
