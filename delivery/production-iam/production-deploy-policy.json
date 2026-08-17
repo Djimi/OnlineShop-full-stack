@@ -37,6 +37,7 @@
         "arn:aws:ecs:eu-north-1:799111666795:service/onlineshop-cluster/onlineshop-auth",
         "arn:aws:ecs:eu-north-1:799111666795:service/onlineshop-cluster/onlineshop-items",
         "arn:aws:ecs:eu-north-1:799111666795:service/onlineshop-cluster/onlineshop-api-gateway",
+        "arn:aws:ecs:eu-north-1:799111666795:container-instance/onlineshop-cluster/*",
         "arn:aws:ecs:eu-north-1:799111666795:task/onlineshop-cluster/*"
       ]
     },

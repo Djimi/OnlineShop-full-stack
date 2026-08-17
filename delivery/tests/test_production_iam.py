@@ -149,6 +149,7 @@ def test_ecs_actions_scoped_to_production_cluster_and_families():
         f"arn:aws:ecs:{REGION}:{ACCOUNT}:service/onlineshop-cluster/onlineshop-auth",
         f"arn:aws:ecs:{REGION}:{ACCOUNT}:service/onlineshop-cluster/onlineshop-items",
         f"arn:aws:ecs:{REGION}:{ACCOUNT}:service/onlineshop-cluster/onlineshop-api-gateway",
+        f"arn:aws:ecs:{REGION}:{ACCOUNT}:container-instance/onlineshop-cluster/*",
         f"arn:aws:ecs:{REGION}:{ACCOUNT}:task/onlineshop-cluster/*",
     }
     register = next(
