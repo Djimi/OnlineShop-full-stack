@@ -41,7 +41,6 @@ lc_init() {
   local required=(
     LC_ENVIRONMENT LC_ACCOUNT_ID LC_PROFILE LC_REGION LC_VPC_ID LC_CLUSTER
     LC_DB_INSTANCE LC_DB_SUBNET_GROUP LC_DB_SECURITY_GROUP LC_ALB_NAME
-    LC_RDS_KMS_KEY_ARN LC_RDS_SECRET_KMS_KEY_ARN
     LC_ALB_SECURITY_GROUP LC_ECS_SECURITY_GROUP LC_TARGET_GROUP_ARN LC_GATEWAY_SERVICE
     LC_GATEWAY_CONTAINER LC_GATEWAY_PORT
   )
@@ -319,6 +318,16 @@ lc_staging_db_status() {
 lc_create_clean_staging_db() {
   lc_require_environment staging || return 1
   local status endpoint public vpc encrypted
+  # The RDS encryption key and master-user-secret key are consumed only by
+  # the clean staging DB creation path; require them here, where they are
+  # used, rather than in lc_init (production RDS is retained, not created).
+  local required=(
+    LC_RDS_KMS_KEY_ARN LC_RDS_SECRET_KMS_KEY_ARN
+  )
+  local name
+  for name in "${required[@]}"; do
+    [ -n "${!name:-}" ] || lc_die "missing lifecycle configuration: $name"
+  done
   status=$(lc_staging_db_status)
   if lc_is_present "$status"; then
     lc_die "staging database $LC_DB_INSTANCE already exists ($status); run pause-staging.sh before a clean start"
