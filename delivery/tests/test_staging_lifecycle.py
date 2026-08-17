@@ -338,6 +338,19 @@ def test_lifecycle_first_invocation_happy_path(runner, capsys):
     assert "prepared for candidate" in capsys.readouterr().out
 
 
+def test_lifecycle_resolves_e2e_url_from_alb_dns_name(runner):
+    ids = staging_identifiers()
+    ids.pop("e2eBaseUrl")
+    runner.ids = ids
+    runner.identifiers_file = write_identifiers(runner.tmp_path, ids)
+    runner._install()
+    code = main(runner.lifecycle_argv())
+    assert code == 0
+    record = runner.record()
+    assert record["e2eUrl"] == "http://staging-alb-1234.eu-north-1.elb.amazonaws.com"
+    assert (runner.tmp_path / "e2e-url.txt").read_text().strip() == record["e2eUrl"]
+
+
 def test_lifecycle_keeps_services_stopped_until_reset_finishes(runner, monkeypatch):
     def fake_sql(ctx, ids, steps, db_host):
         assert all(runner.ecs.desired_counts[service] == 0 for service in SERVICES)

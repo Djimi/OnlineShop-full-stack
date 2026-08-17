@@ -587,12 +587,12 @@ class FakeCloudFront:
 
 
 class FakeElb:
-    def describe_load_balancers(self, Names=None):
-        if not Names or Names[0] != ALB_NAME:
+    def describe_load_balancers(self, LoadBalancerNames=None):
+        if not LoadBalancerNames or LoadBalancerNames[0] != ALB_NAME:
             return {"LoadBalancers": []}
         return {
             "LoadBalancers": [
-                {"LoadBalancerName": Names[0], "DNSName": "onlineshop-alb.example.com"}
+                {"LoadBalancerName": LoadBalancerNames[0], "DNSName": "onlineshop-alb.example.com"}
             ]
         }
 

@@ -16,10 +16,10 @@ class FakeElb:
         self.balancers = balancers
         self.error = error
 
-    def describe_load_balancers(self, Names=None):
+    def describe_load_balancers(self, LoadBalancerNames=None):
         if self.error is not None:
             raise self.error
-        names = Names or []
+        names = LoadBalancerNames or []
         return {
             "LoadBalancers": [
                 b for b in (self.balancers or []) if b.get("LoadBalancerName") in names
