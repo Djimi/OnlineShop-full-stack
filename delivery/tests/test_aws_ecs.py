@@ -40,9 +40,10 @@ def _service(name=SERVICE, task_definition="td-1", deployments=None, **overrides
     return service
 
 
-def _task(task_arn, digest=None, containers=None):
+def _task(task_arn, digest=None, containers=None, task_definition="td-1"):
     return {
         "taskArn": task_arn,
+        "taskDefinitionArn": task_definition,
         "containers": (
             containers
             if containers is not None
@@ -55,7 +56,7 @@ def _td(arn="arn:aws:ecs:eu-north-1:123456789012:task-definition/auth:1", images
     return {
         "taskDefinitionArn": arn,
         "containerDefinitions": [
-            {"name": f"container-{index}", "image": image}
+            {"name": f"container-{index}", "image": image, "essential": True}
             for index, image in enumerate(images or [f"repo@sha256:{'c' * 64}"])
         ],
     }
@@ -98,7 +99,26 @@ class FakeEcs:
         self._maybe_fail()
         td = self.task_definitions.get(taskDefinition)
         if td is None:
-            raise client_error("ResourceNotFoundException", "no such task definition")
+            referencing = [
+                container
+                for task_list in self.tasks.values()
+                for task in task_list
+                if task.get("taskDefinitionArn") == taskDefinition
+                for container in task.get("containers") or []
+            ]
+            if not referencing:
+                raise client_error("ResourceNotFoundException", "no such task definition")
+            td = {
+                "taskDefinitionArn": taskDefinition,
+                "containerDefinitions": [
+                    {
+                        "name": container.get("name"),
+                        "essential": container.get("essential", True),
+                    }
+                    for container in referencing
+                    if not container.get("name", "").startswith("ecs-service-connect-")
+                ],
+            }
         return {"taskDefinition": copy.deepcopy(td)}
 
     def register_task_definition(self, **kwargs):
@@ -505,7 +525,15 @@ def test_wait_for_running_digests_tolerates_transient_draining_overlap():
 
     class ConvergingFakeEcs(FakeEcs):
         def __init__(self):
-            super().__init__(services={"auth": _service()})
+            super().__init__(
+                services={"auth": _service()},
+                tasks={
+                    "auth": [
+                        _task("arn:...:task/1", DIGEST_A),
+                        _task("arn:...:task/2", DIGEST_B),
+                    ]
+                },
+            )
             self.polls = 0
 
         def list_tasks(self, cluster, serviceName):

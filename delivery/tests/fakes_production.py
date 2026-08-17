@@ -307,6 +307,27 @@ class FakeEcs:
     def _initial_td(self, family: str) -> dict:
         arn = self.task_definition_arns[family]
         repository = family
+        definitions = [
+            {
+                "name": family,
+                "image": f"{REGISTRY}/{repository}:{family}-oldtag",
+                "essential": True,
+                "secrets": [
+                    {
+                        "name": "DB_PASSWORD",
+                        "valueFrom": f"{SECRET_ARN}:password::",
+                    }
+                ],
+            }
+        ]
+        if family == "onlineshop-api-gateway":
+            definitions.append(
+                {
+                    "name": "redis-sidecar",
+                    "image": "public.ecr.aws/docker/library/redis:7.4-alpine",
+                    "essential": False,
+                }
+            )
         return {
             "taskDefinitionArn": arn,
             "revision": int(arn.rsplit(":", 1)[1]),
@@ -317,19 +338,7 @@ class FakeEcs:
             "cpu": "256",
             "memory": "512",
             "executionRoleArn": f"arn:aws:iam::{ACCOUNT}:role/ecsTaskExecutionRole",
-            "containerDefinitions": [
-                {
-                    "name": family,
-                    "image": f"{REGISTRY}/{repository}:{family}-oldtag",
-                    "essential": True,
-                    "secrets": [
-                        {
-                            "name": "DB_PASSWORD",
-                            "valueFrom": f"{SECRET_ARN}:password::",
-                        }
-                    ],
-                }
-            ],
+            "containerDefinitions": definitions,
         }
 
     def _current_td(self, family: str) -> dict:
@@ -395,19 +404,24 @@ class FakeEcs:
         described = []
         for task_arn in tasks:
             service = task_arn.split("/")[-2]
+            td_arn = self._current_td(service)["taskDefinitionArn"]
             containers = [
-                {"name": service, "imageDigest": self.digests[service], "essential": True}
+                {"name": service, "imageDigest": self.digests[service]}
             ]
             if service == "onlineshop-api-gateway":
                 containers.append(
                     {
                         "name": "redis-sidecar",
                         "imageDigest": REDIS_DIGEST,
-                        "essential": False,
                     }
                 )
             described.append(
-                {"taskArn": task_arn, "lastStatus": "RUNNING", "containers": containers}
+                {
+                    "taskArn": task_arn,
+                    "taskDefinitionArn": td_arn,
+                    "lastStatus": "RUNNING",
+                    "containers": containers,
+                }
             )
         return {"tasks": described}
 
