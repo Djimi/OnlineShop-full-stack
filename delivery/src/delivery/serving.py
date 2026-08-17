@@ -1,12 +1,16 @@
 """Self-contained frontend server + same-origin API reverse proxy (D5/D6).
 
 The previous-official-frontend and candidate-frontend journeys serve a static
-frontend directory and forward ``/api/*``, ``/items``, and ``/auth`` requests
-to the staging ALB — mirroring the CloudFront behaviors — giving the frontend
-a same-origin API without modifying any files. The implementation uses only
-the standard library (http.server + urllib), binds to 127.0.0.1 on a random
-port, bounds every request, and refuses path traversal. No secrets are
-involved.
+frontend directory and forward GET requests for ``/api/*``, ``/items*``, and
+``/auth*`` paths to the staging ALB — mirroring the CloudFront behaviors —
+giving the frontend a same-origin API without modifying any files. The
+implementation uses only the standard library (http.server + urllib), binds
+to 127.0.0.1 on a random port, bounds every request, and refuses path
+traversal. No secrets are involved.
+
+This server is journey-only (GET), not a browser-facing origin: it has no
+POST handling and no SPA fallback, so direct navigation to deep links is out
+of scope.
 """
 
 from __future__ import annotations

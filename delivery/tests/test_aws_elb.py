@@ -20,11 +20,12 @@ class FakeElb:
         if self.error is not None:
             raise self.error
         names = Names or []
-        return {
-            "LoadBalancers": [
-                b for b in (self.balancers or []) if b.get("LoadBalancerName") in names
-            ]
-        }
+        found = [
+            b for b in (self.balancers or []) if b.get("LoadBalancerName") in names
+        ]
+        if not found:
+            raise client_error("LoadBalancerNotFound")
+        return {"LoadBalancers": found}
 
     def describe_target_health(self, TargetGroupArn):
         return {

@@ -388,7 +388,7 @@ class FakeElb:
 
     def describe_load_balancers(self, Names=None):
         if not Names or Names[0] != "onlineshop-staging-v2-alb":
-            return {"LoadBalancers": []}
+            raise client_error("LoadBalancerNotFound")
         return {
             "LoadBalancers": [
                 {"LoadBalancerName": Names[0], "DNSName": self.dns_name}

@@ -52,13 +52,21 @@ def _task(task_arn, digest=None, containers=None, task_definition="td-1"):
     }
 
 
-def _td(arn="arn:aws:ecs:eu-north-1:123456789012:task-definition/auth:1", images=None):
+def _td(
+    arn="arn:aws:ecs:eu-north-1:123456789012:task-definition/auth:1",
+    images=None,
+    containers=None,
+):
     return {
         "taskDefinitionArn": arn,
-        "containerDefinitions": [
-            {"name": f"container-{index}", "image": image, "essential": True}
-            for index, image in enumerate(images or [f"repo@sha256:{'c' * 64}"])
-        ],
+        "containerDefinitions": (
+            containers
+            if containers is not None
+            else [
+                {"name": f"container-{index}", "image": image, "essential": True}
+                for index, image in enumerate(images or [f"repo@sha256:{'c' * 64}"])
+            ]
+        ),
     }
 
 
@@ -111,10 +119,7 @@ class FakeEcs:
             td = {
                 "taskDefinitionArn": taskDefinition,
                 "containerDefinitions": [
-                    {
-                        "name": container.get("name"),
-                        "essential": container.get("essential", True),
-                    }
+                    {"name": container.get("name"), "essential": True}
                     for container in referencing
                     if not container.get("name", "").startswith("ecs-service-connect-")
                 ],
@@ -201,13 +206,21 @@ def test_running_digests_sorted_from_multiple_tasks():
 def test_running_digests_includes_every_essential_container_of_every_task():
     fake = FakeEcs(
         services={"auth": _service()},
+        task_definitions={
+            "td-1": _td(
+                containers=[
+                    {"name": "auth", "essential": True},
+                    {"name": "sidecar", "essential": True},
+                ]
+            )
+        },
         tasks={
             "auth": [
                 _task(
                     "arn:...:task/1",
                     containers=[
-                        {"name": "auth", "imageDigest": DIGEST_A, "essential": True},
-                        {"name": "sidecar", "imageDigest": DIGEST_B, "essential": True},
+                        {"name": "auth", "imageDigest": DIGEST_A},
+                        {"name": "sidecar", "imageDigest": DIGEST_B},
                     ],
                 )
             ]
@@ -219,13 +232,21 @@ def test_running_digests_includes_every_essential_container_of_every_task():
 def test_running_digests_ignores_non_essential_sidecars():
     fake = FakeEcs(
         services={"auth": _service()},
+        task_definitions={
+            "td-1": _td(
+                containers=[
+                    {"name": "auth", "essential": True},
+                    {"name": "redis-sidecar", "essential": False},
+                ]
+            )
+        },
         tasks={
             "auth": [
                 _task(
                     "arn:...:task/1",
                     containers=[
-                        {"name": "auth", "imageDigest": DIGEST_A, "essential": True},
-                        {"name": "redis-sidecar", "imageDigest": DIGEST_B, "essential": False},
+                        {"name": "auth", "imageDigest": DIGEST_A},
+                        {"name": "redis-sidecar", "imageDigest": DIGEST_B},
                     ],
                 )
             ]
@@ -237,13 +258,16 @@ def test_running_digests_ignores_non_essential_sidecars():
 def test_running_digests_rejects_task_with_only_non_essential_sidecars():
     fake = FakeEcs(
         services={"auth": _service()},
+        task_definitions={
+            "td-1": _td(
+                containers=[{"name": "redis-sidecar", "essential": False}]
+            )
+        },
         tasks={
             "auth": [
                 _task(
                     "arn:...:task/1",
-                    containers=[
-                        {"name": "redis-sidecar", "imageDigest": DIGEST_B, "essential": False}
-                    ],
+                    containers=[{"name": "redis-sidecar", "imageDigest": DIGEST_B}],
                 )
             ]
         },

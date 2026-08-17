@@ -194,7 +194,7 @@ def running_digests(client: Any, cluster: str, service: str) -> list[str]:
         if not task_digests:
             raise ReadError(f"task {task.get('taskArn')} has no application containers")
         digests.extend(task_digests)
-    return sorted(digests)
+    return sorted(set(digests))
 
 
 def wait_for_running_digests(
