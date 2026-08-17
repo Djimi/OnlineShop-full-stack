@@ -18,9 +18,23 @@ class _FakeUpstream(BaseHTTPRequestHandler):
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)
-        elif self.path == "/api/v1/items":
+        elif self.path == "/items":
             body = b'{"items": []}'
             self.send_response(401)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+        elif self.path == "/items/1":
+            body = b'{"item": {"id": 1}}'
+            self.send_response(401)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+        elif self.path == "/auth/validate":
+            body = b'{"valid": true}'
+            self.send_response(200)
             self.send_header("Content-Type", "application/json")
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
@@ -60,6 +74,21 @@ def test_frontend_server_serves_index_and_proxies_api(www_dir, upstream):
     assert by_name["items-api"].conclusion == "passed"
     assert "401" in by_name["items-api"].detail
     assert by_name["gateway-health"].conclusion == "passed"
+
+
+def test_frontend_server_forwards_auth_and_item_paths(www_dir, upstream):
+    import urllib.error
+    import urllib.request
+
+    with FrontendServer(www_dir, upstream) as server:
+        with urllib.request.urlopen(f"{server.base_url}/auth/validate", timeout=10) as response:
+            assert response.status == 200
+            assert b"valid" in response.read()
+        try:
+            urllib.request.urlopen(f"{server.base_url}/items/1", timeout=10)
+        except urllib.error.HTTPError as error:
+            assert error.code == 401
+            assert b"upstream rejected the request" in error.read()
 
 
 def test_frontend_server_static_asset(www_dir, upstream):

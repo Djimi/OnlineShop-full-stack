@@ -204,10 +204,6 @@ def _assert_main_eligible(manifest: CandidateManifest) -> None:
 
 def _revalidate_candidate_artifacts(api: GitHubApi, manifest: CandidateManifest) -> None:
     """CT-CAND-03: the exact run/attempt owns the complete four-artifact set."""
-    artifacts = api.list_run_artifacts(
-        manifest.build.workflowRunId, manifest.build.workflowRunAttempt
-    )
-    names = {artifact["name"] for artifact in artifacts}
     run = manifest.build.workflowRunId
     attempt = manifest.build.workflowRunAttempt
     required = {
@@ -216,12 +212,16 @@ def _revalidate_candidate_artifacts(api: GitHubApi, manifest: CandidateManifest)
         f"sboms-{run}-{attempt}",
         f"test-results-{run}-{attempt}",
     }
-    missing = sorted(required - names)
-    if missing:
+    try:
+        api.list_run_artifacts(run, attempt, required)
+    except ValidationError as error:
+        if not str(error).startswith("missing artifacts "):
+            raise
+        missing = str(error).split(" for run ", 1)[0].removeprefix("missing artifacts ")
         raise ValidationError(
             f"candidate artifact set is incomplete (CT-CAND-03): "
-            f"missing {', '.join(missing)} for run {run} attempt {attempt}"
-        )
+            f"missing {missing} for run {run} attempt {attempt}"
+        ) from error
 
 
 def _load_staging_gate(
@@ -242,14 +242,16 @@ def _load_staging_gate(
     name = f"staging-record-{staging_run_id}-{attempt}"
     if not _STAGING_RECORD_NAME.fullmatch(name):
         raise ValidationError(f"unsafe staging record artifact name {name!r}")
-    artifacts = api.list_artifacts_for_run(staging_run_id)
-    matches = [artifact for artifact in artifacts if artifact["name"] == name]
-    if not matches:
+    try:
+        artifacts = api.list_artifacts_for_run(staging_run_id, attempt, {name})
+    except ValidationError as error:
+        if not str(error).startswith("missing artifacts "):
+            raise
         raise ValidationError(
             f"staging run {staging_run_id} attempt {attempt} has no {name} artifact; "
             "the latest staging attempt is not a completed gate — re-run the staging gate"
-        )
-    zip_bytes = api.download_artifact_zip(matches[0]["archive_download_url"])
+        ) from error
+    zip_bytes = api.download_artifact_zip(artifacts[0]["archive_download_url"])
     record_raw = _extract_staging_record(zip_bytes)
     try:
         record = StagingOperationRecord.model_validate(json.loads(record_raw))

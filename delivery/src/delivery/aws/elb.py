@@ -7,6 +7,7 @@ from typing import Any
 from botocore.exceptions import ClientError
 
 from ..errors import AbsentResourceError, ReadError
+from .readback import absent_or_read
 
 
 def describe_load_balancer(client: Any, name: str) -> dict:
@@ -14,6 +15,8 @@ def describe_load_balancer(client: Any, name: str) -> dict:
     try:
         response = client.describe_load_balancers(Names=[name])
     except ClientError as error:
+        if absent_or_read(error):
+            raise AbsentResourceError(f"load balancer {name} not found") from error
         raise ReadError(f"describe_load_balancers failed for {name}") from error
     balancers = response.get("LoadBalancers") or []
     if not balancers:

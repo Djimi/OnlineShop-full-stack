@@ -99,7 +99,7 @@ class PreflightEnv:
             "ecs": self.ecs,
             "ecr": self.ecr,
             "s3": self.s3,
-            "elb": self.elb,
+            "elbv2": self.elb,
             "rds": self.rds,
         }
         self.monkeypatch.setattr(

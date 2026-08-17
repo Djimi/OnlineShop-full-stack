@@ -19,6 +19,7 @@ _ABSENT_CODES = {
     "ResourceNotFoundException",
     "ImageNotFoundException",
     "RepositoryNotFoundException",
+    "LoadBalancerNotFound",
 }
 
 

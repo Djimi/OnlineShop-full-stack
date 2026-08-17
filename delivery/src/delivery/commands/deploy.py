@@ -372,10 +372,10 @@ def _prefix_content_checksum(
     s3_client, bucket: str, prefix: str, files: list[Path], dist_dir: Path
 ) -> str:
     lines = []
-    for path in files:
+    for path in sorted(files, key=lambda p: p.relative_to(dist_dir).as_posix()):
         relative = path.relative_to(dist_dir).as_posix()
         observed = get_object_sha256(s3_client, bucket, f"{prefix}{relative}")
-        lines.append(f"{observed}  ./{relative}\n")
+        lines.append(f"{observed}\n")
     return sha256_hex("".join(lines).encode())
 
 

@@ -138,11 +138,22 @@ class FakeEcs:
             for arn in spec["tasks"]:
                 self.tasks[arn] = {
                     "taskArn": arn,
+                    "taskDefinitionArn": spec["taskDefinition"],
                     "containers": [{"name": "app", "imageDigest": digests[arn]}],
                 }
 
     def describe_services(self, cluster, services):
         return {"services": [self.services[name] for name in services]}
+
+    def describe_task_definition(self, taskDefinition):
+        return {
+            "taskDefinition": {
+                "taskDefinitionArn": taskDefinition,
+                "containerDefinitions": [
+                    {"name": "app", "image": "repo@sha256:app", "essential": True}
+                ],
+            }
+        }
 
     def list_tasks(self, cluster, serviceName):
         return {"taskArns": list(self.service_tasks[serviceName])}

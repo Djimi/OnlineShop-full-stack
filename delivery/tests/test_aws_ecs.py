@@ -40,9 +40,10 @@ def _service(name=SERVICE, task_definition="td-1", deployments=None, **overrides
     return service
 
 
-def _task(task_arn, digest=None, containers=None):
+def _task(task_arn, digest=None, containers=None, task_definition="td-1"):
     return {
         "taskArn": task_arn,
+        "taskDefinitionArn": task_definition,
         "containers": (
             containers
             if containers is not None
@@ -51,13 +52,21 @@ def _task(task_arn, digest=None, containers=None):
     }
 
 
-def _td(arn="arn:aws:ecs:eu-north-1:123456789012:task-definition/auth:1", images=None):
+def _td(
+    arn="arn:aws:ecs:eu-north-1:123456789012:task-definition/auth:1",
+    images=None,
+    containers=None,
+):
     return {
         "taskDefinitionArn": arn,
-        "containerDefinitions": [
-            {"name": f"container-{index}", "image": image}
-            for index, image in enumerate(images or [f"repo@sha256:{'c' * 64}"])
-        ],
+        "containerDefinitions": (
+            containers
+            if containers is not None
+            else [
+                {"name": f"container-{index}", "image": image, "essential": True}
+                for index, image in enumerate(images or [f"repo@sha256:{'c' * 64}"])
+            ]
+        ),
     }
 
 
@@ -98,7 +107,23 @@ class FakeEcs:
         self._maybe_fail()
         td = self.task_definitions.get(taskDefinition)
         if td is None:
-            raise client_error("ResourceNotFoundException", "no such task definition")
+            referencing = [
+                container
+                for task_list in self.tasks.values()
+                for task in task_list
+                if task.get("taskDefinitionArn") == taskDefinition
+                for container in task.get("containers") or []
+            ]
+            if not referencing:
+                raise client_error("ResourceNotFoundException", "no such task definition")
+            td = {
+                "taskDefinitionArn": taskDefinition,
+                "containerDefinitions": [
+                    {"name": container.get("name"), "essential": True}
+                    for container in referencing
+                    if not container.get("name", "").startswith("ecs-service-connect-")
+                ],
+            }
         return {"taskDefinition": copy.deepcopy(td)}
 
     def register_task_definition(self, **kwargs):
@@ -178,9 +203,17 @@ def test_running_digests_sorted_from_multiple_tasks():
     assert running_digests(fake, CLUSTER, SERVICE) == sorted([DIGEST_A, DIGEST_B])
 
 
-def test_running_digests_includes_every_container_of_every_task():
+def test_running_digests_includes_every_essential_container_of_every_task():
     fake = FakeEcs(
         services={"auth": _service()},
+        task_definitions={
+            "td-1": _td(
+                containers=[
+                    {"name": "auth", "essential": True},
+                    {"name": "sidecar", "essential": True},
+                ]
+            )
+        },
         tasks={
             "auth": [
                 _task(
@@ -194,6 +227,87 @@ def test_running_digests_includes_every_container_of_every_task():
         },
     )
     assert running_digests(fake, CLUSTER, SERVICE) == sorted([DIGEST_A, DIGEST_B])
+
+
+def test_running_digests_ignores_non_essential_sidecars():
+    fake = FakeEcs(
+        services={"auth": _service()},
+        task_definitions={
+            "td-1": _td(
+                containers=[
+                    {"name": "auth", "essential": True},
+                    {"name": "redis-sidecar", "essential": False},
+                ]
+            )
+        },
+        tasks={
+            "auth": [
+                _task(
+                    "arn:...:task/1",
+                    containers=[
+                        {"name": "auth", "imageDigest": DIGEST_A},
+                        {"name": "redis-sidecar", "imageDigest": DIGEST_B},
+                    ],
+                )
+            ]
+        },
+    )
+    assert running_digests(fake, CLUSTER, SERVICE) == [DIGEST_A]
+
+
+def test_running_digests_rejects_task_with_only_non_essential_sidecars():
+    fake = FakeEcs(
+        services={"auth": _service()},
+        task_definitions={
+            "td-1": _td(
+                containers=[{"name": "redis-sidecar", "essential": False}]
+            )
+        },
+        tasks={
+            "auth": [
+                _task(
+                    "arn:...:task/1",
+                    containers=[{"name": "redis-sidecar", "imageDigest": DIGEST_B}],
+                )
+            ]
+        },
+    )
+    with pytest.raises(ReadError, match="no application containers"):
+        running_digests(fake, CLUSTER, SERVICE)
+
+
+def test_running_digests_ignores_ecs_managed_service_connect_proxy():
+    fake = FakeEcs(
+        services={"auth": _service()},
+        tasks={
+            "auth": [
+                _task(
+                    "arn:...:task/1",
+                    containers=[
+                        {"name": "auth", "imageDigest": DIGEST_A},
+                        {"name": "ecs-service-connect-abc123"},
+                    ],
+                )
+            ]
+        },
+    )
+    assert running_digests(fake, CLUSTER, SERVICE) == [DIGEST_A]
+
+
+def test_running_digests_rejects_task_with_only_managed_proxy():
+    fake = FakeEcs(
+        services={"auth": _service()},
+        tasks={
+            "auth": [
+                _task(
+                    "arn:...:task/1",
+                    containers=[{"name": "ecs-service-connect-abc123"}],
+                )
+            ]
+        },
+    )
+    with pytest.raises(ReadError, match="no application containers"):
+        running_digests(fake, CLUSTER, SERVICE)
 
 
 def test_running_digests_empty_task_list_is_read_error():
@@ -435,7 +549,15 @@ def test_wait_for_running_digests_tolerates_transient_draining_overlap():
 
     class ConvergingFakeEcs(FakeEcs):
         def __init__(self):
-            super().__init__(services={"auth": _service()})
+            super().__init__(
+                services={"auth": _service()},
+                tasks={
+                    "auth": [
+                        _task("arn:...:task/1", DIGEST_A),
+                        _task("arn:...:task/2", DIGEST_B),
+                    ]
+                },
+            )
             self.polls = 0
 
         def list_tasks(self, cluster, serviceName):

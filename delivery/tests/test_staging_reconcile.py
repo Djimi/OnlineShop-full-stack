@@ -320,7 +320,8 @@ def test_apply_ecr_digest_missing_fails_without_mutation(apply_runner, capsys):
     assert apply_runner.ecs.register_calls == []
 
 
-def test_apply_does_not_clean_up_a_running_environment(apply_runner, capsys):
+def test_apply_does_not_clean_up_a_running_environment(apply_runner, capsys, monkeypatch):
+    monkeypatch.setattr("delivery.commands.staging.DEPLOYMENT_TIMEOUT", 0.6)
     apply_runner.ecs.digests[SERVICES[0]] = f"sha256:{'f' * 64}"
     code = main(apply_runner.argv())
     assert code == 1

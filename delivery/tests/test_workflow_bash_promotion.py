@@ -562,7 +562,7 @@ def test_report_step_prints_both_outcomes_on_success(tmp_path: Path) -> None:
     (tmp_path / "recovery-verification.json").write_text(
         json.dumps({"conclusion": "passed"})
     )
-    result = _bash(REPORT_SCRIPT, cwd=tmp_path)
+    result = _bash(REPORT_SCRIPT, {"ORIGINAL_RESULT": "failure", "RUN_ID": "4713"}, cwd=tmp_path)
     assert result.returncode == 0, result.stdout + result.stderr
     assert "ORIGINAL FAILURE" in result.stdout
     assert "VERIFICATION OUTCOME: passed" in result.stdout
@@ -573,7 +573,7 @@ def test_report_step_fails_when_verification_missing(tmp_path: Path) -> None:
     (tmp_path / "recovery-result.json").write_text(
         json.dumps({"outcome": "completed", "components": [], "originalFailure": "x"})
     )
-    result = _bash(REPORT_SCRIPT, cwd=tmp_path)
+    result = _bash(REPORT_SCRIPT, {"ORIGINAL_RESULT": "failure", "RUN_ID": "4713"}, cwd=tmp_path)
     assert result.returncode == 1
     assert "post-recovery verification produced no report" in result.stderr
     assert "NOT confirmed" in result.stderr
@@ -586,7 +586,7 @@ def test_report_step_fails_when_verification_failed(tmp_path: Path) -> None:
     (tmp_path / "recovery-verification.json").write_text(
         json.dumps({"conclusion": "failed"})
     )
-    result = _bash(REPORT_SCRIPT, cwd=tmp_path)
+    result = _bash(REPORT_SCRIPT, {"ORIGINAL_RESULT": "failure", "RUN_ID": "4713"}, cwd=tmp_path)
     assert result.returncode == 1
     assert "post-recovery verification FAILED" in result.stderr
     assert "NOT confirmed" in result.stderr
@@ -641,7 +641,7 @@ def test_report_step_fails_when_recovery_failed(tmp_path: Path) -> None:
             }
         )
     )
-    result = _bash(REPORT_SCRIPT, cwd=tmp_path)
+    result = _bash(REPORT_SCRIPT, {"ORIGINAL_RESULT": "failure", "RUN_ID": "4713"}, cwd=tmp_path)
     assert result.returncode == 1
     assert "ORIGINAL FAILURE" in result.stdout
     assert "UNRESOLVED" in result.stderr
@@ -649,6 +649,6 @@ def test_report_step_fails_when_recovery_failed(tmp_path: Path) -> None:
 
 
 def test_report_step_fails_when_no_result_exists(tmp_path: Path) -> None:
-    result = _bash(REPORT_SCRIPT, cwd=tmp_path)
+    result = _bash(REPORT_SCRIPT, {"ORIGINAL_RESULT": "failure", "RUN_ID": "4713"}, cwd=tmp_path)
     assert result.returncode == 1
     assert "UNRESOLVED" in result.stderr

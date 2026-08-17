@@ -19,16 +19,18 @@ stage-candidate.yml (workflow_dispatch: candidate run id + attempt)
   v
 QUEUED → OWNED ────────────── marker acquire on staging RDS (fail-closed
   │       revalidate: GitHub artifacts of the EXACT run/attempt +
-  │       ECR digests via ecr:BatchGetImage (read-only)
+  │       ECR digests via DescribeImages / ecr:DescribeImages (read-only)
   v
-STARTING → RESETTING ──────── RDS start; tenant DB reset through the ECS
+STARTING → RESETTING ──────── RDS start while services stay at desired 0;
+  │       tenant DB reset through the ECS
   │       SQL runner: schema + grants + seed + connectivity proof,
   │       every step with mandatory read-back (SQL sources resolved
   │       from the checkout via --repo-path, fail-closed)
   v
-DEPLOYING ─────────────────── digest-pinned image-only TD diff,
-  │       ordered auth+items → gateway, bounded waiters,
-  │       running-digest observation
+DEPLOYING ─────────────────── digest-pinned image-only TD diff registered
+  │       before each service starts; ordered auth+items → gateway, bounded waiters,
+  │       running-digest observation; stale task definitions and database
+  │       hosts never start before reset and candidate registration
   v
 COMPATIBILITY ─────────────── AD-15: previous-official-frontend read-only
   │       journey, or bootstrapException when no official release exists
@@ -70,7 +72,7 @@ reconcile-staging.yml (cron */15 + workflow_dispatch)
 | Rule | How it's enforced |
 |---|---|
 | Exact run/attempt authority | Dispatch inputs are digits-regex-validated; the engine revalidates the exact run/attempt through the GitHub API and the four `-<run>-<attempt>` artifact names (CT-CAND-03); ECR digest read-back proves the images still exist |
-| Ownership marker (D1) | RDS tag `onlineshop:staging-owner` (canonical JSON, TTL 3h) on the staging DB; acquire fails closed on any valid owner; release read-back must prove absence |
+| Ownership marker (D1) | RDS tag `onlineshop:staging-owner` (`v1:<operation>:<run>:<attempt>:<owner>:<acquired-epoch>:<expires-epoch>`, TTL 3h) on the staging DB; the compact value is validated against the AWS charset and 256-character limit before mutation; acquire fails closed on any valid owner; release read-back must prove absence |
 | Record is visibility only (CT-STG-02) | Continuation re-reads the live marker and asserts operation/run/attempt identity before any second-invocation mutation; the record never grants ownership |
 | Two-invocation machine | Invocation 1 runs through E2E(pending) and emits the E2E URL; invocation 2 records the real conclusion, cleans up, completes; a decided E2E conclusion is never overwritten |
 | Digest-pinned deployment | Image-only container replacement (the diff is proven image-only), register + update-service, bounded waiter, running digests compared to the candidate's |
@@ -99,8 +101,8 @@ Both workflows assume `arn:aws:iam::799111666795:role/github-actions-staging`
 pass). The desired policy artifact
 `delivery/staging-iam/staging-deploy-policy.json` enforces:
 
-- scoped read-only ECR on the three repositories (`ecr:BatchGetImage`,
-  `ecr:DescribeImages` — no `PutImage`);
+- scoped read-only ECR digest lookup on the three repositories
+  (`ecr:DescribeImages` — no manifest fetch and no `PutImage`);
 - `ecs:RunTask` scoped to the staging cluster with an
   `ecs:task-definition-family` condition (sql-runner family only);
 - TD register/inspect/deregister scoped to staging families;

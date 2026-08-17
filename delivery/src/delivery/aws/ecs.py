@@ -128,7 +128,7 @@ def wait_for_deployment(
 
 
 def running_digests(client: Any, cluster: str, service: str) -> list[str]:
-    """Return the sorted image digests of the running containers of a service."""
+    """Return running application digests, excluding non-essential sidecars."""
     try:
         listed = client.list_tasks(cluster=cluster, serviceName=service)
     except ClientError as error:
@@ -150,25 +150,51 @@ def running_digests(client: Any, cluster: str, service: str) -> list[str]:
             f"describe_tasks returned {len(tasks)} of {len(task_arns)} tasks "
             f"for service {service}"
         )
+    essential_names: dict[str, set[str]] = {}
+
+    def essential_containers(td_arn: str) -> set[str]:
+        if td_arn not in essential_names:
+            td = describe_task_definition(client, td_arn)
+            definitions = (td.get("taskDefinition") or {}).get("containerDefinitions") or []
+            essential_names[td_arn] = {
+                container.get("name")
+                for container in definitions
+                if container.get("essential", True)
+            }
+        return essential_names[td_arn]
+
     digests: list[str] = []
     for task in tasks:
         containers = task.get("containers") or []
         if not containers:
             raise ReadError(f"task {task.get('taskArn')} has no containers")
+        td_arn = task.get("taskDefinitionArn")
+        if not td_arn:
+            raise ReadError(f"task {task.get('taskArn')} has no taskDefinitionArn")
+        essential = essential_containers(td_arn)
+        task_digests = []
         for container in containers:
+            name = container.get("name") or ""
+            if name.startswith("ecs-service-connect-"):
+                continue
+            if name not in essential:
+                continue
             digest = container.get("imageDigest")
             if not digest:
                 raise ReadError(
-                    f"task {task.get('taskArn')} container {container.get('name')} "
+                    f"task {task.get('taskArn')} container {name} "
                     "has no imageDigest"
                 )
             if not _IMAGE_DIGEST.fullmatch(digest):
                 raise ReadError(
-                    f"task {task.get('taskArn')} container {container.get('name')} "
+                    f"task {task.get('taskArn')} container {name} "
                     f"has malformed imageDigest {digest}"
                 )
-            digests.append(digest)
-    return sorted(digests)
+            task_digests.append(digest)
+        if not task_digests:
+            raise ReadError(f"task {task.get('taskArn')} has no application containers")
+        digests.extend(task_digests)
+    return sorted(set(digests))
 
 
 def wait_for_running_digests(

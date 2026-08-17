@@ -11,6 +11,9 @@ STAGING_CLUSTER_SERVICE = (
     "arn:aws:ecs:eu-north-1:799111666795:service/onlineshop-staging-cluster/onlineshop-*-staging"
 )
 STAGING_CLUSTER_ARN = "arn:aws:ecs:eu-north-1:799111666795:cluster/onlineshop-staging-cluster"
+STAGING_TASK_ARN = (
+    "arn:aws:ecs:eu-north-1:799111666795:task/onlineshop-staging-cluster/*"
+)
 ECR_REPOSITORY_ARNS = [
     "arn:aws:ecr:eu-north-1:799111666795:repository/onlineshop-auth",
     "arn:aws:ecr:eu-north-1:799111666795:repository/onlineshop-items",
@@ -20,11 +23,13 @@ STAGING_TD_RESOURCES = [
     "arn:aws:ecs:eu-north-1:799111666795:task-definition/onlineshop-*-staging-v2:*",
     "arn:aws:ecs:eu-north-1:799111666795:task-definition/onlineshop-staging-sql-runner:*",
 ]
-TD_ACTIONS = {
+TD_SCOPED_ACTIONS = {
     "ecs:RegisterTaskDefinition",
+    "ecs:DeleteTaskDefinitions",
+}
+TD_UNSCOPED_ACTIONS = {
     "ecs:DescribeTaskDefinition",
     "ecs:DeregisterTaskDefinition",
-    "ecs:DeleteTaskDefinitions",
 }
 
 
@@ -156,23 +161,47 @@ def test_policy_run_task_scoped_to_staging_cluster_only():
     ]
     assert len(run_statements) == 1
     statement = run_statements[0]
-    assert statement["Resource"] == STAGING_CLUSTER_ARN
+    assert statement["Resource"] == STAGING_TD_RESOURCES[1]
     assert statement["Effect"] == "Allow"
-    assert "Condition" not in statement
+    assert statement["Condition"] == {"ArnEquals": {"ecs:cluster": STAGING_CLUSTER_ARN}}
 
 
-def test_policy_td_actions_scoped_to_staging_task_definition_families():
-    for statement in _policy()["Statement"]:
-        stmt_actions = statement.get("Action")
-        if isinstance(stmt_actions, str):
-            stmt_actions = [stmt_actions]
-        if TD_ACTIONS & set(stmt_actions):
-            assert set(statement["Resource"]) == set(STAGING_TD_RESOURCES)
-            for resource in statement["Resource"]:
-                assert resource.startswith(
-                    "arn:aws:ecs:eu-north-1:799111666795:task-definition/"
-                )
-                assert "staging" in resource
+def test_policy_scopes_service_and_task_reads_to_staging():
+    by_sid = {statement["Sid"]: statement for statement in _policy()["Statement"]}
+    services = by_sid["InspectStagingServices"]
+    assert services["Action"] == "ecs:DescribeServices"
+    assert services["Resource"] == STAGING_CLUSTER_SERVICE
+
+    tasks = by_sid["InspectStagingTasks"]
+    assert tasks["Action"] == "ecs:DescribeTasks"
+    assert tasks["Resource"] == STAGING_TASK_ARN
+    assert tasks["Condition"] == {"ArnEquals": {"ecs:cluster": STAGING_CLUSTER_ARN}}
+
+    listing = by_sid["ListStagingTasksWithoutResourceSupport"]
+    assert listing["Action"] == "ecs:ListTasks"
+    assert listing["Resource"] == "*"
+    assert listing["Condition"] == {"ArnEquals": {"ecs:cluster": STAGING_CLUSTER_ARN}}
+
+
+def test_policy_scopes_supported_td_actions_to_staging_families():
+    statement = next(
+        entry
+        for entry in _policy()["Statement"]
+        if entry["Sid"] == "RegisterAndDeleteStagingTaskDefinitions"
+    )
+    assert set(statement["Action"]) == TD_SCOPED_ACTIONS
+    assert set(statement["Resource"]) == set(STAGING_TD_RESOURCES)
+
+
+def test_policy_wildcards_only_td_actions_without_resource_support():
+    statement = next(
+        entry
+        for entry in _policy()["Statement"]
+        if entry["Sid"] == "InspectAndDeregisterTaskDefinitionsWithoutResourceSupport"
+    )
+    assert set(statement["Action"]) == TD_UNSCOPED_ACTIONS
+    assert statement["Resource"] == "*"
+    assert TD_SCOPED_ACTIONS.isdisjoint(statement["Action"])
 
 
 def test_policy_ecs_actions_never_touch_production_cluster():
@@ -184,6 +213,11 @@ def test_policy_ecs_actions_never_touch_production_cluster():
             stmt_actions = [stmt_actions]
         if any(action.startswith("ecs:") for action in stmt_actions):
             resources = statement["Resource"]
+            if resources == "*":
+                assert set(stmt_actions) == TD_UNSCOPED_ACTIONS or stmt_actions == [
+                    "ecs:ListTasks"
+                ]
+                continue
             if isinstance(resources, str):
                 resources = [resources]
             for resource in resources:

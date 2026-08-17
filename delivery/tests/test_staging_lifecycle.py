@@ -31,9 +31,10 @@ from fakes_staging import (
 )
 
 from delivery.cli import main
-from delivery.commands.staging import _content_checksum
+from delivery.commands.staging import _content_checksum, _StagingMachine
 from delivery.serialization import sha256_hex
 from delivery.serving import JourneyResult
+from delivery.staging_marker import parse_marker
 
 RUN_ID = 4712
 RUN_ATTEMPT = 2
@@ -42,6 +43,72 @@ CANDIDATE_ID = f"cand-{RUN_ID}-{RUN_ATTEMPT}-{SHA[:12]}"
 OPERATION_ID = f"stg-{RUN_ID}-{RUN_ATTEMPT}"
 
 FRONTEND_CHECKSUM = f"{'d' * 64}"
+
+
+def _machine_without_init() -> _StagingMachine:
+    return object.__new__(_StagingMachine)
+
+
+def test_stop_db_returns_when_already_stopped(monkeypatch):
+    rds = FakeRds(status="stopped")
+    monkeypatch.setattr(
+        "delivery.commands.staging._wait_for_db_status",
+        lambda *args: pytest.fail("waiter must not run for an already stopped DB"),
+    )
+
+    observed = _machine_without_init()._stop_db(rds, "onlineshop-staging-postgres")
+
+    assert observed["DBInstanceStatus"] == "stopped"
+    assert "stop_db_instance" not in rds.calls
+
+
+def test_stop_db_waits_when_stop_is_already_in_progress(monkeypatch):
+    rds = FakeRds(status="stopping")
+
+    def wait(client, identifier, expected, timeout):
+        assert expected == "stopped"
+        client.status = "stopped"
+        return client.describe_db_instances(DBInstanceIdentifier=identifier)["DBInstances"][0]
+
+    monkeypatch.setattr("delivery.commands.staging._wait_for_db_status", wait)
+
+    observed = _machine_without_init()._stop_db(rds, "onlineshop-staging-postgres")
+
+    assert observed["DBInstanceStatus"] == "stopped"
+    assert "stop_db_instance" not in rds.calls
+
+
+def test_stop_db_waits_for_transient_state_before_stopping(monkeypatch):
+    rds = FakeRds(status="configuring-enhanced-monitoring", stop_result="stopping")
+    expected_states = iter(("available", "stopped"))
+
+    def wait(client, identifier, expected, timeout):
+        assert expected == next(expected_states)
+        client.status = expected
+        return client.describe_db_instances(DBInstanceIdentifier=identifier)["DBInstances"][0]
+
+    monkeypatch.setattr("delivery.commands.staging._wait_for_db_status", wait)
+
+    observed = _machine_without_init()._stop_db(rds, "onlineshop-staging-postgres")
+
+    assert observed["DBInstanceStatus"] == "stopped"
+    assert rds.calls.count("stop_db_instance") == 1
+
+
+def test_stop_db_stops_available_database_once(monkeypatch):
+    rds = FakeRds(status="available", stop_result="stopping")
+
+    def wait(client, identifier, expected, timeout):
+        assert expected == "stopped"
+        client.status = "stopped"
+        return client.describe_db_instances(DBInstanceIdentifier=identifier)["DBInstances"][0]
+
+    monkeypatch.setattr("delivery.commands.staging._wait_for_db_status", wait)
+
+    observed = _machine_without_init()._stop_db(rds, "onlineshop-staging-postgres")
+
+    assert observed["DBInstanceStatus"] == "stopped"
+    assert rds.calls.count("stop_db_instance") == 1
 
 # The reset SQL sources live in the repository checkout; the CLI takes the
 # checkout as --repo-path (the wheel-installed engine has no source tree).
@@ -153,7 +220,7 @@ class Runner:
             "ecs": self.ecs,
             "ecr": self.ecr,
             "rds": self.rds,
-            "elb": self.elb,
+            "elbv2": self.elb,
             "s3": self.s3,
             "secretsmanager": self.secrets,
             "logs": self.logs,
@@ -242,10 +309,10 @@ def test_lifecycle_first_invocation_happy_path(runner, capsys):
     assert runner.rds.status == "available"
     assert all(runner.ecs.desired_counts[s] == 1 for s in SERVICES)
     # ownership marker acquired with the right identity
-    marker = json.loads(runner.rds.tags[MARKER_TAG_KEY])
-    assert marker["operationId"] == OPERATION_ID
-    assert marker["workflowRunId"] == RUN_ID
-    assert marker["workflowRunAttempt"] == RUN_ATTEMPT
+    marker = parse_marker(runner.rds.tags[MARKER_TAG_KEY])
+    assert marker.operationId == OPERATION_ID
+    assert marker.workflowRunId == RUN_ID
+    assert marker.workflowRunAttempt == RUN_ATTEMPT
     # reset plan ran with schema/seed/grants/connectivity/negative steps
     steps = runner.sql_steps[0]
     assert len(steps) == 12
@@ -269,6 +336,66 @@ def test_lifecycle_first_invocation_happy_path(runner, capsys):
     # candidate-frontend journeys recorded (D6)
     assert any(j["name"] == "candidate-frontend:items-api" for j in record["journeys"])
     assert "prepared for candidate" in capsys.readouterr().out
+
+
+def test_lifecycle_resolves_e2e_url_from_alb_dns_name(runner):
+    ids = staging_identifiers()
+    ids.pop("e2eBaseUrl")
+    runner.ids = ids
+    runner.identifiers_file = write_identifiers(runner.tmp_path, ids)
+    runner._install()
+    code = main(runner.lifecycle_argv())
+    assert code == 0
+    record = runner.record()
+    assert record["e2eUrl"] == "http://staging-alb-1234.eu-north-1.elb.amazonaws.com"
+    assert (runner.tmp_path / "e2e-url.txt").read_text().strip() == record["e2eUrl"]
+
+
+def test_lifecycle_keeps_services_stopped_until_reset_finishes(runner, monkeypatch):
+    def fake_sql(ctx, ids, steps, db_host):
+        assert all(runner.ecs.desired_counts[service] == 0 for service in SERVICES)
+        runner.sql_steps.append(list(steps))
+        return [{} for _ in steps]
+
+    monkeypatch.setattr("delivery.commands.staging.execute_sql_steps", fake_sql)
+
+    assert main(runner.lifecycle_argv()) == 0
+    assert all(runner.ecs.desired_counts[service] == 1 for service in SERVICES)
+
+
+def test_lifecycle_reuses_already_pinned_candidate_revisions(runner):
+    repositories = ("onlineshop-auth", "onlineshop-items", "onlineshop-api-gateway")
+    digests = (DIGEST_A, DIGEST_B, DIGEST_C)
+    for service, repository, digest in zip(SERVICES, repositories, digests, strict=True):
+        arn = (
+            f"arn:aws:ecs:eu-north-1:{ACCOUNT}:task-definition/"
+            f"{service}:2"
+        )
+        runner.ecs.td_store[service] = {
+            arn: {
+                "taskDefinitionArn": arn,
+                "revision": 2,
+                "status": "ACTIVE",
+                "family": service,
+                "networkMode": "awsvpc",
+                "requiresCompatibilities": ["FARGATE"],
+                "cpu": "256",
+                "memory": "512",
+                "executionRoleArn": f"arn:aws:iam::{ACCOUNT}:role/ecsTaskExecutionRole",
+                "containerDefinitions": [
+                    {
+                        "name": service,
+                        "image": f"{ACCOUNT}.dkr.ecr.eu-north-1.amazonaws.com/"
+                        f"{repository}@{digest}",
+                        "essential": True,
+                    }
+                ],
+            }
+        }
+
+    assert main(runner.lifecycle_argv()) == 0
+    assert runner.ecs.register_calls == []
+    assert all(runner.ecs.desired_counts[service] == 1 for service in SERVICES)
 
 
 def test_lifecycle_continuation_passed_completes(runner):
@@ -330,7 +457,7 @@ def test_lifecycle_continuation_foreign_marker_fails_closed(runner, capsys):
     record = runner.record()
     # the foreign environment was not touched: cleanup skipped, marker intact
     assert "skipped" in record["failure"]["cleanupConclusion"]
-    assert json.loads(runner.rds.tags[MARKER_TAG_KEY])["operationId"] == "stg-9999-9"
+    assert parse_marker(runner.rds.tags[MARKER_TAG_KEY]).operationId == "stg-9999-9"
     assert runner.rds.status == "available"
 
 
@@ -354,7 +481,7 @@ def test_lifecycle_marker_conflict_fails_closed_without_mutation(runner, capsys)
     assert record["failure"]["mutationBegan"] is False
     assert "skipped" in record["failure"]["cleanupConclusion"]
     # never stole the marker, never started the DB, never touched services
-    assert json.loads(runner.rds.tags[MARKER_TAG_KEY])["operationId"] == "stg-4712-2"
+    assert parse_marker(runner.rds.tags[MARKER_TAG_KEY]).operationId == "stg-4712-2"
     assert "start_db_instance" not in runner.rds.calls
     assert all(runner.ecs.desired_counts[s] == 1 for s in SERVICES)
     assert not any(
@@ -365,8 +492,8 @@ def test_lifecycle_marker_conflict_fails_closed_without_mutation(runner, capsys)
 def test_lifecycle_expired_marker_is_reacquired(runner):
     runner.rds.tags[MARKER_TAG_KEY] = marker_tag_value(expires_in=timedelta(hours=-1))
     assert main(runner.lifecycle_argv()) == 0
-    marker = json.loads(runner.rds.tags[MARKER_TAG_KEY])
-    assert marker["operationId"] == OPERATION_ID
+    marker = parse_marker(runner.rds.tags[MARKER_TAG_KEY])
+    assert marker.operationId == OPERATION_ID
 
 
 def test_lifecycle_ecr_digest_missing_fails_before_ecs_mutation(runner, capsys):
@@ -392,7 +519,8 @@ def test_lifecycle_ecr_read_error_is_error_not_absence(runner, capsys):
     assert "ERROR READ_ERROR" in capsys.readouterr().err
 
 
-def test_lifecycle_running_digest_mismatch_fails_and_cleans_up(runner, capsys):
+def test_lifecycle_running_digest_mismatch_fails_and_cleans_up(runner, capsys, monkeypatch):
+    monkeypatch.setattr("delivery.commands.staging.DEPLOYMENT_TIMEOUT", 0.6)
     runner.ecs.digests[SERVICES[1]] = f"sha256:{'f' * 64}"
     code = main(runner.lifecycle_argv())
     assert code == 1

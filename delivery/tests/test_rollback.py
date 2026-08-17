@@ -240,6 +240,7 @@ class RollbackEcs:
             "tasks": [
                 {
                     "taskArn": task_arn,
+                    "taskDefinitionArn": self.service_td[task_arn.split("/")[-2]],
                     "lastStatus": "RUNNING",
                     "containers": [
                         {
@@ -382,7 +383,7 @@ class RollbackEnv:
             "ecr": self.ecr,
             "s3": self.s3,
             "cloudfront": self.cf,
-            "elb": self.elb,
+            "elbv2": self.elb,
         }
         self.monkeypatch.setattr(
             "delivery.aws.context.client_for", lambda ctx, service: clients[service]
@@ -405,7 +406,7 @@ class RollbackEnv:
                     {"Content-Type": "application/json"},
                     b'{"status":"UP"}',
                 ),
-                "http://onlineshop-alb.example.com/api/v1/items": (
+                "http://onlineshop-alb.example.com/items": (
                     200,
                     {"Content-Type": "application/json"},
                     b"[]",

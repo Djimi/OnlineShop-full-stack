@@ -702,6 +702,7 @@ jobs:
       - name: Restore the pre-mutation snapshot (automatic recovery)
         env:
           ORIGINAL_RESULT: ${{ needs.promote.result }}
+          RUN_ID: ${{ github.run_id }}
         run: |
           set -euo pipefail
           ORIGINAL_FAILURE="promotion job result: $ORIGINAL_RESULT"
@@ -748,9 +749,12 @@ jobs:
       # claims success for a failed recovery.
       - name: Report the original failure and the recovery outcome
         if: always()
+        env:
+          ORIGINAL_RESULT: ${{ needs.promote.result }}
+          RUN_ID: ${{ github.run_id }}
         run: |
           set -euo pipefail
-          echo "ORIGINAL FAILURE: promotion job result was ${{ needs.promote.result }} (run ${{ github.run_id }})"
+          echo "ORIGINAL FAILURE: promotion job result was $ORIGINAL_RESULT (run $RUN_ID)"
           if [ ! -f recovery-result.json ]; then
             echo "ERROR: automatic recovery produced no result; the original failure is UNRESOLVED" >&2
             exit 1

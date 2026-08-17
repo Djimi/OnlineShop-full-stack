@@ -9,8 +9,9 @@ production snapshot (post-compensation, OP-REC-02):
   digests equal to the expected digest (never task-definition text alone);
 - frontend: live marker content equality, S3 full-object checksum, and the
   public CloudFront-visible marker/index identity;
-- read-only journeys: gateway health, read-only GET /api/v1/items, and the
-  frontend marker/index observed through CloudFront (CT-PROD-03).
+- read-only journeys: gateway health, read-only GET /items through the
+  gateway, and the frontend marker/index observed through CloudFront
+  (CT-PROD-03).
 
 No business-data mutation exists anywhere in this path. Any mismatch or read
 error writes the failed report first and then fails the command.
@@ -259,7 +260,7 @@ def _resolve_base_url(ctx, ids: dict) -> str:
             "production identifiers carry neither gatewayBaseUrl nor albName; "
             "the read-only journeys cannot be resolved"
         )
-    elb_client = aws_context.client_for(ctx, "elb")
+    elb_client = aws_context.client_for(ctx, "elbv2")
     dns_name = describe_load_balancer(elb_client, alb_name).get("DNSName")
     if not isinstance(dns_name, str) or not dns_name:
         raise ReadError(f"load balancer {alb_name} has no DNSName")
@@ -286,7 +287,7 @@ def _journey_backend_health(base_url: str) -> VerificationJourney:
 
 
 def _journey_items_api(base_url: str) -> VerificationJourney:
-    status, headers, _body = _fetch(f"{base_url.rstrip('/')}/api/v1/items")
+    status, headers, _body = _fetch(f"{base_url.rstrip('/')}/items")
     detail = f"HTTP {status}, content-type {headers.get('Content-Type', '')}"
     passed = status in (200, 401, 403) and "application/json" in headers.get(
         "Content-Type", ""

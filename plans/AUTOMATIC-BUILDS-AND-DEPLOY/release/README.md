@@ -494,14 +494,24 @@ candidate never supplies current task-definition ARNs.
 - `compensate` — the exact reverse-order restore plan to the pre-promotion
   snapshot.
 
-The workflow `.github/workflows/promote-release.yml` runs a read-only
+The greenfield workflow `.github/workflows/promote-release-greenfield.yml`
+(which replaced the legacy `.github/workflows/promote-release.yml`, retired as
+an inert stub in Phase 6 of the live acceptance, 2026-08-17) runs a read-only
 `preflight` job before the protected `production` Environment that validates
 the dispatch inputs and the candidate manifest contract; the approved `promote`
 job then runs the full preflight with a fresh snapshot after approval/lock
 acquisition (closing the time-of-check race) before mutating, and a
 `compensate` job (`if: failure()` on `promote`, not approval-gated so a
 failing promotion restores itself automatically) restores the recorded
-snapshot.
+snapshot. The workflow drives the `delivery.cli` engine, which wraps the
+legacy shell tooling (`bin/promotion-preflight.sh`, `bin/snapshot-production.sh`,
+`bin/deploy-production.sh`, `bin/verify-production.sh`,
+`bin/publish-frontend.sh`, `bin/finalize-release.sh`,
+`bin/compensate-production.sh`, `bin/check-release-identity.sh`) with a
+decision layer. The old and new mutation paths never run concurrently
+(OP-CUT-01): the greenfield workflows fail closed while either legacy
+workflow still declares a mutation path, and the legacy files were
+neutralized to inert stubs (no triggers, no jobs).
 The candidate evidence artifact is consumed by the exact producing run attempt
 (`gh run download --attempt`, duplicate/ambiguous bundles fail closed), and
 `approvedBy` is derived from the environment-approval evidence
@@ -520,6 +530,9 @@ every `aws` call carries the mandatory non-overridable
 `PROMOTION_PRODUCTION_VERIFIED=true`. On failure `compensate-production.sh`
 restores the changed ECS services and the frontend live root (from the previous
 immutable prefix), failing closed when the snapshot cannot be restored.
+The greenfield workflow drives these wrappers through `delivery.cli` (the
+engine owns the deployment manifest, the official release manifest, and the
+official GitHub Release publication).
 
 ### Deferred live checks
 
@@ -702,20 +715,23 @@ decisions and reuses the promotion contract for the shared ones:
   audit annotation (JSON on stdout, diagnostics on stderr). `--requester` and
   `--approver` are mandatory (the approver is derived by the workflow from the
   GitHub environment-approval evidence, never the run actor).
-- `.github/workflows/rollback-release.yml` — manual dispatch (`version` +
-  requester + schema-change inputs); read-only `preflight` job before the
+- `.github/workflows/rollback-release-greenfield.yml` — manual dispatch with a
+  single `version` input (release-NNNN); read-only `preflight` job before the
   protected `production` Environment (job-scoped `id-token: write` for its
   read-only ECR/S3 scope); the `rollback` job re-runs the full
-  preflight post-approval under the shared non-cancelling `production-mutation`
+  preflight post-approval under the job-scoped non-cancelling `production`
   concurrency group — and fails closed if the revalidated manifest differs
   byte-for-byte from the approved one — then snapshots, deploys, restores the
   frontend, verifies, and derives `approvedBy` from
   `actions/runs/{run}/approvals` (never `github.actor`); automatic `compensate`
-  job restores the pre-rollback snapshot on failure via the shared
-  `compensate-production.sh` (which accepts the literal JSON `--changed` array
-  the workflow passes; a typo'd component key fails closed). The validated
+  job restores the pre-rollback snapshot on failure through the `delivery.cli`
+  recover engine (changed components are derived from the rollback result's
+  per-component conclusions, never hardcoded). The validated
   target manifest is consumed from the exact producing run via download-artifact
-  pinned to `run-id: ${{ github.run_id }}`.
+  pinned to `run-id: ${{ github.run_id }}`. The legacy
+  `.github/workflows/rollback-release.yml` was retired as an inert stub in
+  Phase 6 of the live acceptance (2026-08-17); old and new mutation paths
+  never run concurrently (OP-CUT-01).
 
 ### Deferred live checks
 

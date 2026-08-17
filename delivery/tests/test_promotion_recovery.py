@@ -179,6 +179,7 @@ class RecoveryEcs:
             "tasks": [
                 {
                     "taskArn": task_arn,
+                    "taskDefinitionArn": self.service_td[task_arn.split("/")[-2]],
                     "lastStatus": "RUNNING",
                     "containers": [
                         {

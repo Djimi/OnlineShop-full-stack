@@ -368,6 +368,8 @@ Learned during staging provisioning (2026-08-02). Full narrative: [AWS_COMMANDS_
 | `SC service is already used by ...namespace...` | Service Connect maps `portName` → Cloud Map service name, which must be **unique per namespace**. Production uses `auth-port`, `items-port`, `gateway-port`; staging has its own namespace and uses `auth-staging-port`, etc. | Within a single namespace port names must be unique in BOTH the container `portMappings[].name` and the SC config. Production and staging now use separate namespaces, so cross-environment collisions are moot — the isolation is enforced by `scripts/verify-production-staging-separation.sh` |
 | `portName(X) does not refer to any named PortMapping` | SC `portName` must exactly match a `portMappings[].name` in the task definition | Rename the portMapping name in the TD, not just the SC config |
 | `Specifying both a launch type and capacity provider strategy is not supported` | `--launch-type` and `--capacity-provider-strategy` are mutually exclusive on `create-service`/`update-service` | Pick one. We use `--capacity-provider-strategy "capacityProvider=FARGATE_SPOT,weight=1"` |
+| `Unknown parameter in input: "LoadBalancerNames"` / `'ElasticLoadBalancing' object has no attribute 'describe_target_health'` / `LoadBalancerNotFound` for a real ALB | The boto3 service name `elb` is the CLASSIC ELBv1 API — it has no `describe_target_health`, returns `LoadBalancerDescriptions` (not `LoadBalancers`), and raises `LoadBalancerNotFound` for ALB names. And the two clients take DIFFERENT parameters: classic `elb.describe_load_balancers` takes `LoadBalancerNames`, while `elbv2` takes `Names` — a fix that makes one client pass breaks the other | Use `client_for(ctx, "elbv2")` with `describe_load_balancers(Names=[name])` for ALB reads/writes; keep fake clients parameter-named identically to the real API and add a lifecycle test without `e2eBaseUrl` so the ALB DNS path is exercised |
+| Staging COMPATIBILITY journey gets 404 (not 401) on the items API | The journey hit `/api/v1/items`, the items SERVICE's internal path — but the gateway only routes `/items/**` (rewritten downstream to `/api/v1/items/**`); the frontend, E2E suite, and CloudFront behaviors all use `/items` | Journeys must use the gateway's PUBLIC route: `GET /items` (expect 200/401/403 + JSON). Service-internal `/api/v1/*` paths 404 on the gateway and belong only in the rewrite rule |
 | `you must also specify a value for 'executionRoleArn'` | Container `secrets` (Secrets Manager injection) requires an execution role | Always include `executionRoleArn` when the TD has `secrets` |
 | Service stops launching tasks after repeated crashes | ECS gives up retrying a failing deployment; `desired:1, running:0`, rollout "COMPLETED" | Fix the root cause, then `update-service --force-new-deployment` |
 | Task health stuck `UNKNOWN` for minutes | Container `healthCheck.startPeriod: 180` = no checks for 3 min. This is NORMAL | Don't wait blindly — check `list-tasks --desired-status STOPPED` for crash loops first |
@@ -377,6 +379,10 @@ Learned during staging provisioning (2026-08-02). Full narrative: [AWS_COMMANDS_
 | `taskId length should be one of [32,36]` / `Unexpected number of separators` | An empty/`None` task ARN was passed to `describe-tasks` | Guard: `[ "$TASK_ARN" != "None" ] && [ -n "$TASK_ARN" ]` before describing |
 | `Invalid control character` parsing `--container-definitions` | Multi-line strings (SQL, JSON) inline in CLI params | Never inline complex JSON: build with python `json.dump` to a temp file, use `--cli-input-json file://` |
 | `The Systems Manager parameter name specified for secret ... is invalid` | `secrets[].valueFrom` with the `:json-key::` suffix requires the **full ARN** (name alone is treated as an SSM parameter) | Resolve names via `describe-secret --query ARN` before building TD JSON |
+| `Tags can not be empty` from `RegisterTaskDefinition` | `describe-task-definition --include TAGS` returns `tags: []`, but registration rejects an explicit empty tag list | Omit `tags` from the registration payload when the observed list is empty; preserve and pass it only when non-empty |
+| `running_digests` never converged on the gateway while auth/items passed | The gateway TD runs a non-essential `redis-sidecar` container whose digest is included in `describe-tasks` containers, so the observed digest set can never equal `{expected}` | `running_digests` builds the application digest set from the **essential** containers declared in each task's task definition — the `essential` flag never exists in `describe-tasks` output (it lives only in the TD), so filtering on task containers can never exclude sidecars; non-essential sidecars and ECS-managed `ecs-service-connect-*` proxies are excluded |
+| `CannotPullContainerError ... not found` on resume after services ran earlier | The ECR **newest-5** lifecycle policy expires images not in the newest 5 per repo; task definitions pinned to an older `sha-<commit>` digest (or even `main-latest`) silently lose their image when newer builds are pushed | Re-point the service to a digest that still exists (verify via `ecr describe-images` first — `ImageNotFoundException` = expired). Production must never assume an ECR tag/digest is permanent; the greenfield release pipeline solves this with immutable release tagging + retention |
+| Live frontend API calls 502 after a `pause`/`resume` cycle | The ALB is disposable: every resume creates a new ALB with a **new DNS name**, but CloudFront's `alb-api` origin (behaviors `/auth*`, `/items*`) keeps pointing at the deleted ALB | `resume-playground.sh` now calls `lc_repoint_cloudfront_alb_origin` (lifecycle.sh) — re-points the origin to the current ALB DNS via `get-distribution-config` + `update-distribution` with the top-level ETag, waits for `distribution-deployed`, and fails closed on read-back mismatch. Manual one-off: same flow with `--if-match "$(aws cloudfront get-distribution ... --query ETag)"` |
 
 ### ECS anti-patterns
 
@@ -435,3 +441,28 @@ scripts/ecs-run-sql.sh --database <db> --file <schema.sql> --verify "\dt"
   snapshot or 10–20 minutes with one. These are operational guidance, not hard
   timeouts—AWS capacity, image pulls, JVM health checks, and RDS control-plane
   load can extend them.
+## ECS RunTask and RDS cleanup
+
+`ecs:RunTask` is authorized against the task-definition ARN, not the cluster
+ARN. Scope the resource to the staging SQL-runner family and constrain the
+cluster with `ArnEquals` on `ecs:cluster`. Likewise, `ecs:DescribeTasks` uses
+task ARNs; `ecs:ListTasks` requires `Resource: "*"` and should be constrained
+with the same `ecs:cluster` condition. For cleanup, RDS accepts
+`StopDBInstance` only from `available`; wait through transient start or
+configuration states, and if the instance is already `stopping`, wait for
+`stopped` without issuing a duplicate stop.
+
+ECS injects Service Connect runtime containers named `ecs-service-connect-*`.
+They are not application task-definition containers and can omit
+`imageDigest`; running-image verification ignores only this managed prefix and
+still fails closed for every application or user-defined sidecar container.
+
+Staging retries can encounter a service task definition already pinned to the
+candidate digest after an earlier failure. Reuse that exact revision and
+continue start/verification; do not call the shared image-only transform with
+an empty diff. The shared transform remains fail-closed for production paths.
+
+Deployment-primary does not guarantee that every old task has drained under a
+100/200 rolling policy. Use the bounded running-digest waiter after the
+deployment waiter; tolerate only known old/new overlap and finish only when
+the observed digest set converges to the exact candidate digest.

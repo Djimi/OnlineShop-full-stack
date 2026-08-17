@@ -1,7 +1,7 @@
 # Phase 7 — Cutover + Live Acceptance Plan
 
 **Plan:** `DELIVERY-SYSTEM-IMPLEMENTATION-PLAN.md` §7 / `OPERATIONS.md` OP-CUT-01/02
-**Status:** Ready to execute — starts after owner sign-off (Phase 0)
+**Status:** Phase 4 COMPLETE (2026-08-17, run `32055042796` — full staging lifecycle COMPLETE: database reset/seed/access passed, deploy digests converged, COMPATIBILITY bootstrap-exception, cloud E2E passed, cleanup passed, RDS stopped, services 0/0/0). Next: Phase 5 production start/stop proof.
 **Who acts:** repository owner (GitHub approvals + local AWS commands); GitHub Actions (workflow execution). Steps are written for both actors.
 **Normative inputs:** `SPEC.md` (esp. §4.4, AD-17/18), `OPERATIONS.md` (OP-CUT), `VERIFICATION.md` (VR-READY-01/02, VR-SEC-01, VR-STG-02, VR-PRO, VR-REC-03, VR-OPS), phase reports PHASE-04/05/06 "known limitations / live-pass deferrals", repo `AGENTS.md`, `docs/CI_CD_GOTCHAS.md`
 
@@ -260,6 +260,16 @@ The environment subject is immutable-format and validated live, never guessed: t
 
 **Owner checkpoint 5:** owner decides timing; no GitHub approval required (established scripts), but this mutates production.
 
+**Status: COMPLETE (2026-08-17, 19:54Z–20:27Z).** Evidence:
+
+- Production was already paused (services 0/0/0, ALB absent, RDS `available`), so the phase ran as **resume → pause → resume**.
+- **Resume #1 (19:54Z) failed at STEP 5** with `Waiter ServicesStable failed`: production task definitions pointed at `sha-06658a68…` (legacy commit #31, never in ECR; images expired by the ECR newest-5 lifecycle policy). Production TDs were hardened and re-registered digest-pinned against the live `main-latest` digest (`sha-97e7777…`): `onlineshop-auth:6`, `onlineshop-items:7`, `onlineshop-api-gateway:15` (validate-task-definition.sh all VALID after adding `versionConsistency=enabled`, `stopTimeout: 30`, and the named `redis-port` mapping the legacy TDs lacked). Services re-pointed via `update-service`; `services-stable` passed (1/1/1, rollout COMPLETED).
+- **Resume #2 (20:01Z) succeeded** (API readiness HTTP 401, attempt 1): new ALB `onlineshop-alb-1849239189.eu-north-1.elb.amazonaws.com`; gateway `/actuator/health` 200, `/items` 401. CloudFront `EPS8MI3FV3B7X` `alb-api` origin was re-pointed to the new ALB DNS (update-distribution with top-level ETag, distribution Deployed; CloudFront `/items` → 401, `/` → 200).
+- **Pause (20:04Z) succeeded** with read-backs: services 0/0/0, ALB `LoadBalancerNotFound`, RDS `available`.
+- **Resume #3 (20:05Z) failed at STEP 5**: gateway `sha-97e7777…` image expired by the ECR newest-5 lifecycle policy between resume #2 and #3 (greenfield pushes added newer tags to the gateway repo). Gateway TD re-registered as `onlineshop-api-gateway:16` against the staging-validated candidate digest `sha-a5fbdeb…` (`sha256:5de8ef0d…`, the exact Phase-4 candidate gateway image); services-stable passed (1/1/1, rollout COMPLETED).
+- **Resume #4 (20:26Z) fully green** with the new automatic CloudFront re-point step: `lc_repoint_cloudfront_alb_origin` (no-op path verified — origin already matched), API readiness HTTP 401 attempt 1, total 0m 29s. **Production left running for Phase 8** at `http://onlineshop-alb-1838927966.eu-north-1.elb.amazonaws.com`.
+- **Gap found and fixed (commit to follow):** every resume recreates the ALB with a NEW DNS, silently breaking the live frontend's `/auth*` and `/items*` CloudFront → `alb-api` origin path. `resume-playground.sh` now calls `lc_repoint_cloudfront_alb_origin` (lifecycle.sh: `get-distribution` ETag → `get-distribution-config` → `jq` DomainName swap → `update-distribution` → `wait distribution-deployed` → read-back fail-closed; no-op when origin already matches; skipped unless `LC_ENVIRONMENT=production` and `LC_CLOUDFRONT_DISTRIBUTION` set; `jq` added to `lc_init` required tools). `tests/scripts/lifecycle_test.sh` covers the staging no-op. ALB DNS change across pause/resume and the ECR newest-5 expiry of TD-referenced images are documented in `docs/CI_CD_GOTCHAS.md`.
+
 ---
 
 ## Phase 6 — Neutralize legacy production-mutation workflows (revertable in git)
@@ -271,9 +281,9 @@ The environment subject is immutable-format and validated live, never guessed: t
 **Steps:**
 
 1. `[OWNER] [MUTATION]` PR (owner review + merge): replace the mutation jobs in the two legacy workflows so the marker strings disappear and no AWS path remains:
-   - `.github/workflows/promote-release.yml` → remove the step invoking `release/bin/finalize-release.sh` (and the whole mutation job); leave a minimal inert file (name + retired notice, no triggers).
-   - `.github/workflows/rollback-release.yml` → remove the step invoking `release/bin/deploy-rollback.sh` (and the whole mutation job); same minimal inert file.
-   - Keep the legacy files present (not deleted) — the guards are fail-closed on file *content*, and deletion is a separate Phase-13 action.
+   - `.github/workflows/promote-release.yml` → remove the step invoking `release/bin/finalize-release.sh` (and the whole mutation job); leave a minimal inert file (name + retired notice, no triggers). ✅ done (Phase 6 PR on `greenfield/live-acceptance-1`, owner PR — see git log).
+   - `.github/workflows/rollback-release.yml` → remove the step invoking `release/bin/deploy-rollback.sh` (and the whole mutation job); same minimal inert file. ✅ done (same PR).
+   - Keep the legacy files present (not deleted) — the guards are fail-closed on file *content*, and deletion is a separate Phase-13 action. ✅ both stubs carry no markers and no `on:` triggers; greenfield gates re-pointed to `promote-release-greenfield.yml` / `rollback-release-greenfield.yml` (promotion/rollback/security/retention gates all pass).
 2. `[READ-ONLY]` Verification:
    - `grep -c 'finalize-release.sh' .github/workflows/promote-release.yml` → `0`; `grep -c 'deploy-rollback.sh' .github/workflows/rollback-release.yml` → `0`.
    - Repo-wide: `grep -rn 'finalize-release.sh\|deploy-rollback.sh' .github/workflows/` → only the (already neutralized) legacy files or nothing.

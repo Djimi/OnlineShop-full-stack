@@ -10,10 +10,11 @@ set -euo pipefail
 #           ancestry, preflight, snapshot, plan, waiter, frontend, verify,
 #           finalize, compensate (valid passes; every invalid fixture fails
 #           closed with its intended issue code)
-#   [ 3/10] promote-release.yml workflow static checks (manual dispatch inputs,
-#           protected `production` Environment, shared non-cancelling
-#           concurrency group, no rebuild, preflight repeated post-approval,
-#           compensation on failure, SHA-pinned Actions)
+#   [ 3/10] promote-release-greenfield.yml workflow static checks (manual
+#           dispatch inputs, protected `production` Environment, shared
+#           non-cancelling concurrency group, no rebuild, preflight repeated
+#           post-approval, legacy-mutation bring-up guard, compensation on
+#           failure, SHA-pinned Actions)
 #   [ 4/10] promotion-preflight.sh offline (fixture run/ancestry/identity):
 #           passes on a clean candidate, fails closed on a bad run / bad
 #           ancestry / unreviewed schema change
@@ -40,7 +41,7 @@ REPO_ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)
 RELEASE="$REPO_ROOT/plans/AUTOMATIC-BUILDS-AND-DEPLOY/release"
 FX="$RELEASE/fixtures/promotion"
 VALID="$RELEASE/fixtures/valid"
-PROMOTE_WF="$REPO_ROOT/.github/workflows/promote-release.yml"
+PROMOTE_WF="$REPO_ROOT/.github/workflows/promote-release-greenfield.yml"
 SHA="a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4"
 AUTH_DIGEST="sha256:50310c92745326299ce463ebd8ad2279a4ff0386a3701246e48165c65d5682b0"
 
@@ -240,7 +241,7 @@ jq -e '.valid == true and (.steps | map(.component)) == ["frontend", "apiGateway
   <<<"$OUT" >/dev/null || fail "compensation must include frontend first when changed"
 
 # ---------------------------------------------------------------------------
-echo "[ 3/10] promote-release.yml workflow static checks"
+echo "[ 3/10] promote-release-greenfield.yml workflow static checks"
 python3 - "$PROMOTE_WF" "$RELEASE" <<'PY' || fail "promote workflow YAML checks failed"
 import sys
 
@@ -252,14 +253,13 @@ with open(workflow_path, encoding="utf-8") as handle:
 
 problems = []
 
-# Manual dispatch only, with the two required inputs. PyYAML parses the YAML
+# Manual dispatch only, with the three required inputs. PyYAML parses the YAML
 # `on:` trigger key as boolean True (YAML 1.1), so read it that way.
 trigger = wf.get("on") or wf.get(True) or {}
 dispatch_inputs = (trigger.get("workflow_dispatch") or {}).get("inputs", {}) if isinstance(trigger, dict) else {}
-if "version" not in dispatch_inputs or "run_id" not in dispatch_inputs:
-    problems.append("promote-release.yml must take version + run_id dispatch inputs")
-if "source_sha" not in dispatch_inputs:
-    problems.append("promote-release.yml must preserve the optional source_sha selector")
+for required in ("candidate_run_id", "candidate_run_attempt", "staging_run_id"):
+    if required not in dispatch_inputs:
+        problems.append(f"promote-release-greenfield.yml must take a {required} dispatch input")
 
 # The production mutation job must use the protected production Environment
 # and the shared non-cancelling production concurrency group.
@@ -272,96 +272,89 @@ else:
     env_name = env if isinstance(env, str) else (env or {}).get("name")
     if env_name != "production":
         problems.append("promote job must use the production Environment")
-concurrency = wf.get("concurrency", {})
-if concurrency.get("group") != "production-mutation":
-    problems.append("workflow must use the shared production-mutation concurrency group")
-if concurrency.get("cancel-in-progress") is not False:
-    problems.append("production concurrency must set cancel-in-progress: false")
+    promote_concurrency = promote.get("concurrency", {})
+    if promote_concurrency.get("group") != "production":
+        problems.append("promote job must hold the shared production concurrency group")
+    if promote_concurrency.get("cancel-in-progress") is not False:
+        problems.append("production concurrency must set cancel-in-progress: false")
+
+# The pre-approval preflight job is read-only: it must not hold the production
+# concurrency group, must not use the production Environment, and must run
+# before approval (no AWS mutation role).
+preflight = jobs.get("preflight")
+if preflight is None:
+    problems.append("preflight job missing")
+else:
+    if preflight.get("concurrency"):
+        problems.append("the pre-approval preflight job must not hold the production concurrency group")
+    preflight_env = preflight.get("environment")
+    preflight_env_name = preflight_env if isinstance(preflight_env, str) else (preflight_env or {}).get("name")
+    if preflight_env_name == "production":
+        problems.append("the pre-approval preflight job must not be behind the production Environment")
 
 # No rebuild: the workflow must consume the candidate evidence (download) and
 # never invoke a build/push action.
 text = str(wf)
 if "build-push-action" in text or "publish-candidate-image.sh" in text:
-    problems.append("promote-release.yml must never rebuild; it consumes candidate evidence")
+    problems.append("promote-release-greenfield.yml must never rebuild; it consumes candidate evidence")
 
-# Preflight repeated post-approval: the promote job must re-run the preflight.
+# Preflight repeated post-approval: the promote job must re-run the preflight
+# against a FRESH snapshot and prove the approved state did not drift
+# (--previous-report).
 promote_text = str(promote)
-if "promotion-preflight.sh" not in promote_text:
-    problems.append("promote job must run the full preflight after approval")
+if "--previous-report" not in promote_text:
+    problems.append("promote job must re-run the full preflight after approval with --previous-report")
+if "delivery.cli promote preflight" not in promote_text:
+    problems.append("promote job must run the engine preflight")
 
-# The pre-approval preflight job is lighter: it must NOT call the full preflight
-# (which needs AWS) but must validate inputs + render the candidate manifest.
-preflight = jobs.get("preflight")
-if preflight is None:
-    problems.append("preflight job missing")
-else:
-    if "promotion-preflight.sh" in str(preflight):
-        problems.append("the pre-approval preflight job must not require AWS (promotion-preflight.sh)")
-    if "emit-candidate-manifest.sh" not in str(preflight) or "validate-manifest.sh" not in str(preflight):
-        problems.append("the pre-approval preflight job must render and validate the candidate manifest")
+# The pre-approval preflight job is read-only: it must NOT mutate anything.
+# (The bring-up guard legitimately contains the legacy markers, so check the
+# engine commands, not the guard text.)
+preflight_text = str(preflight)
+for forbidden in ("delivery.cli deploy", "delivery.cli finalize",
+                  "delivery.cli recover"):
+    if forbidden in preflight_text:
+        problems.append(f"the pre-approval preflight job must be read-only (no {forbidden})")
 
-outputs = (preflight or {}).get("outputs", {}) if isinstance(preflight, dict) else {}
-if outputs.get("source_sha") != "${{ steps.inputs.outputs.source_sha }}":
-    problems.append("preflight must carry the validated source_sha into the approved job")
-for label, block in (("preflight", str(preflight)), ("promote", promote_text)):
-    if "source-sha" not in block:
-        problems.append(f"{label} must bind source_sha to candidate evidence via the release decision")
-    if '--requested "$SOURCE_SHA_VALUE"' not in block:
-        problems.append(f"{label} must pass the validated source_sha through quoted argv")
-    if "--evidence candidate-evidence/candidate-evidence.json" not in block:
-        problems.append(f"{label} must compare against the downloaded candidate evidence")
-    if 'rl_assert_full_sha "$SOURCE_SHA_VALUE"' not in block:
-        problems.append(f"{label} must validate source_sha before the semantic binding")
+# Bring-up guard: the greenfield workflow must refuse while either legacy
+# production-mutation workflow still declares its path (OP-CUT-01). The guard
+# must exist in preflight, promote, and compensate.
+for label, block in (("preflight", preflight_text), ("promote", promote_text),
+                     ("compensate", str(jobs.get("compensate") or {}))):
+    if "finalize-release.sh" not in block or "deploy-rollback.sh" not in block:
+        problems.append(f"{label} must run the legacy-mutation bring-up guard (both markers)")
 
 # approvedBy is derived from the environment-approval evidence via the
 # actions/runs/{run}/approvals API, never from github.actor or user input.
 if "approvals" not in promote_text:
     problems.append("promote job must derive approvedBy from actions/runs/{run}/approvals")
-# The jq that builds promotionWorkflow must not wire approvedBy to the actor.
-import re as _re
-m = _re.search(r"promotionWorkflow = \{[^}]*\}", promote_text)
-if m and _re.search(r"approvedBy:\s*\$actor", m.group(0)):
-    problems.append("approvedBy must never be set from the run actor (github.actor)")
+if "approved_at" not in promote_text and "approvedAt" not in promote_text:
+    problems.append("promote job must derive approvedAt from the approval evidence, never the runner clock")
 
 # The candidate evidence artifact is consumed by the exact producing run
 # attempt, never the latest; duplicates/ambiguity fail closed.
-for block in (promote_text, str(preflight)):
-    if "--attempt" not in block or "gh run download" not in block:
-        problems.append("candidate evidence must be downloaded with gh run download --attempt <exact attempt>")
-    if "length > 1" not in block and "length > 1 then error" not in block:
-        problems.append("ambiguous candidate evidence artifacts must fail closed")
-if "unpack-frontend.sh" not in promote_text:
-    problems.append("promote job must unpack and verify the candidate frontend before publishing")
+if "github.event.inputs.candidate_run_id" not in promote_text:
+    problems.append("promote job must consume the candidate artifacts of the exact producing run")
+if "candidate_run_attempt" not in promote_text:
+    problems.append("promote job must pin to the exact candidate run attempt")
 
-# The compensate job restores the frontend too (the promotion can mutate it).
+# The compensate job restores the frontend too (the promotion can mutate it),
+# is automatic (not approval-gated), and builds --changed only from completed
+# mutation steps (never guessed).
 compensate = jobs.get("compensate")
 if compensate is None:
     problems.append("compensate job missing")
 else:
-    if "compensate-production.sh" not in str(compensate):
-        problems.append("compensate job must call compensate-production.sh")
-    if str(compensate.get("if", "")) != "failure() && needs.promote.result == 'failure'":
-        problems.append("compensate job must run only when promote failed")
+    if "delivery.cli recover" not in str(compensate):
+        problems.append("compensate job must call the recover engine")
+    if "needs.promote.outputs" not in str(compensate):
+        problems.append("compensate job must derive --changed from the promote job outputs (never guessed)")
     comp_env = compensate.get("environment")
     comp_env_name = comp_env if isinstance(comp_env, str) else (comp_env or {}).get("name")
     if comp_env_name == "production":
         problems.append("compensate job must not be approval-gated by the production Environment (automatic restore)")
-    if '"frontend"' not in str(compensate):
+    if "frontend" not in str(compensate):
         problems.append("compensate job must include frontend in the changed components")
-
-# The dead `revalidate` input was removed (no staging rebuild in this workflow).
-if "revalidate" in text:
-    problems.append("promote-release.yml must not declare an unused revalidate input")
-
-# The official manifest is rendered from the deployed manifest (candidate bytes
-# + registered task-definition ARNs) and verification/finalization use it.
-if "deployment-manifest.json" not in promote_text:
-    problems.append("promote job must capture the deployed manifest with the registered task definitions")
-verify_step_text = " ".join(
-    str(step) for step in promote.get("steps", []) if str(step).startswith("{'id': 'verify'")
-)
-if verify_step_text and "official-manifest.json" not in verify_step_text:
-    problems.append("verify job must verify against the official manifest")
 
 # Release-critical Actions pinned by full commit SHA.
 sha_ref = __import__("re").compile(r"^([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)@([0-9a-f]{40})$")

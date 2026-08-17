@@ -386,6 +386,7 @@ def test_deploy_backends_accepts_transient_draining_overlap(env, capsys):
                 described.append(
                     {
                         "taskArn": task_arn,
+                        "taskDefinitionArn": self._current_td(service)["taskDefinitionArn"],
                         "lastStatus": "RUNNING",
                         "containers": [{"name": service, "imageDigest": digest}],
                     }

@@ -53,11 +53,11 @@ from ..aws import (
     load_balancer_dns_name,
     register_task_definition,
     replace_container_images,
-    running_digests,
     scale_service,
     task_definition_images,
     update_service,
     wait_for_deployment,
+    wait_for_running_digests,
     wait_for_service_running_count,
 )
 from ..aws.readback import absent_or_read
@@ -588,8 +588,13 @@ class _StagingMachine:
 
     def _stop_db(self, rds_client, identifier: str) -> dict:
         instance = describe_db_instance(rds_client, identifier)
-        if instance.get("DBInstanceStatus") == "stopped":
+        status = instance.get("DBInstanceStatus")
+        if status == "stopped":
             return instance
+        if status == "stopping":
+            return _wait_for_db_status(rds_client, identifier, "stopped", RDS_STOP_TIMEOUT)
+        if status != "available":
+            _wait_for_db_status(rds_client, identifier, "available", RDS_START_TIMEOUT)
         rds_client.stop_db_instance(DBInstanceIdentifier=identifier)
         return _wait_for_db_status(rds_client, identifier, "stopped", RDS_STOP_TIMEOUT)
 
@@ -692,10 +697,6 @@ class _StagingMachine:
 
     def _revalidate_github_artifacts(self) -> None:
         api = GitHubApi(self._repository())
-        artifacts = api.list_run_artifacts(
-            self.identity.workflowRunId, self.identity.workflowRunAttempt
-        )
-        names = {artifact["name"] for artifact in artifacts}
         run = self.identity.workflowRunId
         attempt = self.identity.workflowRunAttempt
         required = {
@@ -704,12 +705,16 @@ class _StagingMachine:
             f"sboms-{run}-{attempt}",
             f"test-results-{run}-{attempt}",
         }
-        missing = sorted(required - names)
-        if missing:
+        try:
+            api.list_run_artifacts(run, attempt, required)
+        except ValidationError as error:
+            if not str(error).startswith("missing artifacts "):
+                raise
+            missing = str(error).split(" for run ", 1)[0].removeprefix("missing artifacts ")
             raise ValidationError(
                 f"candidate artifact set is incomplete (CT-CAND-03): "
-                f"missing {', '.join(missing)} for run {run} attempt {attempt}"
-            )
+                f"missing {missing} for run {run} attempt {attempt}"
+            ) from error
 
     def _repository(self) -> str:
         return self.manifest.source.repository
@@ -755,7 +760,7 @@ class _StagingMachine:
         self._start_db(rds_client, self.ids["dbInstance"])
         ecs_client = aws_context.client_for(self.ctx, "ecs")
         for service in self.ids["services"]:
-            self._scale(ecs_client, service, 1)
+            self._scale(ecs_client, service, 0)
             self.mutation_began = True
 
     def _reset_database(self) -> None:
@@ -914,11 +919,16 @@ class _StagingMachine:
                     f"service {service} must have exactly one container for "
                     f"repository {repository}, found {matches}"
                 )
-            revision_arn = register_task_definition(
-                ecs_client,
-                replace_container_images(td, {matches[0]: target}),
-            )
-            update_service(ecs_client, self.ids["cluster"], service, revision_arn)
+            if images[matches[0]] == target:
+                revision_arn = td_arn
+            else:
+                revision_arn = register_task_definition(
+                    ecs_client,
+                    replace_container_images(td, {matches[0]: target}),
+                )
+                update_service(ecs_client, self.ids["cluster"], service, revision_arn)
+            if service_observed.get("desiredCount") == 0:
+                self._scale(ecs_client, service, 1)
             deployment_id = _primary_deployment_id(
                 describe_services(ecs_client, self.ids["cluster"], [service])[service],
                 service,
@@ -930,12 +940,13 @@ class _StagingMachine:
                 deployment_id,
                 timeout_seconds=DEPLOYMENT_TIMEOUT,
             )
-            digests = running_digests(ecs_client, self.ids["cluster"], service)
-            if digests != [expected_digest]:
-                raise MutationVerificationError(
-                    f"service {service} running digests {digests} do not match "
-                    f"expected {[expected_digest]}"
-                )
+            wait_for_running_digests(
+                ecs_client,
+                self.ids["cluster"],
+                service,
+                expected_digest,
+                timeout_seconds=DEPLOYMENT_TIMEOUT,
+            )
             observed[key] = expected_digest
             self.mutation_began = True
         self.observed = ObservedArtifacts(
@@ -958,7 +969,7 @@ class _StagingMachine:
                 raise ValidationError(f"e2eBaseUrl must be http(s), got {override!r}")
             self.e2e_url = override
             return override
-        elb_client = aws_context.client_for(self.ctx, "elb")
+        elb_client = aws_context.client_for(self.ctx, "elbv2")
         dns_name = load_balancer_dns_name(elb_client, self.ids["albName"])
         self.e2e_url = f"http://{dns_name}"
         return self.e2e_url
@@ -1122,7 +1133,7 @@ class _StagingMachine:
             diagnostics.errors.append(f"rds describe_db_instances: {capture_error}")
         target_group = self.ids.get("targetGroupArn")
         if target_group:
-            elb_client = aws_context.client_for(self.ctx, "elb")
+            elb_client = aws_context.client_for(self.ctx, "elbv2")
             try:
                 diagnostics.albTargetHealth = describe_target_health(elb_client, target_group)
             except Exception as capture_error:

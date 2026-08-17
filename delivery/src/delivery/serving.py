@@ -1,11 +1,16 @@
-"""Self-contained frontend server + same-origin /api/* reverse proxy (D5/D6).
+"""Self-contained frontend server + same-origin API reverse proxy (D5/D6).
 
 The previous-official-frontend and candidate-frontend journeys serve a static
-frontend directory and forward ``/api/*`` requests to the staging ALB, giving
-the frontend a same-origin API without modifying any files. The implementation
-uses only the standard library (http.server + urllib), binds to 127.0.0.1 on a
-random port, bounds every request, and refuses path traversal. No secrets are
-involved.
+frontend directory and forward GET requests for ``/api/*``, ``/items*``, and
+``/auth*`` paths to the staging ALB — mirroring the CloudFront behaviors —
+giving the frontend a same-origin API without modifying any files. The
+implementation uses only the standard library (http.server + urllib), binds
+to 127.0.0.1 on a random port, bounds every request, and refuses path
+traversal. No secrets are involved.
+
+This server is journey-only (GET), not a browser-facing origin: it has no
+POST handling and no SPA fallback, so direct navigation to deep links is out
+of scope.
 """
 
 from __future__ import annotations
@@ -28,7 +33,7 @@ class _ProxyHandler(BaseHTTPRequestHandler):
     server_version = "onlineshop-delivery"
 
     def do_GET(self) -> None:
-        if self.path == "/api" or self.path.startswith("/api/"):
+        if self.path == "/api" or self.path.startswith(("/api/", "/items", "/auth")):
             self._proxy()
             return
         self._serve_file()
@@ -149,7 +154,7 @@ def _journey_frontend_index(base_url: str) -> JourneyResult:
 
 
 def _journey_items_api(base_url: str) -> JourneyResult:
-    status, headers, body = _fetch(f"{base_url}/api/v1/items")
+    status, headers, body = _fetch(f"{base_url}/items")
     content_type = headers.get("Content-Type", headers.get("content-type", ""))
     detail = f"HTTP {status}, content-type {content_type}, {len(body)} bytes"
     if status not in (200, 401, 403):

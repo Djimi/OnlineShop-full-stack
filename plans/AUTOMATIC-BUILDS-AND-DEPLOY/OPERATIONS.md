@@ -155,6 +155,10 @@ QUEUED -> OWNED/revalidate -> STARTING -> RESETTING/seed/verify
 
 Every phase and expected/observed identity is recorded by
 [CT-STG-01](./CONTRACTS.md#ct-stg-01-operation-record).
+`STARTING` starts RDS but holds every ECS service at desired zero. `DEPLOYING`
+registers the selected digest-pinned revision before starting each service, so
+a stale task definition, including one carrying a stale database host, can
+never start before reset and candidate registration.
 
 ### OP-STG-02 — Database reset and verification
 

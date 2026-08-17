@@ -208,8 +208,10 @@ insufficient.
 
 Evidence records the selected read-only production journeys and conclusions.
 The journeys are backend health, frontend marker/content observed through
-CloudFront, and read-only `GET /api/v1/items`. They read health, release
-identity, and public application state but do not mutate business data.
+CloudFront, and read-only `GET /items` through the gateway (the gateway
+rewrites `/items/**` to the items service's internal `/api/v1/items/**`).
+They read health, release identity, and public application state but do not
+mutate business data.
 
 ### CT-PROD-04 — Mutation verification
 

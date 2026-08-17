@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import json
+import re
 from datetime import UTC, datetime, timedelta
 
 from conftest import client_error
 
-from delivery.serialization import canonical_json
+from delivery.errors import ValidationError
+from delivery.models import OwnershipMarker
+from delivery.staging_marker import marker_value
 
 ACCOUNT = "799111666795"
 REGION = "eu-north-1"
@@ -19,11 +22,13 @@ SERVICES = [
 ]
 DB_INSTANCE = "onlineshop-staging-postgres"
 MARKER_TAG_KEY = "onlineshop:staging-owner"
+AWS_TAG_VALUE_PATTERN = re.compile(r"^[A-Za-z0-9_.:/=+@-]{0,256}$")
 
 DIGEST_A = f"sha256:{'a' * 64}"
 DIGEST_B = f"sha256:{'b' * 64}"
 DIGEST_C = f"sha256:{'c' * 64}"
 DIGEST_D = f"sha256:{'d' * 64}"
+REDIS_DIGEST = f"sha256:{'e' * 64}"
 
 REGISTRY = f"{ACCOUNT}.dkr.ecr.{REGION}.amazonaws.com"
 REPOSITORIES = {
@@ -140,6 +145,11 @@ class FakeRds:
     def add_tags_to_resource(self, ResourceName, Tags):
         self._check("add_tags_to_resource")
         for tag in Tags:
+            if AWS_TAG_VALUE_PATTERN.fullmatch(tag["Value"]) is None:
+                raise client_error(
+                    "InvalidParameterValue",
+                    "tag value contains forbidden characters or exceeds 256 characters",
+                )
             self.tags[tag["Key"]] = tag["Value"]
 
     def remove_tags_from_resource(self, ResourceName, TagKeys):
@@ -155,17 +165,16 @@ def marker_tag_value(
     owner: str = "tester",
     expires_in: timedelta = timedelta(hours=1),
 ):
-    now = datetime.now(UTC)
-    return canonical_json(
-        {
-            "schemaVersion": "1.0",
-            "operationId": operation_id,
-            "workflowRunId": run_id,
-            "workflowRunAttempt": run_attempt,
-            "owner": owner,
-            "acquiredAt": now.isoformat().replace("+00:00", "Z"),
-            "expiresAt": (now + expires_in).isoformat().replace("+00:00", "Z"),
-        }
+    now = datetime.now(UTC).replace(microsecond=0)
+    return marker_value(
+        OwnershipMarker(
+            operationId=operation_id,
+            workflowRunId=run_id,
+            workflowRunAttempt=run_attempt,
+            owner=owner,
+            acquiredAt=now,
+            expiresAt=now + expires_in,
+        )
     )
 
 
@@ -227,6 +236,27 @@ class FakeEcs:
             return {"taskDefinition": self.td_store[family][taskDefinition]}
         repository = family.replace("-staging", "")
         image = f"{REGISTRY}/{repository}:{family}-oldtag"
+        definitions = [
+            {
+                "name": family,
+                "image": image,
+                "essential": True,
+                "secrets": [
+                    {
+                        "name": "DB_PASSWORD",
+                        "valueFrom": f"{AUTH_SECRET_ARN}:password::",
+                    }
+                ],
+            }
+        ]
+        if family == "onlineshop-api-gateway-staging":
+            definitions.append(
+                {
+                    "name": "redis-sidecar",
+                    "image": "public.ecr.aws/docker/library/redis:7.4-alpine",
+                    "essential": False,
+                }
+            )
         td = {
             "taskDefinitionArn": taskDefinition,
             "revision": revision,
@@ -237,19 +267,7 @@ class FakeEcs:
             "cpu": "256",
             "memory": "512",
             "executionRoleArn": f"arn:aws:iam::{ACCOUNT}:role/ecsTaskExecutionRole",
-            "containerDefinitions": [
-                {
-                    "name": family,
-                    "image": image,
-                    "essential": True,
-                    "secrets": [
-                        {
-                            "name": "DB_PASSWORD",
-                            "valueFrom": f"{AUTH_SECRET_ARN}:password::",
-                        }
-                    ],
-                }
-            ],
+            "containerDefinitions": definitions,
         }
         return {"taskDefinition": td}
 
@@ -286,16 +304,29 @@ class FakeEcs:
         described = []
         for task_arn in tasks:
             service = task_arn.split("/")[-2]
+            td_arn = (
+                f"arn:aws:ecs:{REGION}:{ACCOUNT}:task-definition/"
+                f"{service}:{self._current_revision(service)}"
+            )
+            containers = [
+                {
+                    "name": service,
+                    "imageDigest": self.digests[service],
+                }
+            ]
+            if service == "onlineshop-api-gateway-staging":
+                containers.append(
+                    {
+                        "name": "redis-sidecar",
+                        "imageDigest": REDIS_DIGEST,
+                    }
+                )
             described.append(
                 {
                     "taskArn": task_arn,
+                    "taskDefinitionArn": td_arn,
                     "lastStatus": "RUNNING",
-                    "containers": [
-                        {
-                            "name": service,
-                            "imageDigest": self.digests[service],
-                        }
-                    ],
+                    "containers": containers,
                 }
             )
         return {"tasks": described}
@@ -357,8 +388,12 @@ class FakeElb:
 
     def describe_load_balancers(self, Names=None):
         if not Names or Names[0] != "onlineshop-staging-v2-alb":
-            return {"LoadBalancers": []}
-        return {"LoadBalancers": [{"LoadBalancerName": Names[0], "DNSName": self.dns_name}]}
+            raise client_error("LoadBalancerNotFound")
+        return {
+            "LoadBalancers": [
+                {"LoadBalancerName": Names[0], "DNSName": self.dns_name}
+            ]
+        }
 
     def describe_target_health(self, TargetGroupArn):
         return {"TargetHealthDescriptions": []}
@@ -420,10 +455,17 @@ class FakeGitHub:
         self.releases = releases if releases is not None else []
         self._assets = {}
 
-    def list_run_artifacts(self, run_id, run_attempt):
+    def list_run_artifacts(self, run_id, run_attempt, expected_names):
         artifacts = []
         for name in self.artifacts.get((run_id, run_attempt), []):
-            artifacts.append({"id": 1000 + len(artifacts), "name": name})
+            if name in expected_names:
+                artifacts.append({"id": 1000 + len(artifacts), "name": name})
+        missing = expected_names - {artifact["name"] for artifact in artifacts}
+        if missing:
+            raise ValidationError(
+                f"missing artifacts {', '.join(sorted(missing))} "
+                f"for run {run_id} attempt {run_attempt}"
+            )
         return artifacts
 
     def list_releases(self):

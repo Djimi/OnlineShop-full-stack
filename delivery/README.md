@@ -8,6 +8,23 @@ The engine is strict by design: fail-closed validation, canonical JSON
 serialization, exact workflow run/attempt authority, immutable record
 identity, and no secrets in records.
 
+Artifact discovery selects only exact deterministic names for the validated
+run/attempt. Unrelated GitHub artifacts are ignored without parsing their
+fields; every selected record must be unique, non-expired, and fully valid.
+Attempt authority comes from the validated workflow-run response plus exact
+artifact names containing that run/attempt; artifact entries do not carry an
+attempt field. Candidate-manifest validation binds the same identity again
+after download.
+
+The staging role keeps task-definition registration and deletion scoped to
+the staging service and SQL-runner families. AWS ECS exposes no resource-level
+authorization for `DescribeTaskDefinition` or `DeregisterTaskDefinition`, so
+those two actions alone require `Resource: "*"`. This is an unavoidable IAM
+residual risk, not an application-code sandbox: it is bounded operationally by
+the narrow OIDC repository/ref trust, short sessions, reviewed workflows, and
+the remaining scoped registration, deletion, PassRole, RunTask, and service
+mutation permissions.
+
 ## Layout
 
 - `src/delivery/errors.py` — exception hierarchy with stable machine-readable codes
@@ -45,7 +62,7 @@ CLI exit code (see below).
 
 - `candidate validate --manifest <file>` — validate a candidate manifest
 - `snapshot production --out <file> [--profile NAME] [--region REGION] [--environment ENV] [--identifiers FILE]` — capture and internally validate the production snapshot
-- `staging lifecycle --candidate <file> --frontend-archive <file> --repo-path DIR --out <file> [--e2e-url-out FILE]` — first invocation of the staging lifecycle (through E2E-prepared)
+- `staging lifecycle --candidate <file> --frontend-archive <file> --repo-path DIR --out <file> [--e2e-url-out FILE]` — first invocation of the staging lifecycle (through E2E-prepared); it keeps every service at desired `0` while RDS starts and resets, then registers each digest-pinned candidate revision before starting that service, so a stale task definition or database host can never start first
 - `staging lifecycle --continue --e2e-conclusion <passed|failed> --repo-path DIR --out <file>` — second invocation: record the real cloud E2E conclusion, stop/verify cleanup, release the ownership marker, complete the record
 - `staging apply --candidate <file> --repo-path DIR --out <file>` — deploy exact candidate digests to a running staging environment (no start/stop)
 - `staging reconcile --out <file>` — OP-STG-05 ownerless-RDS reconciliation (stops ownerless running staging RDS and exits non-zero to surface the event; a genuinely absent staging DB is a no-op success)

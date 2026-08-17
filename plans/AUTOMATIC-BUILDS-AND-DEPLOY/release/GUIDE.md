@@ -136,7 +136,11 @@ cutover is Pass 3R.9.
 
 ## 5. Flow B — Promotion: staging → production (subphase 3.4)
 
-**Trigger:** manual dispatch of `promote-release.yml` with `version` + candidate `run_id`.
+**Trigger:** manual dispatch of `promote-release-greenfield.yml` with
+`candidate_run_id` + `candidate_run_attempt` + `staging_run_id` (the legacy
+`promote-release.yml` is an inert stub since Phase 6 of the live acceptance,
+2026-08-17; the greenfield workflow fails closed while it still declares a
+mutation path, OP-CUT-01).
 
 ```
  Operator dispatches: version=vX.Y.Z, run_id=<candidate run>
@@ -201,8 +205,11 @@ to `refs/heads/main`; the selected run `id`/`run_attempt` must match exactly.
 
 ## 6. Flow C — Rollback to an existing official release (subphase 3.6)
 
-**Trigger:** manual dispatch of `rollback-release.yml` with the `version` of an
-existing official release (never a tag/digest/SHA).
+**Trigger:** manual dispatch of `rollback-release-greenfield.yml` with the
+`version` of an existing official release (release-NNNN, never a
+tag/digest/SHA; the legacy `rollback-release.yml` is an inert stub since Phase
+6 of the live acceptance, 2026-08-17, and the greenfield workflow fails closed
+while it still declares a mutation path, OP-CUT-01).
 
 ```
  Operator dispatches: version=vX.Y.Z (+ requester, schema-change inputs)
@@ -376,8 +383,10 @@ offline gates deliberately do not claim them.
 2. `schema/release-manifest.schema.json` — the contract in grammar form.
 3. `bin/promotion-preflight.sh` — the cleanest "gather → decide → fail-closed"
    example (~300 lines).
-4. `.github/workflows/promote-release.yml` then `rollback-release.yml` — how
-   approval + concurrency wrap the scripts.
+4. `.github/workflows/promote-release-greenfield.yml` then
+   `rollback-release-greenfield.yml` — how approval + concurrency wrap the
+   engine (the legacy `promote-release.yml`/`rollback-release.yml` are inert
+   stubs since Phase 6 of the live acceptance).
 5. `src/release_contract/promotion.py` — the heart: one decision function per
    lifecycle stage.
 6. `README.md` for the full decision rationale, then `../03_RELEASE_TRACEABILITY.md`

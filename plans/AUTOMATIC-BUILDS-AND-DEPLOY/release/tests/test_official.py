@@ -50,9 +50,7 @@ class OfficialTagResolutionTests(unittest.TestCase):
         self.assertEqual(raised.exception.code, "TAG_API_SHAPE")
 
     def test_duplicate_canonical_tag_with_same_identity_is_idempotent(self):
-        selected = resolve_official_tag(
-            [[tag("v1.2.1", SHA)], [tag("v1.2.1", SHA)]], VERSION, SHA
-        )
+        selected = resolve_official_tag([[tag("v1.2.1", SHA)], [tag("v1.2.1", SHA)]], VERSION, SHA)
         self.assertEqual(selected["tag"], "v1.2.1")
 
     def test_live_marker_identity_is_validated(self):

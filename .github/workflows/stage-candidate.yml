@@ -123,7 +123,7 @@ jobs:
           }
           mkdir -p candidate/frontend-dist
           tar -xf candidate/frontend.tar -C candidate/frontend-dist
-          CONTENT_CHECKSUM=$(cd candidate/frontend-dist && find . -type f -print0 | sort -z | xargs -0 sha256sum | sha256sum | cut -d' ' -f1)
+          CONTENT_CHECKSUM=$(cd candidate/frontend-dist && find . -type f -print0 | LC_ALL=C sort -z | xargs -0 sha256sum | cut -d' ' -f1 | sha256sum | cut -d' ' -f1)
           EXPECTED_CHECKSUM=$(jq -r '.artifacts.frontend.contentChecksum' candidate/candidate-manifest.json)
           [[ "$CONTENT_CHECKSUM" == "$EXPECTED_CHECKSUM" ]] || {
             echo "ERROR: frontend content checksum $CONTENT_CHECKSUM != manifest $EXPECTED_CHECKSUM" >&2

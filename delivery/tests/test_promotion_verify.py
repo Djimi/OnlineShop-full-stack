@@ -60,7 +60,7 @@ class VerifyEnv:
             "sts": self.sts,
             "ecs": self.ecs,
             "s3": self.s3,
-            "elb": self.elb,
+            "elbv2": self.elb,
             "cloudfront": self.cf,
         }
         self.monkeypatch.setattr(
@@ -88,7 +88,7 @@ class VerifyEnv:
                 {"Content-Type": "application/json"},
                 b'{"status":"UP"}',
             ),
-            "http://onlineshop-alb.example.com/api/v1/items": (
+            "http://onlineshop-alb.example.com/items": (
                 200,
                 {"Content-Type": "application/json"},
                 b"[]",

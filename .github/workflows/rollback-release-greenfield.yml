@@ -550,6 +550,7 @@ jobs:
       - name: Restore the pre-mutation snapshot (automatic compensation)
         env:
           ORIGINAL_RESULT: ${{ needs.rollback.result }}
+          RUN_ID: ${{ github.run_id }}
         run: |
           set -euo pipefail
           ORIGINAL_FAILURE="rollback job result: $ORIGINAL_RESULT"
@@ -596,9 +597,12 @@ jobs:
       # claims success for a failed recovery.
       - name: Report the original failure and the recovery outcome
         if: always()
+        env:
+          ORIGINAL_RESULT: ${{ needs.rollback.result }}
+          RUN_ID: ${{ github.run_id }}
         run: |
           set -euo pipefail
-          echo "ORIGINAL FAILURE: rollback job result was ${{ needs.rollback.result }} (run ${{ github.run_id }})"
+          echo "ORIGINAL FAILURE: rollback job result was $ORIGINAL_RESULT (run $RUN_ID)"
           if [ ! -f recovery-result.json ]; then
             echo "ERROR: automatic compensation produced no result; the original failure is UNRESOLVED" >&2
             exit 1

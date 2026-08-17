@@ -2,12 +2,10 @@
   "Version": "2012-10-17",
   "Statement": [
     {
-      "Sid": "RegisterAndInspectStagingTaskDefinitions",
+      "Sid": "RegisterAndDeleteStagingTaskDefinitions",
       "Effect": "Allow",
       "Action": [
         "ecs:RegisterTaskDefinition",
-        "ecs:DescribeTaskDefinition",
-        "ecs:DeregisterTaskDefinition",
         "ecs:DeleteTaskDefinitions"
       ],
       "Resource": [
@@ -16,23 +14,52 @@
       ]
     },
     {
-      "Sid": "InspectStagingServicesAndTasks",
+      "Sid": "InspectAndDeregisterTaskDefinitionsWithoutResourceSupport",
       "Effect": "Allow",
       "Action": [
-        "ecs:DescribeServices",
-        "ecs:ListTasks",
-        "ecs:DescribeTasks"
+        "ecs:DescribeTaskDefinition",
+        "ecs:DeregisterTaskDefinition"
       ],
-      "Resource": [
-        "arn:aws:ecs:eu-north-1:799111666795:cluster/onlineshop-staging-cluster",
-        "arn:aws:ecs:eu-north-1:799111666795:service/onlineshop-staging-cluster/onlineshop-*-staging"
-      ]
+      "Resource": "*"
+    },
+    {
+      "Sid": "InspectStagingServices",
+      "Effect": "Allow",
+      "Action": "ecs:DescribeServices",
+      "Resource": "arn:aws:ecs:eu-north-1:799111666795:service/onlineshop-staging-cluster/onlineshop-*-staging"
+    },
+    {
+      "Sid": "InspectStagingTasks",
+      "Effect": "Allow",
+      "Action": "ecs:DescribeTasks",
+      "Resource": "arn:aws:ecs:eu-north-1:799111666795:task/onlineshop-staging-cluster/*",
+      "Condition": {
+        "ArnEquals": {
+          "ecs:cluster": "arn:aws:ecs:eu-north-1:799111666795:cluster/onlineshop-staging-cluster"
+        }
+      }
+    },
+    {
+      "Sid": "ListStagingTasksWithoutResourceSupport",
+      "Effect": "Allow",
+      "Action": "ecs:ListTasks",
+      "Resource": "*",
+      "Condition": {
+        "ArnEquals": {
+          "ecs:cluster": "arn:aws:ecs:eu-north-1:799111666795:cluster/onlineshop-staging-cluster"
+        }
+      }
     },
     {
       "Sid": "RunStagingSqlRunnerOnly",
       "Effect": "Allow",
       "Action": "ecs:RunTask",
-      "Resource": "arn:aws:ecs:eu-north-1:799111666795:cluster/onlineshop-staging-cluster"
+      "Resource": "arn:aws:ecs:eu-north-1:799111666795:task-definition/onlineshop-staging-sql-runner:*",
+      "Condition": {
+        "ArnEquals": {
+          "ecs:cluster": "arn:aws:ecs:eu-north-1:799111666795:cluster/onlineshop-staging-cluster"
+        }
+      }
     },
     {
       "Sid": "ValidateIsolatedStagingNetwork",
