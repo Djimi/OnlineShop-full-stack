@@ -12,7 +12,7 @@ from ..errors import AbsentResourceError, ReadError
 def describe_load_balancer(client: Any, name: str) -> dict:
     """Describe a load balancer by name, absent only when it does not exist."""
     try:
-        response = client.describe_load_balancers(LoadBalancerNames=[name])
+        response = client.describe_load_balancers(Names=[name])
     except ClientError as error:
         raise ReadError(f"describe_load_balancers failed for {name}") from error
     balancers = response.get("LoadBalancers") or []

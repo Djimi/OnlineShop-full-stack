@@ -386,12 +386,12 @@ class FakeElb:
     def __init__(self, dns_name="staging-alb-1234.eu-north-1.elb.amazonaws.com"):
         self.dns_name = dns_name
 
-    def describe_load_balancers(self, LoadBalancerNames=None):
-        if not LoadBalancerNames or LoadBalancerNames[0] != "onlineshop-staging-v2-alb":
+    def describe_load_balancers(self, Names=None):
+        if not Names or Names[0] != "onlineshop-staging-v2-alb":
             return {"LoadBalancers": []}
         return {
             "LoadBalancers": [
-                {"LoadBalancerName": LoadBalancerNames[0], "DNSName": self.dns_name}
+                {"LoadBalancerName": Names[0], "DNSName": self.dns_name}
             ]
         }
 
