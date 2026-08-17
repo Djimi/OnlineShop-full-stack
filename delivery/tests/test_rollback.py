@@ -406,7 +406,7 @@ class RollbackEnv:
                     {"Content-Type": "application/json"},
                     b'{"status":"UP"}',
                 ),
-                "http://onlineshop-alb.example.com/api/v1/items": (
+                "http://onlineshop-alb.example.com/items": (
                     200,
                     {"Content-Type": "application/json"},
                     b"[]",

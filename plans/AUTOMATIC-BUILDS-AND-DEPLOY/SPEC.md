@@ -176,7 +176,7 @@ authoritative home.
 2. **Candidate metadata retention:** 30 days —
    [OP-RET-02](./OPERATIONS.md#op-ret-02-retention-classes).
 3. **Production smoke tests:** backend health, frontend marker/content observed
-   through CloudFront, and read-only `GET /api/v1/items` —
+   through CloudFront, and read-only `GET /items` through the gateway —
    [CT-PROD-03](./CONTRACTS.md#ct-prod-03-read-only-application-verification).
 4. **Staging compatibility:** previous official frontend against candidate
    backends, then candidate-frontend cloud E2E; bootstrap exception when no
