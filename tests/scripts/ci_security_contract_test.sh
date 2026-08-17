@@ -34,6 +34,8 @@ workflow_paths = [
     root / ".github/workflows/build-and-deploy.yml",
     root / ".github/workflows/promote-release.yml",
     root / ".github/workflows/rollback-release.yml",
+    root / ".github/workflows/promote-release-greenfield.yml",
+    root / ".github/workflows/rollback-release-greenfield.yml",
 ]
 expression_in_run = re.compile(r"\$\{\{\s*(?:github|inputs|needs|steps|matrix|vars)\.")
 action_sha = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+@[0-9a-f]{40}$")

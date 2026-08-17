@@ -585,9 +585,14 @@ def test_compensate_reports_both_outcomes_and_fails_on_recovery_failure() -> Non
         if step.get("name") == "Report the original failure and the recovery outcome"
     )
     assert step.get("if") == "always()"
+    env = step.get("env", {})
+    assert env.get("ORIGINAL_RESULT") == "${{ needs.promote.result }}"
+    assert env.get("RUN_ID") == "${{ github.run_id }}"
     run = step["run"]
     assert "ORIGINAL FAILURE" in run
-    assert "needs.promote.result" in run
+    assert "$ORIGINAL_RESULT" in run
+    assert "$RUN_ID" in run
+    assert "${{" not in run
     assert "RECOVERY OUTCOME" in run or "recovery-result.json" in run
     assert "the original failure is UNRESOLVED" in run
     # a failed recovery, a missing verification report, and a failed

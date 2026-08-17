@@ -532,10 +532,11 @@ require_days(f"{wf}/build-and-deploy.yml", "candidate evidence bundle", 30, "can
 require_days(f"{wf}/build-and-deploy.yml", "candidate-artifact-id", 30, "candidate-artifact=30")
 # Staging-failure diagnostics: existing shorter operational retention (14 days).
 require_days(f"{wf}/build-and-deploy.yml", "staging failure diagnostics", 14, "staging-failure-diagnostics=14")
-# Release result / snapshot records: 14 days (operational retention).
-require_days(f"{wf}/promote-release.yml", "production-snapshot", 14, "rollback-result=14")
-require_days(f"{wf}/rollback-release.yml", "rollback-result", 14, "rollback-result=14")
-require_days(f"{wf}/rollback-release.yml", "production-snapshot", 14, "rollback-result=14")
+# Release result / snapshot records: 14 days (operational retention). The
+# greenfield promotion/rollback workflows own these artifacts now.
+require_days(f"{wf}/promote-release-greenfield.yml", "promotion-snapshot", 14, "rollback-result=14")
+require_days(f"{wf}/rollback-release-greenfield.yml", "rollback-evidence", 14, "rollback-result=14")
+require_days(f"{wf}/rollback-release-greenfield.yml", "rollback-snapshot", 14, "rollback-result=14")
 # The decision layer knows the same classes as the workflows configure.
 for name, expected in classes.items():
     if name in ("candidate-artifact", "staging-failure-diagnostics", "rollback-result"):

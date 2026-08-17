@@ -281,9 +281,9 @@ The environment subject is immutable-format and validated live, never guessed: t
 **Steps:**
 
 1. `[OWNER] [MUTATION]` PR (owner review + merge): replace the mutation jobs in the two legacy workflows so the marker strings disappear and no AWS path remains:
-   - `.github/workflows/promote-release.yml` → remove the step invoking `release/bin/finalize-release.sh` (and the whole mutation job); leave a minimal inert file (name + retired notice, no triggers).
-   - `.github/workflows/rollback-release.yml` → remove the step invoking `release/bin/deploy-rollback.sh` (and the whole mutation job); same minimal inert file.
-   - Keep the legacy files present (not deleted) — the guards are fail-closed on file *content*, and deletion is a separate Phase-13 action.
+   - `.github/workflows/promote-release.yml` → remove the step invoking `release/bin/finalize-release.sh` (and the whole mutation job); leave a minimal inert file (name + retired notice, no triggers). ✅ done (Phase 6 PR on `greenfield/live-acceptance-1`, owner PR — see git log).
+   - `.github/workflows/rollback-release.yml` → remove the step invoking `release/bin/deploy-rollback.sh` (and the whole mutation job); same minimal inert file. ✅ done (same PR).
+   - Keep the legacy files present (not deleted) — the guards are fail-closed on file *content*, and deletion is a separate Phase-13 action. ✅ both stubs carry no markers and no `on:` triggers; greenfield gates re-pointed to `promote-release-greenfield.yml` / `rollback-release-greenfield.yml` (promotion/rollback/security/retention gates all pass).
 2. `[READ-ONLY]` Verification:
    - `grep -c 'finalize-release.sh' .github/workflows/promote-release.yml` → `0`; `grep -c 'deploy-rollback.sh' .github/workflows/rollback-release.yml` → `0`.
    - Repo-wide: `grep -rn 'finalize-release.sh\|deploy-rollback.sh' .github/workflows/` → only the (already neutralized) legacy files or nothing.

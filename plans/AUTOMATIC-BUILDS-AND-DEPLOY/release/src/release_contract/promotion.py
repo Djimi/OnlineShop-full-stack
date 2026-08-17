@@ -559,8 +559,8 @@ def snapshot_issues(snapshot: Any, manifest: Any) -> Decision:
                     "SNAPSHOT_MISSING_FIELD",
                     f"snapshot.frontend.{required}",
                     f"pre-promotion snapshot must record frontend.{required}",
-                    )
                 )
+            )
 
     marker = frontend.get("marker")
     if isinstance(marker, dict):
