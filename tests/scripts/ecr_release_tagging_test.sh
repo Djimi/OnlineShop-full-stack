@@ -24,7 +24,7 @@ set -euo pipefail
 REPO_ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)
 RELEASE="$REPO_ROOT/plans/AUTOMATIC-BUILDS-AND-DEPLOY/release"
 PLAN_DIR="$REPO_ROOT/plans/AUTOMATIC-BUILDS-AND-DEPLOY"
-WORKFLOW="$REPO_ROOT/.github/workflows/build-and-deploy.yml"
+WORKFLOW="$REPO_ROOT/.github/workflows/ci.yml"
 SHA="a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4"
 CANDIDATE_TAG="sha-$SHA"
 RELEASE_TAG="release-1.2.1"
@@ -267,7 +267,7 @@ jobs = wf.get("jobs", {})
 problems = []
 
 # Validation jobs must not be able to request an OIDC token or AWS credentials.
-for job_id in ("frontend", "e2e-pr"):
+for job_id in ("test-frontend", "e2e"):
     job = jobs.get(job_id)
     if job is None:
         problems.append(f"{job_id} job missing")
@@ -282,31 +282,28 @@ for job_id in ("frontend", "e2e-pr"):
 # The build workflow only ever tags sha-* / main-latest / branch-*; it must
 # never produce `latest` or a `release-*` tag, and must never invoke the
 # promotion script (release tags are minted server-side only by promotion).
-for backend in ("auth", "items", "api-gateway"):
-    job = jobs.get(backend)
-    if job is None:
-        problems.append(f"{backend} job missing")
-        continue
-    steps = [s for s in job.get("steps", []) if isinstance(s, dict)]
+# The tag computation lives once, in the publish job's Compute candidate
+# image tags step, and feeds every docker/build-push-action.
+publish = jobs.get("publish")
+if publish is None:
+    problems.append("publish job missing")
+else:
+    steps = [s for s in publish.get("steps", []) if isinstance(s, dict)]
     tag_steps = [s for s in steps if s.get("id") == "tags"]
     if not tag_steps:
-        problems.append(f"{backend} job has no Compute Docker tags step")
-        continue
-    tags_text = tag_steps[0].get("run", "")
-    if ":latest" in tags_text:
-        problems.append(f"{backend} tags computation must not produce `latest` (Decision 4)")
-    # `release-input.sh` is sourced by the validator and contains the literal
-    # substring `release-` in its filename. Inspect actual tag positions so the
-    # job-level validator does not mistake that helper path for a release tag.
-    if re.search(r"(?<![A-Za-z0-9_/-])release-", tags_text):
-        problems.append(f"{backend} build workflow must never push a release-* tag")
-
-for job in jobs.values():
-    if not isinstance(job, dict):
-        continue
-    for step in job.get("steps", []) if isinstance(job.get("steps"), list) else []:
+        problems.append("publish job has no Compute candidate image tags step")
+    else:
+        tags_text = tag_steps[0].get("run", "")
+        if ":latest" in tags_text:
+            problems.append("tags computation must not produce `latest` (Decision 4)")
+        # `release-input.sh` is sourced by the validator and contains the literal
+        # substring `release-` in its filename. Inspect actual tag positions so the
+        # job-level validator does not mistake that helper path for a release tag.
+        if re.search(r"(?<![A-Za-z0-9_/-])release-", tags_text):
+            problems.append("build workflow must never push a release-* tag")
+    for step in steps:
         if isinstance(step, dict) and "promote-image-digest.sh" in str(step.get("run", "")):
-            problems.append("build-and-deploy.yml must not invoke promote-image-digest.sh")
+            problems.append("ci.yml must not invoke promote-image-digest.sh")
 
 if problems:
     print("\n".join(problems))

@@ -226,14 +226,13 @@ def test_build_contexts_match_dockerfile_layout() -> None:
     assert contexts(CI_WORKFLOW) == EXPECTED_BUILD_CONTEXTS
 
 
-def test_ci_push_trigger_is_isolated_from_legacy_branches() -> None:
-    # OP-CUT-01: legacy build-and-deploy.yml still owns main and feature/**
-    # pushes; overlapping triggers would push identical sha-<fullsha> tags
-    # into the same immutable ECR repositories. The push path runs on
-    # greenfield/** only until cutover expands it (after legacy triggers are
-    # disabled).
+def test_ci_push_trigger_owns_main_and_feature_after_cutover() -> None:
+    # OP-CUT-01: after the Phase 7 trigger swap the legacy build-and-deploy.yml
+    # is an inert stub, so ci.yml owns the push path for main and feature/** —
+    # exactly one producer per sha. Overlapping triggers would push identical
+    # sha-<fullsha> tags into the same immutable ECR repositories.
     ci = _load(CI_WORKFLOW)
-    assert ci["on"]["push"]["branches"] == ["greenfield/**"]
+    assert ci["on"]["push"]["branches"] == ["main", "feature/**"]
     assert ci["on"]["pull_request"]["branches"] == ["main"]
 
 
