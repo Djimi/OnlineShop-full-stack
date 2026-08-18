@@ -364,17 +364,23 @@ class GitHubApi:
             )
 
     def download_artifact_zip(self, archive_url: str) -> bytes:
-        """Download an artifact zip from its (short-lived) archive URL.
+        """Download an artifact zip from its archive URL.
 
-        The archive URL is a signed S3 URL; it is fetched without the GitHub
-        Authorization header so the token is never sent off-host.
+        GitHub serves ``archive_download_url`` today as an authenticated
+        ``api.github.com`` endpoint that redirects to the signed S3 object;
+        an unauthenticated request is answered with HTTP 401. The token is
+        sent ONLY to GitHub hosts (``api.github.com``) — a plain signed S3
+        URL (the historical shape) is still fetched without the Authorization
+        header so the token is never sent off-host.
         """
         if not isinstance(archive_url, str) or not archive_url.startswith("https://"):
             raise ValidationError(f"artifact archive URL must be https, got {archive_url!r}")
-        request = urllib.request.Request(
-            archive_url,
-            headers={"Accept": "application/octet-stream", "User-Agent": "onlineshop-delivery"},
-        )
+        headers = {"Accept": "application/octet-stream", "User-Agent": "onlineshop-delivery"}
+        if urllib.parse.urlsplit(archive_url).hostname == "api.github.com":
+            if not self.token:
+                raise ReadError("GITHUB_TOKEN is not set; artifact download is unavailable")
+            headers["Authorization"] = f"Bearer {self.token}"
+        request = urllib.request.Request(archive_url, headers=headers)
         try:
             with urllib.request.urlopen(request, timeout=60) as response:
                 return response.read()

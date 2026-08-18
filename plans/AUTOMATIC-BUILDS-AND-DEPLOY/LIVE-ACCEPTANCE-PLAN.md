@@ -327,6 +327,12 @@ The environment subject is immutable-format and validated live, never guessed: t
 
 **Owner checkpoint 7:** owner approves the swap — the legacy application-delivery fallback is now inert (restorable via `git revert`). No greenfield production promotion was possible before this point because no main candidate could exist.
 
+**COMPLETED 2026-08-18 (run 32103952612):**
+- PR #54 merged (`b93f5e1`): ci.yml owns push for `main` + `feature/**`; `build-and-deploy.yml` inert stub; the four offline gates + `test_workflows.py` re-pointed in the same PR; all 9 offline gates, 1066 delivery tests, ruff green before merge; PR checks green (e2e + 4 test jobs; publish correctly skipped).
+- **Ruleset re-pointing (unplanned but required):** the `main-restricted` ruleset (id 18557637) required status check `e2e-pr`, which existed only as the legacy `build-and-deploy.yml` job — the stub removed it, so the ruleset blocked the merge. Updated via `PUT /repos/.../rulesets/18557637` (PUT, not PATCH — PATCH 404s) to require the greenfield `e2e` check context (strict policy kept). This is the same re-pointing class as the gate scripts; recorded as a Phase 7 sub-step for any future "retire a workflow" PR.
+- **GitHub quirk (cosmetic, expected):** an `on:`-less workflow file is invalid per GitHub's workflow validation, so every push to the branch emits a synthetic 0s "This run likely failed because of a workflow file issue" run per retired stub (promote/rollback since Phase 6, build-and-deploy since this swap). No jobs run, no permissions used, never attaches to PR checks. Accepted cost of the gate-mandated "no triggers" inertness; the stubs are deleted at Phase 13.
+- **FIRST MAIN CANDIDATE:** `CANDIDATE_RUN_ID=32103952612`, `CANDIDATE_RUN_ATTEMPT=1`, full SHA `b93f5e1313b9024a8a5f6790c43aa7ddf8dd9563`, `candidateId cand-32103952612-1-b93f5e1313b9` (class main). All 6 jobs success. Four artifacts exist for the run/attempt (`candidate-manifest`, `frontend-archive`, `sboms`, `test-results` — plus per-service test reports and buildx cache artifacts). `sha-<fullsha>` resolves on all three ECR repos exactly once (digest at `imageId.imageDigest`; image is an OCI multi-arch index incl. the attestation manifest). No `build-and-deploy.yml` run for the push.
+
 ---
 
 ## Phase 8 — First live promotion → first official release (owner approval)

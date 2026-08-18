@@ -170,6 +170,18 @@ for service in onlineshop-auth onlineshop-items onlineshop-api-gateway; do
     echo "ERROR: sanitized task definition for $service failed hardening validation" >&2
     exit 1
   }
+  # The sanitized definition is the full describe output (read-only fields
+  # like revision/status/taskDefinitionArn included) so the image-only diff is
+  # provable. register-task-definition rejects those read-only fields, so strip
+  # them (td-level + per-container) before registration — the same canonical
+  # key set the delivery CLI drops (see delivery/src/delivery/aws/ecs.py).
+  jq 'del(.taskDefinitionArn, .revision, .status, .requiresAttributes,
+         .compatibilities, .registeredAt, .registeredBy, .deregisteredAt)
+      | .containerDefinitions |= map(del(.imageDigest, .containerArn))' \
+    "$TMP/new-$service.json" > "$TMP/register-$service.json" || {
+    echo "ERROR: could not strip read-only fields from sanitized task definition for $service" >&2
+    exit 1
+  }
 
   if [ "$DRY_RUN" -eq 1 ]; then
     echo "dry-run: would register $service task definition -> ${image_ref}" >&2
@@ -177,7 +189,7 @@ for service in onlineshop-auth onlineshop-items onlineshop-api-gateway; do
   else
     set +e
     REGISTERED=$(aws ecs register-task-definition "${AWS_ARGS[@]}" \
-      --cli-input-json "file://$TMP/new-$service.json" \
+      --cli-input-json "file://$TMP/register-$service.json" \
       --query 'taskDefinition.taskDefinitionArn' --output text 2>"$TMP/reg.err")
     RC=$?
     set -e
