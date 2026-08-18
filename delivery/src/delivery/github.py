@@ -11,6 +11,28 @@ import urllib.request
 
 from .errors import ReadError, ValidationError
 
+
+class _StripAuthRedirectHandler(urllib.request.HTTPRedirectHandler):
+    """Follow redirects but never forward Authorization to a different host.
+
+    GitHub's artifact zip endpoint redirects to a signed Azure Blob/S3
+    object; forwarding the Bearer token there fails authentication (the
+    signed request does not include it) and leaks the token off-host.
+    """
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        new_req = super().redirect_request(req, fp, code, msg, headers, newurl)
+        if new_req is None:
+            return None
+        old_host = urllib.parse.urlsplit(req.full_url).hostname
+        new_host = urllib.parse.urlsplit(newurl).hostname
+        if new_host != old_host:
+            new_req.remove_header("Authorization")
+        return new_req
+
+
+_ARTIFACT_OPENER = urllib.request.build_opener(_StripAuthRedirectHandler())
+
 _FULL_SHA = re.compile(r"^[0-9a-f]{40}$")
 _BRANCH_NAME = re.compile(r"^[A-Za-z0-9._/-]+$")
 _ARTIFACT_NAME = re.compile(r"^[A-Za-z0-9._-]+$")
@@ -367,22 +389,29 @@ class GitHubApi:
         """Download an artifact zip from its archive URL.
 
         GitHub serves ``archive_download_url`` today as an authenticated
-        ``api.github.com`` endpoint that redirects to the signed S3 object;
-        an unauthenticated request is answered with HTTP 401. The token is
-        sent ONLY to GitHub hosts (``api.github.com``) — a plain signed S3
-        URL (the historical shape) is still fetched without the Authorization
-        header so the token is never sent off-host.
+        ``api.github.com`` endpoint that redirects (302) to the signed blob
+        object (Azure Blob Storage). The token is sent ONLY to GitHub hosts;
+        a plain signed blob/S3 URL (the historical shape) is fetched without
+        the Authorization header so the token is never sent off-host, and the
+        redirect handler strips Authorization whenever a host change occurs.
         """
         if not isinstance(archive_url, str) or not archive_url.startswith("https://"):
             raise ValidationError(f"artifact archive URL must be https, got {archive_url!r}")
-        headers = {"Accept": "application/octet-stream", "User-Agent": "onlineshop-delivery"}
         if urllib.parse.urlsplit(archive_url).hostname == "api.github.com":
             if not self.token:
                 raise ReadError("GITHUB_TOKEN is not set; artifact download is unavailable")
-            headers["Authorization"] = f"Bearer {self.token}"
+            # The GitHub zip endpoint answers 415 to any non-JSON Accept
+            # header, so request the API media type and follow its redirect.
+            headers = {
+                "Authorization": f"Bearer {self.token}",
+                "Accept": "application/vnd.github+json",
+                "User-Agent": "onlineshop-delivery",
+            }
+        else:
+            headers = {"Accept": "application/octet-stream", "User-Agent": "onlineshop-delivery"}
         request = urllib.request.Request(archive_url, headers=headers)
         try:
-            with urllib.request.urlopen(request, timeout=60) as response:
+            with _ARTIFACT_OPENER.open(request, timeout=60) as response:
                 return response.read()
         except urllib.error.HTTPError as error:
             raise ReadError(f"artifact archive download failed with HTTP {error.code}") from error

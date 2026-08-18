@@ -515,23 +515,52 @@ def test_download_artifact_zip_sends_token_only_to_github_host(monkeypatch):
         def __exit__(self, *exc_info):
             return False
 
-    def urlopen(request, timeout=None):
-        seen["url"] = request.full_url
-        seen["authorization"] = request.get_header("Authorization")
-        return BytesResponse(b"zip-bytes")
+    class FakeOpener:
+        def open(self, request, timeout=None):
+            seen["url"] = request.full_url
+            seen["authorization"] = request.get_header("Authorization")
+            seen["accept"] = request.get_header("Accept")
+            return BytesResponse(b"zip-bytes")
 
-    monkeypatch.setattr("delivery.github.urllib.request.urlopen", urlopen)
+    monkeypatch.setattr("delivery.github._ARTIFACT_OPENER", FakeOpener())
     api = GitHubApi(REPO, token="secret-token")
 
     github_url = "https://api.github.com/repos/owner/repo/actions/artifacts/11/zip"
     assert api.download_artifact_zip(github_url) == b"zip-bytes"
     assert seen["url"] == github_url
     assert seen["authorization"] == "Bearer secret-token"
+    assert seen["accept"] == "application/vnd.github+json"
 
     s3_url = "https://example.s3.amazonaws.com/artifacts/11.zip"
     assert api.download_artifact_zip(s3_url) == b"zip-bytes"
     assert seen["url"] == s3_url
     assert seen["authorization"] is None
+    assert seen["accept"] == "application/octet-stream"
+
+
+def test_artifact_redirect_handler_strips_authorization_cross_host():
+    from delivery.github import _StripAuthRedirectHandler
+
+    handler = _StripAuthRedirectHandler()
+    request = urllib.request.Request(
+        "https://api.github.com/repos/owner/repo/actions/artifacts/11/zip",
+        headers={"Authorization": "Bearer secret-token"},
+    )
+    blob_url = "https://blob.core.windows.net/actions/artifacts/11.zip"
+    new_request = handler.redirect_request(
+        request, None, 302, "Found", {"Location": blob_url}, blob_url
+    )
+    assert new_request is not None
+    assert new_request.get_header("Authorization") is None
+    assert new_request.full_url == blob_url
+
+    same_host = handler.redirect_request(
+        request, None, 302, "Found",
+        {"Location": "https://api.github.com/repos/owner/repo/actions/artifacts/12/zip"},
+        "https://api.github.com/repos/owner/repo/actions/artifacts/12/zip",
+    )
+    assert same_host is not None
+    assert same_host.get_header("Authorization") == "Bearer secret-token"
 
 
 def test_download_artifact_zip_github_host_without_token_fails_closed(monkeypatch):
