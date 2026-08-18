@@ -356,6 +356,29 @@ def test_list_downloadable_artifact_uses_authoritative_attempt_not_artifact_fiel
     ]
 
 
+def test_get_branch_head_sha(monkeypatch):
+    sha = "a" * 40
+    api = _api(
+        monkeypatch,
+        {
+            f"https://api.github.com/repos/{REPO}/branches/main": FakeResponse(
+                {"name": "main", "commit": {"sha": sha}}
+            )
+        },
+    )
+    assert api.get_branch_head_sha("main") == sha
+
+
+def test_get_branch_head_sha_rejects_unsafe_branch(monkeypatch):
+    api = _api(monkeypatch, {})
+    with pytest.raises(ValidationError):
+        api.get_branch_head_sha("bad branch")
+    with pytest.raises(ValidationError):
+        api.get_branch_head_sha("bad@branch")
+    with pytest.raises(ValidationError):
+        api.get_branch_head_sha("")
+
+
 def test_list_releases_parses_assets(monkeypatch):
     api = _api(
         monkeypatch,

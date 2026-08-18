@@ -640,6 +640,7 @@ class FakeGithub:
         self.artifacts_by_run = artifacts_by_run or {}
         self.newer_candidates = newer_candidates or []
         self.compare = compare or {}
+        self.main_head_sha = "1" * 40
         self.releases = releases or []
         self.created_releases = []
         self.uploaded_assets = []
@@ -697,6 +698,9 @@ class FakeGithub:
 
     def list_main_candidate_runs(self, selected_run_id, limit=10):
         return self.newer_candidates
+
+    def get_branch_head_sha(self, branch):
+        return self.main_head_sha
 
     def compare_commits(self, base, head):
         key = (base, head)
