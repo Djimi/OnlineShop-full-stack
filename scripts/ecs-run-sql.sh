@@ -246,10 +246,35 @@ cleanup_on_exit() {
 trap cleanup_on_exit EXIT
 
 # --- Run one-off task -----------------------------------------------------------
-TASK_ARN=$($AWS ecs run-task \
-  --cluster "$CLUSTER" --task-definition "$TD_ARN" --launch-type FARGATE \
-  --network-configuration "awsvpcConfiguration={subnets=[$SUBNETS],securityGroups=[$SG],assignPublicIp=ENABLED}" \
-  --query 'tasks[0].taskArn' --output text)
+# run-task does NOT guarantee a placed task: on Fargate capacity unavailability
+# it returns an empty tasks array plus a `failures` entry (e.g. "Capacity is
+# unavailable at this time..."). Never assume tasks[0] exists — inspect the
+# failures array and retry with backoff before declaring success. Without this,
+# a transient capacity crunch surfaces as a confusing `Task: None` / invalid
+# taskId waiter error and fails the whole lifecycle.
+RUN_TASK_MAX_ATTEMPTS="${RUN_TASK_MAX_ATTEMPTS:-10}"
+TASK_ARN=""
+attempt=0
+while :; do
+  attempt=$((attempt + 1))
+  RUN_RESP=$($AWS ecs run-task \
+    --cluster "$CLUSTER" --task-definition "$TD_ARN" --launch-type FARGATE \
+    --network-configuration "awsvpcConfiguration={subnets=[$SUBNETS],securityGroups=[$SG],assignPublicIp=ENABLED}" \
+    --output json 2>/dev/null || true)
+  TASK_ARN=$(printf '%s' "$RUN_RESP" | jq -r '.tasks[0].taskArn // empty' 2>/dev/null || true)
+  if [ -n "$TASK_ARN" ]; then
+    break
+  fi
+  FAILURES=$(printf '%s' "$RUN_RESP" | jq -r '[.failures[].reason] | join("; ")' 2>/dev/null || true)
+  if [ "$attempt" -ge "$RUN_TASK_MAX_ATTEMPTS" ]; then
+    echo "ERROR: run-task placed no task after $RUN_TASK_MAX_ATTEMPTS attempts (failures: ${FAILURES:-unknown})" >&2
+    exit 1
+  fi
+  BACKOFF=$(( 5 * (1 << (attempt - 1)) ))
+  [ "$BACKOFF" -gt 60 ] && BACKOFF=60
+  echo "run-task placed no task (attempt $attempt/$RUN_TASK_MAX_ATTEMPTS; failures: ${FAILURES:-none}); retrying in ${BACKOFF}s" >&2
+  sleep "$BACKOFF"
+done
 TASK_ID="${TASK_ARN##*/}"
 echo "Task: $TASK_ID"
 
