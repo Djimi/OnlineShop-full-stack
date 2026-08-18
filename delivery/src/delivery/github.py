@@ -474,6 +474,28 @@ class GitHubApi:
             )
         return candidates
 
+    def get_branch_head_sha(self, branch: str) -> str:
+        """Resolve a branch ref to its current head SHA (AD-11 reachability).
+
+        ``compare_commits`` is SHA-only by contract; callers compare against
+        the exact tip of protected main at preflight time instead of passing
+        a ref.
+        """
+        if not isinstance(branch, str) or not branch or not _BRANCH_NAME.fullmatch(branch):
+            raise ValidationError(f"unsafe branch name {branch!r}")
+        data = self._request(
+            f"/repos/{self.repository}/branches/{urllib.parse.quote(branch, safe='')}"
+        )
+        if not isinstance(data, dict):
+            raise ReadError("branch response must be a JSON object")
+        commit = data.get("commit")
+        if not isinstance(commit, dict):
+            raise ReadError(f"branch {branch!r} has no commit object")
+        sha = commit.get("sha")
+        if not isinstance(sha, str) or not _FULL_SHA.fullmatch(sha):
+            raise ReadError(f"branch {branch!r} has no valid head SHA")
+        return sha
+
     def compare_commits(self, base: str, head: str) -> dict:
         """GitHub compare: expose build-order-independent source relation.
 

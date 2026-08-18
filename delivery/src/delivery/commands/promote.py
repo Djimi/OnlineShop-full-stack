@@ -99,7 +99,8 @@ def preflight(args: argparse.Namespace) -> int:
     _assert_live_marker_matches_snapshot(ctx, ids, snapshot)
 
     newer = api.list_main_candidate_runs(candidate.build.workflowRunId)
-    reachability = api.compare_commits("main", candidate.source.fullSha)
+    main_head = api.get_branch_head_sha("main")
+    reachability = api.compare_commits(main_head, candidate.source.fullSha)
     reachability_status = (
         "reachable" if reachability["status"] == "behind" else reachability["status"]
     )

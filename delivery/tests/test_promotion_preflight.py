@@ -328,7 +328,7 @@ def test_preflight_newer_candidate_diverged_rejected(env, capsys):
             "html_url": "https://github.com/x/y/actions/runs/4718",
         }
     ]
-    env.github.compare = {("main", CANDIDATE_SHA): "diverged"}
+    env.github.compare = {(env.github.main_head_sha, CANDIDATE_SHA): "diverged"}
     code = main(env.argv())
     assert code == 1
     err = capsys.readouterr().err
@@ -358,7 +358,7 @@ def test_preflight_rejects_candidate_older_than_production(env, capsys):
         }
     ]
     env.github.compare = {
-        ("main", CANDIDATE_SHA): "behind",
+        (env.github.main_head_sha, CANDIDATE_SHA): "behind",
         (production_sha, CANDIDATE_SHA): "behind",
     }
     code = main(env.argv())
