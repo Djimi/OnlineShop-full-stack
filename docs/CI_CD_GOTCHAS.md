@@ -132,7 +132,7 @@ bash tests/scripts/candidate_evidence_test.sh
 | Candidate evidence could be emitted for a failed staging run | A dependent job with its own `if:` can run even when a needed job failed | The `candidate-evidence` job requires every `needs.*.result == 'success'` AND `emit-candidate-evidence.sh` refuses to emit unless all five conclusions are `success` |
 | A rerun's evidence misattributed the produced bytes | The rerun reuses, it does not produce | Evidence records `candidateWorkflow` = artifact-producing run (from the images' producer labels) and `artifactWorkflow` = the current staging-validation run; `emit-candidate-evidence.sh` takes `--producer-run-id/--producer-run-attempt` |
 | Candidate manifest needed a version at build time | The owner assigns SemVer at promotion (Decision 3) | The bundle records immutable facts (`candidate-evidence.json`); `emit-candidate-manifest.sh` renders a schema-valid candidate manifest when the version is supplied |
-| Release-critical Actions drifting by mutable tag | `@v4`-style tags move | All release-critical third-party Actions in `build-and-deploy.yml` are pinned by full commit SHA with a version comment; the gate enforces it |
+| Release-critical Actions drifting by mutable tag | `@v4`-style tags move | All release-critical third-party Actions in `ci.yml` (the candidate producer since the Phase 7 trigger swap) are pinned by full commit SHA with a version comment; the gate enforces it |
 | Item images missing the `common` revision | Items embeds `common` at the monorepo SHA | Items images additionally carry `org.onlineshop.common-revision=<sha>`; the canonical-set check requires it |
 
 Live ECR label read-back, real digests, real artifact IDs and service-reported

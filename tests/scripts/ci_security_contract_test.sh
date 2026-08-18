@@ -31,7 +31,7 @@ from yaml.constructor import ConstructorError
 
 root = Path(sys.argv[1])
 workflow_paths = [
-    root / ".github/workflows/build-and-deploy.yml",
+    root / ".github/workflows/ci.yml",
     root / ".github/workflows/promote-release.yml",
     root / ".github/workflows/rollback-release.yml",
     root / ".github/workflows/promote-release-greenfield.yml",
@@ -109,117 +109,41 @@ for path in workflow_paths:
             if permissions.get("id-token") != "write":
                 problems.append(f"{path.name}:{job_name}: AWS job lacks job-scoped id-token: write")
 
-build = yaml.load(
-    (root / ".github/workflows/build-and-deploy.yml").read_text(encoding="utf-8"),
+# The producer workflow (ci.yml) is checked by the generic loop above (it is
+# in workflow_paths); the retired legacy workflows must remain inert stubs
+# (no triggers, no jobs).
+for legacy_name in ("build-and-deploy.yml", "promote-release.yml", "rollback-release.yml"):
+    legacy = yaml.load(
+        (root / ".github/workflows" / legacy_name).read_text(encoding="utf-8"),
+        Loader=UniqueKeyLoader,
+    )
+    if legacy.get("on"):
+        problems.append(f"{legacy_name}: retired workflow must have no triggers")
+    if legacy.get("jobs"):
+        problems.append(f"{legacy_name}: retired workflow must have no jobs")
+
+# ci.yml: the publish job is the only AWS-capable job; every validation job
+# must be read-only, and the publish job must never run with pull-request
+# credentials (it guards on push events and consumes env-transferred inputs).
+ci = yaml.load(
+    (root / ".github/workflows/ci.yml").read_text(encoding="utf-8"),
     Loader=UniqueKeyLoader,
 )
-
-changes = build.get("jobs", {}).get("changes", {})
-changes_permissions = changes.get("permissions") or {}
-if changes_permissions != {"contents": "read", "pull-requests": "read"}:
-    problems.append(
-        "changes job permissions must be exactly contents: read and pull-requests: read"
-    )
-resolve_steps = [
-    step
-    for step in changes.get("steps", [])
-    if isinstance(step, dict) and step.get("id") == "resolve"
-]
-if len(resolve_steps) != 1:
-    problems.append("changes job must have exactly one resolve step")
+publish = ci.get("jobs", {}).get("publish", {})
+if not publish:
+    problems.append("ci.yml: publish job missing")
 else:
-    resolve_run = resolve_steps[0].get("run", "")
-
-    def resolve_selection(event, ref, dispatch_service, filters):
-        with tempfile.TemporaryDirectory() as temp_dir:
-            output = Path(temp_dir) / "github-output"
-            environment = os.environ.copy()
-            environment.update(
-                {
-                    "GITHUB_OUTPUT": str(output),
-                    "EVENT_NAME": event,
-                    "WORKFLOW_REF": ref,
-                    "DISPATCH_SERVICE": dispatch_service,
-                    "FILTER_AUTH": filters["auth"],
-                    "FILTER_ITEMS": filters["items"],
-                    "FILTER_API_GATEWAY": filters["api-gateway"],
-                    "FILTER_FRONTEND": filters["frontend"],
-                }
-            )
-            result = subprocess.run(
-                ["bash", "-c", resolve_run],
-                cwd=root,
-                env=environment,
-                capture_output=True,
-                text=True,
-                check=False,
-            )
-            if result.returncode != 0:
-                return None, f"resolver failed for {event}/{dispatch_service}: {result.stderr.strip()}"
-            values = {}
-            for line in output.read_text(encoding="utf-8").splitlines():
-                key, value = line.split("=", 1)
-                values[key] = value
-            return values, None
-
-    dispatch_values, error = resolve_selection(
-        "workflow_dispatch",
-        "refs/heads/main",
-        "auth",
-        {"auth": "false", "items": "false", "api-gateway": "false", "frontend": "false"},
-    )
-    if error:
-        problems.append(error)
-    elif dispatch_values != {
-        "auth": "true",
-        "items": "false",
-        "api-gateway": "false",
-        "frontend": "false",
-    }:
-        problems.append(
-            "workflow_dispatch auth on refs/heads/main must select only auth: "
-            f"{dispatch_values}"
-        )
-
-    push_values, error = resolve_selection(
-        "push",
-        "refs/heads/main",
-        "",
-        {"auth": "false", "items": "false", "api-gateway": "false", "frontend": "false"},
-    )
-    if error:
-        problems.append(error)
-    elif push_values != {
-        "auth": "true",
-        "items": "true",
-        "api-gateway": "true",
-        "frontend": "true",
-    }:
-        problems.append(
-            "push on refs/heads/main must select all components: " f"{push_values}"
-        )
-
-for backend in ("auth", "items", "api-gateway"):
-    job = build.get("jobs", {}).get(backend, {})
-    steps = [step for step in job.get("steps", []) if isinstance(step, dict)]
-    tag_steps = [step for step in steps if step.get("id") == "tags"]
-    label_steps = [step for step in steps if step.get("name") == "Compute OCI labels"]
-    if not tag_steps or not label_steps:
-        problems.append(f"{backend}: missing tag/label security steps")
-        continue
-    tag_run = str(tag_steps[0].get("run", ""))
-    label_run = str(label_steps[0].get("run", ""))
-    for name, run in (("tags", tag_run), ("labels", label_run)):
-        if 'case "$WORKFLOW_EVENT" in' not in run:
-            problems.append(f"{backend} {name}: event-specific ref validation is missing")
-        if 'push|workflow_dispatch) rl_assert_ci_ref "$WORKFLOW_REF"' not in run:
-            problems.append(f"{backend} {name}: branch refs are not validated")
-        if 'pull_request) rl_assert_ci_pr_ref "$WORKFLOW_REF"' not in run:
-            problems.append(f"{backend} {name}: pull-request refs are not explicitly validated")
-    if '"$WORKFLOW_EVENT" != "pull_request"' not in tag_run:
-        problems.append(f"{backend} tags: branch/convenience tags are not excluded for PRs")
-    if "sha-$WORKFLOW_SHA" not in tag_run:
-        problems.append(f"{backend} tags: PR-safe SHA-local tag is missing")
+    if str(publish.get("if", "")) != "github.event_name == 'push'":
+        problems.append("ci.yml: publish job must run only on push events")
+    publish_permissions = publish.get("permissions") or {}
+    if publish_permissions.get("id-token") != "write":
+        problems.append("ci.yml: publish job must grant job-scoped id-token: write")
+    if publish_permissions.get("actions") != "read":
+        problems.append("ci.yml: publish job must grant actions: read for artifact download")
+    for job_name, job in ci.get("jobs", {}).items():
+        text = str(job)
+        if job_name != "publish" and "configure-aws-credentials" in text:
+            problems.append(f"ci.yml: {job_name} must not configure AWS credentials")
 
 if problems:
     print("\n".join(problems))

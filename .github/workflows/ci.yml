@@ -1,16 +1,17 @@
 name: CI
 
 on:
-  # Trigger isolation (OP-CUT-01): legacy build-and-deploy.yml still owns push
-  # builds for main and feature/** — overlapping triggers would push identical
-  # sha-<fullsha> tags into the same sha-* immutable ECR repositories on the
-  # same commit and the second push would fail. The push path is exercised on
-  # greenfield/** branches during bring-up; expansion to main + feature/**
-  # happens only at cutover, after legacy triggers are disabled
-  # (DELIVERY-SYSTEM-IMPLEMENTATION-PLAN §7 / OP-CUT-02).
+  # Cutover (Phase 7 of the live acceptance, 2026-08-18): the legacy
+  # build-and-deploy.yml is an inert stub with no triggers, so ci.yml owns the
+  # push path for main and feature/** — exactly one producer per sha (OP-CUT-01).
+  # The immutable sha-<fullsha> ECR tags are pushed once by the first trusted
+  # successful run; reruns revalidate and reuse, never rebuild and overwrite.
+  # feature/** pushes produce staging-only feature candidates (AD-03); only
+  # protected-main pushes produce production-eligible main candidates.
   push:
     branches:
-      - 'greenfield/**'
+      - main
+      - 'feature/**'
   pull_request:
     branches:
       - main

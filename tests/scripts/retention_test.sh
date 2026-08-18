@@ -527,11 +527,15 @@ def require_days(path, artifact_substring, expected, label):
 
 
 wf = f"{root}/.github/workflows"
-# Candidate-only artifacts: 30 days.
-require_days(f"{wf}/build-and-deploy.yml", "candidate evidence bundle", 30, "candidate-artifact=30")
-require_days(f"{wf}/build-and-deploy.yml", "candidate-artifact-id", 30, "candidate-artifact=30")
-# Staging-failure diagnostics: existing shorter operational retention (14 days).
-require_days(f"{wf}/build-and-deploy.yml", "staging failure diagnostics", 14, "staging-failure-diagnostics=14")
+# Candidate-only artifacts: 30 days. The greenfield producer (ci.yml) emits
+# the four run/attempt-scoped evidence artifacts; the staging lifecycle owns
+# the 14-day staging-record/diagnostics artifact in stage-candidate.yml.
+require_days(f"{wf}/ci.yml", "candidate-manifest", 30, "candidate-artifact=30")
+require_days(f"{wf}/ci.yml", "frontend-archive", 30, "candidate-artifact=30")
+require_days(f"{wf}/ci.yml", "sboms", 30, "candidate-artifact=30")
+require_days(f"{wf}/ci.yml", "test-results", 30, "candidate-artifact=30")
+# Staging record + failure diagnostics: 14 days (operational retention).
+require_days(f"{wf}/stage-candidate.yml", "staging record and diagnostics", 14, "staging-failure-diagnostics=14")
 # Release result / snapshot records: 14 days (operational retention). The
 # greenfield promotion/rollback workflows own these artifacts now.
 require_days(f"{wf}/promote-release-greenfield.yml", "promotion-snapshot", 14, "rollback-result=14")

@@ -37,16 +37,20 @@
         "arn:aws:ecs:eu-north-1:799111666795:service/onlineshop-cluster/onlineshop-auth",
         "arn:aws:ecs:eu-north-1:799111666795:service/onlineshop-cluster/onlineshop-items",
         "arn:aws:ecs:eu-north-1:799111666795:service/onlineshop-cluster/onlineshop-api-gateway",
+        "arn:aws:ecs:eu-north-1:799111666795:container-instance/onlineshop-cluster/*",
         "arn:aws:ecs:eu-north-1:799111666795:task/onlineshop-cluster/*"
       ]
     },
     {
+      "Sid": "DescribeProductionTaskDefinitionsWithoutResourceSupport",
+      "Effect": "Allow",
+      "Action": "ecs:DescribeTaskDefinition",
+      "Resource": "*"
+    },
+    {
       "Sid": "RegisterProductionTaskDefinitions",
       "Effect": "Allow",
-      "Action": [
-        "ecs:RegisterTaskDefinition",
-        "ecs:DescribeTaskDefinition"
-      ],
+      "Action": "ecs:RegisterTaskDefinition",
       "Resource": [
         "arn:aws:ecs:eu-north-1:799111666795:task-definition/onlineshop-auth:*",
         "arn:aws:ecs:eu-north-1:799111666795:task-definition/onlineshop-items:*",

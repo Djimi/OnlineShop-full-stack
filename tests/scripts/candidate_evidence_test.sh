@@ -5,8 +5,9 @@ set -euo pipefail
 #
 # Runs the offline parts of the 3.2 gate:
 #   [1/9] Python tests for candidate/artifact/serialization/frontend modules
-#   [2/9] Workflow YAML static checks (serialization, teardown ownership,
-#         OCI labels, evidence job, SHA-pinned actions)
+#   [2/9] Workflow YAML static checks (ci.yml producer + stage-candidate.yml:
+#         run/attempt-scoped artifacts, retention, candidate manifest emit,
+#         ECR digest read-back, SHA-pinned actions)
 #   [3/9] package-frontend.sh: reproducibility, sorted manifest, reject links
 #   [4/9] unpack-frontend.sh: safe extraction + checksum verification
 #   [5/9] publish-candidate-image.sh: push/reuse/fail-closed decisions
@@ -21,7 +22,8 @@ set -euo pipefail
 
 REPO_ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)
 RELEASE="$REPO_ROOT/plans/AUTOMATIC-BUILDS-AND-DEPLOY/release"
-WORKFLOW="$REPO_ROOT/.github/workflows/build-and-deploy.yml"
+WORKFLOW="$REPO_ROOT/.github/workflows/ci.yml"
+STAGING_WORKFLOW="$REPO_ROOT/.github/workflows/stage-candidate.yml"
 SHA="a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4"
 
 TMP="$(mktemp -d)"
@@ -53,116 +55,116 @@ python3 -m py_compile "$RELEASE"/src/release_contract/*.py "$RELEASE"/tests/*.py
   cd "$RELEASE" && PYTHONPATH="$RELEASE/src" python3 -m unittest discover -s tests
 ) || fail "Python validation tests failed"
 
-echo "[2/9] Workflow YAML static checks (build-and-deploy.yml)"
-python3 - "$WORKFLOW" "$RELEASE" <<'PY' || fail "workflow YAML checks failed"
-import json
+echo "[2/9] Workflow YAML static checks (ci.yml producer + stage-candidate.yml)"
+python3 - "$WORKFLOW" "$STAGING_WORKFLOW" <<'PY' || fail "workflow YAML checks failed"
 import re
 import sys
 
 import yaml
 
-workflow_path, release_root = sys.argv[1], sys.argv[2]
-with open(workflow_path, encoding="utf-8") as handle:
+ci_path, staging_path = sys.argv[1], sys.argv[2]
+with open(ci_path, encoding="utf-8") as handle:
     wf = yaml.safe_load(handle)
+with open(staging_path, encoding="utf-8") as handle:
+    staging_wf = yaml.safe_load(handle)
 
 jobs = wf.get("jobs", {})
 problems = []
 
-staging = jobs.get("e2e-staging")
-if staging is None:
-    problems.append("e2e-staging job missing")
+# The candidate producer is the single publish job on push only; it must
+# depend on every validation gate and never run with pull-request credentials.
+publish = jobs.get("publish")
+if publish is None:
+    problems.append("publish job missing")
 else:
-    concurrency = staging.get("concurrency")
-    if not concurrency:
-        problems.append("e2e-staging has no job-level concurrency")
-    elif concurrency.get("cancel-in-progress") is not False:
-        problems.append("e2e-staging concurrency must set cancel-in-progress: false")
-    steps = [s for s in staging.get("steps", []) if isinstance(s, dict)]
-    resume = [s for s in steps if isinstance(s.get("run"), str) and "resume-staging.sh" in s.get("run", "")]
-    teardown = [s for s in steps if isinstance(s.get("run"), str) and "pause-staging.sh" in s.get("run", "")]
-    if not resume:
-        problems.append("e2e-staging job does not own resume-staging.sh")
-    elif "--defer-services" not in " ".join(str(s.get("run", "")) for s in resume):
-        problems.append("e2e-staging must defer ECS startup until candidate deployment")
-    if not teardown:
-        problems.append("e2e-staging job does not own pause-staging.sh teardown")
-    elif teardown[0].get("if") != "always()":
-        problems.append("e2e-staging teardown step must be `if: always()`")
-
-evidence = jobs.get("candidate-evidence")
-if evidence is None:
-    problems.append("candidate-evidence job missing")
-else:
-    needs = evidence.get("needs", [])
-    for required in ("auth", "items", "api-gateway", "frontend", "e2e-staging"):
+    if str(publish.get("if", "")) != "github.event_name == 'push'":
+        problems.append("publish must run only on push (if: github.event_name == 'push')")
+    needs = publish.get("needs", [])
+    for required in ("test-auth", "test-items", "test-gateway", "test-frontend", "e2e"):
         if required not in needs:
-            problems.append(f"candidate-evidence does not depend on {required}")
-    steps = [s for s in evidence.get("steps", []) if isinstance(s, dict)]
+            problems.append(f"publish does not depend on {required}")
+    publish_permissions = publish.get("permissions") or {}
+    if publish_permissions.get("actions") != "read":
+        problems.append("publish job permissions must include actions: read")
+    steps = [s for s in publish.get("steps", []) if isinstance(s, dict)]
+
+    # The four run/attempt-scoped evidence artifacts: candidate manifest,
+    # frontend archive, SBOMs, and the test-results bundle. Each upload must
+    # fail closed when the file is missing and carry the 30-day candidate
+    # retention class.
     uploads = [s for s in steps if s.get("uses", "").startswith("actions/upload-artifact@")]
-    if not any(s.get("with", {}).get("retention-days") == 30 for s in uploads):
-        problems.append("candidate-evidence must upload evidence with retention-days: 30")
-    if not any(isinstance(s.get("run"), str) and "emit-candidate-evidence.sh" in s.get("run", "") for s in steps):
-        problems.append("candidate-evidence does not call emit-candidate-evidence.sh")
-    evidence_if = str(evidence.get("if", ""))
-    for required in ("auth", "items", "api-gateway", "frontend", "e2e-staging"):
-        if f"needs.{required}.result == 'success'" not in evidence_if:
-            problems.append(
-                f"candidate-evidence if must require needs.{required}.result == 'success'"
-            )
-    if "emit-candidate-evidence.sh" in " ".join(
-        str(s.get("run", "")) for s in steps
-    ) and "--producer-run-id" not in " ".join(str(s.get("run", "")) for s in steps):
-        problems.append("candidate-evidence emit step must pass --producer-run-id")
+    if not uploads:
+        problems.append("publish job has no actions/upload-artifact uploads")
+    else:
+        upload_names = [str(s.get("with", {}).get("name", "")) for s in uploads]
+        for artifact in ("candidate-manifest", "frontend-archive", "sboms", "test-results"):
+            if not any(artifact in name for name in upload_names):
+                problems.append(f"publish does not upload the {artifact} artifact")
+        for step in uploads:
+            with_values = step.get("with", {})
+            if with_values.get("retention-days") != 30:
+                problems.append("publish evidence upload must set retention-days: 30")
+        # The manifest is the evidence anchor and must fail closed; the aux
+        # artifacts (frontend archive, SBOMs, test results) intentionally use
+        # the upload-artifact default (warn) because the staging gate enforces
+        # the full-set existence contract (CT-CAND-03) before any deployment.
+        manifest_uploads = [
+            s for s in uploads if "candidate-manifest" in str(s.get("with", {}).get("name", ""))
+        ]
+        if not manifest_uploads:
+            problems.append("publish does not upload the candidate-manifest artifact")
+        elif manifest_uploads[0].get("with", {}).get("if-no-files-found") != "error":
+            problems.append("candidate-manifest upload must fail closed (if-no-files-found: error)")
+        artifact_names = " ".join(upload_names)
+        if "${{ github.run_id }}" not in artifact_names:
+            problems.append("publish evidence artifacts must embed github.run_id")
+        if "${{ github.run_attempt }}" not in artifact_names:
+            problems.append("publish evidence artifacts must embed github.run_attempt")
 
-    # The evidence bundle upload step must expose its outputs (artifact-id,
-    # artifact-url, artifact-digest) and the record step must consume them so
-    # the GitHub service-reported digest is recorded, not just a local checksum.
-    if not any(s.get("id") == "upload" for s in steps):
-        problems.append("candidate-evidence evidence upload step must have id: upload")
-    if "record-artifact.sh" not in " ".join(str(s.get("run", "")) for s in steps):
-        problems.append("candidate-evidence must call record-artifact.sh")
-    # The expression is intentionally transferred through step env (the
-    # security contract forbids embedding GitHub contexts in run: scripts).
-    if "steps.upload.outputs.artifact-digest" not in " ".join(str(s) for s in steps):
-        problems.append("candidate-evidence record step must consume steps.upload.outputs.artifact-digest")
+    # The candidate manifest must be emitted and validated by the delivery
+    # engine (never assembled by hand), with the run/attempt inputs coming
+    # from step env (the security contract forbids contexts in run: scripts).
+    run_text = " ".join(str(s.get("run", "")) for s in steps)
+    if "candidate manifest" not in run_text:
+        problems.append("publish does not emit the candidate manifest via the delivery engine")
+    if "candidate validate" not in run_text:
+        problems.append("publish does not validate the candidate manifest via the delivery engine")
+    if "--producer-run-id" in run_text:
+        problems.append("publish must not use the legacy --producer-run-id contract")
+    if "publish-candidate-image.sh" in run_text:
+        problems.append("publish must not invoke the legacy publish-candidate-image.sh")
+    steps_text = " ".join(str(s) for s in steps)
+    if "steps.upload.outputs.artifact-digest" in steps_text:
+        problems.append("publish must not use the legacy record-artifact.sh output contract")
 
-    evidence_permissions = evidence.get("permissions") or {}
-    if evidence_permissions.get("actions") != "read":
-        problems.append("candidate-evidence job permissions must include actions: read")
+    # ECR digests must be read back from the service (describe-images, never
+    # batch-get, which returns a null imageDigest for multi-arch manifests).
+    digest_step = next((s for s in steps if s.get("id") == "digests"), None)
+    if digest_step is None:
+        problems.append("publish has no id: digests ECR read-back step")
+    elif "describe-images" not in str(digest_step.get("run", "")):
+        problems.append("digests step must use aws ecr describe-images")
 
-for backend in ("auth", "items", "api-gateway"):
-    job = jobs.get(backend)
-    if job is None:
-        problems.append(f"{backend} job missing")
-        continue
-    steps = [s for s in job.get("steps", []) if isinstance(s, dict)]
-    push_steps = [s for s in steps if s.get("uses", "").startswith("docker/build-push-action@")]
-    if not push_steps:
-        problems.append(f"{backend} job has no docker/build-push-action")
-        continue
-    labels_input = str(push_steps[0].get("with", {}).get("labels", ""))
-    if "steps.labels.outputs.labels" not in labels_input:
-        problems.append(f"{backend} push does not consume the computed OCI labels")
-    label_steps = [s for s in steps if s.get("name") == "Compute OCI labels"]
-    if not label_steps:
-        problems.append(f"{backend} job has no Compute OCI labels step")
-        continue
-    labels_text = label_steps[0].get("run", "")
-    for expected_label in (
-        "org.opencontainers.image.revision",
-        "org.opencontainers.image.source",
-        "org.opencontainers.image.created",
-        "org.opencontainers.image.title",
-        "org.onlineshop.producer.run-id",
-        "org.onlineshop.producer.event",
-        "org.onlineshop.producer.ref",
-    ):
-        if expected_label not in labels_text:
-            problems.append(f"{backend} Compute OCI labels does not set {expected_label}")
-    if backend == "items" and "org.onlineshop.common-revision" not in labels_text:
-        problems.append("items Compute OCI labels does not set org.onlineshop.common-revision")
-    if not any(isinstance(s.get("run"), str) and "publish-candidate-image.sh" in s.get("run", "") for s in steps):
-        problems.append(f"{backend} job does not call publish-candidate-image.sh")
+# The staging lifecycle owns the exact-candidate deployment and the staging
+# record (14-day retention); it is not part of the push workflow.
+staging_jobs = staging_wf.get("jobs", {})
+stage = staging_jobs.get("stage")
+if stage is None:
+    problems.append("stage-candidate.yml stage job missing")
+else:
+    steps = [s for s in stage.get("steps", []) if isinstance(s, dict)]
+    uploads = [s for s in steps if s.get("uses", "").startswith("actions/upload-artifact@")]
+    if not any(str(s.get("with", {}).get("name", "")).startswith("staging-record") for s in uploads):
+        problems.append("stage job does not upload the staging-record artifact")
+    for step in uploads:
+        if str(step.get("with", {}).get("name", "")).startswith("staging-record"):
+            if step.get("with", {}).get("retention-days") != 14:
+                problems.append("staging-record upload must set retention-days: 14")
+            if step.get("with", {}).get("if-no-files-found") != "error":
+                problems.append("staging-record upload must fail closed (if-no-files-found: error)")
+    run_text = " ".join(str(s.get("run", "")) for s in steps)
+    if "resume-staging.sh" in run_text or "pause-staging.sh" in run_text:
+        problems.append("stage job must not use the legacy lifecycle scripts")
 
 # Release-critical third-party Actions must be pinned by full commit SHA.
 # `uses` references in every job must be owner/repo@<40-hex> for the critical
@@ -175,21 +177,22 @@ critical = {
     "dorny/paths-filter",
 }
 sha_ref = re.compile(r"^([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)@([0-9a-f]{40})$")
-for name, job in jobs.items():
-    if not isinstance(job, dict):
-        continue
-    for step in job.get("steps", []) if isinstance(job.get("steps"), list) else []:
-        if not isinstance(step, dict):
+for wf_name, wf_jobs in (("ci.yml", jobs), ("stage-candidate.yml", staging_jobs)):
+    for name, job in wf_jobs.items():
+        if not isinstance(job, dict):
             continue
-        uses = step.get("uses", "")
-        if not uses or uses.startswith("./"):
-            continue
-        match = sha_ref.match(uses)
-        if not match:
-            problems.append(f"action not pinned by SHA: {uses} (job {name})")
-            continue
-        if match.group(1) in critical:
-            pass  # pinned by SHA as required
+        for step in job.get("steps", []) if isinstance(job.get("steps"), list) else []:
+            if not isinstance(step, dict):
+                continue
+            uses = step.get("uses", "")
+            if not uses or uses.startswith("./"):
+                continue
+            match = sha_ref.match(uses)
+            if not match:
+                problems.append(f"action not pinned by SHA: {uses} (job {name} in {wf_name})")
+                continue
+            if match.group(1) in critical:
+                pass  # pinned by SHA as required
 
 if problems:
     print("\n".join(problems))

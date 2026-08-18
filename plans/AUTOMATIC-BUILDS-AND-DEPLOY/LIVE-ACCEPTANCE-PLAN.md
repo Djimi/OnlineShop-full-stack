@@ -310,6 +310,7 @@ The environment subject is immutable-format and validated live, never guessed: t
 1. `[OWNER] [MUTATION]` PR (owner review + merge) changing exactly two workflows:
    - `.github/workflows/ci.yml`: `push.branches: ['greenfield/**']` → `['main', 'feature/**']`; update the trigger-isolation comment block.
    - `.github/workflows/build-and-deploy.yml`: remove the `push` triggers and remove the `e2e-staging` + `candidate-evidence` jobs (their needs chains included); leave the file as an inert stub (retained in git until Phase 13). This also flips `reconcile-staging.yml`'s bring-up guard (its marker string `e2e-staging` disappears) so reconcile goes **live** from this point.
+   - The offline gates statically reference the legacy producer workflow's shape and must be re-pointed in the same PR (they fail against the stub): `tests/scripts/candidate_evidence_test.sh` [2/9] (→ ci.yml producer + stage-candidate.yml record contract), `tests/scripts/ecr_release_tagging_test.sh` [2/10] (→ ci.yml validation jobs + publish tags step), `tests/scripts/retention_test.sh` (→ ci.yml 30-day candidate artifacts + stage-candidate.yml 14-day staging record), `tests/scripts/ci_security_contract_test.sh` [1/6] (→ ci.yml generic checks + legacy inertness: no triggers, no jobs), `delivery/tests/test_workflows.py` trigger test (`greenfield/**` → `main` + `feature/**`), and the reconcile guard delivery tests (already cover the stub state via fabricated legacy trees).
    - Optionally include one small application change (e.g., a version string or README line) in the same PR so the first production release carries real application content, not only YAML.
 2. `[ACTIONS]` The merge push to `main` fires the expanded `ci.yml` → **FIRST MAIN CANDIDATE** (`--class main`, mutable tag `main-latest`, immutable `sha-<fullsha>`). Record its `CANDIDATE_RUN_ID`/`CANDIDATE_RUN_ATTEMPT`.
 3. `[READ-ONLY]` Verification:
@@ -318,6 +319,7 @@ The environment subject is immutable-format and validated live, never guessed: t
    - `gh run list --workflow build-and-deploy.yml` shows no run for this push.
    - No legacy workflow has any remaining `push`/`schedule` trigger (`grep -A4 '^on:' .github/workflows/build-and-deploy.yml`).
 4. `[READ-ONLY]` Record that legacy `workflow_dispatch` on `build-and-deploy.yml` is gone too (the stub has no triggers); the legacy path can no longer mutate ECR/staging at all — revert is the only revival.
+5. `[READ-ONLY]` Offline gates still green after the swap: `bash tests/scripts/{candidate_evidence,ecr_release_tagging,retention,ci_security_contract}_test.sh` + `delivery/.venv/bin/python -m pytest delivery/tests -q` (the re-pointed gates now validate the ci.yml producer contract).
 
 **Expected evidence:** first main candidate with full artifact set; ECR sha-tag uniqueness; no legacy run for the push.
 

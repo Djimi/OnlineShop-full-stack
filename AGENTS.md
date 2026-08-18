@@ -459,14 +459,17 @@ the offline gate.
 ### Pass 3R.1 — CI security and promotion handoff repair (offline only)
 
 The current 3R.1 implementation hardens the existing v1 workflows and
-promotion wrappers; it does not redesign the release schema or staging. The
-three in-scope workflows have workflow-level `permissions: contents: read`.
-The change detector, frontend validation, and PR E2E jobs stay read-only. The
-existing combined backend jobs remain AWS-capable at job scope because the same
-jobs still serve branch pushes; their pull-request credential and publication
-steps are guarded off, and the source-controlled role trust does not admit a
-`pull_request` subject. The structural PR/trusted-job split is Pass 3R.2/3R.3,
-and the purpose-specific role cutover and live trust read-back are Pass 3R.9.
+promotion wrappers; it does not redesign the release schema or staging. After
+the Phase 6/7 neutralization the three legacy workflows
+(`build-and-deploy.yml`, `promote-release.yml`, `rollback-release.yml`) are
+inert stubs — no triggers, no jobs — and the gates enforce that inertness
+(any revival fails the security gate). The active producer is `ci.yml`
+(workflow-level `permissions: contents: read`, only the `publish` job grants
+`id-token: write` + `actions: read` and configures AWS credentials, and it
+runs only on push events). The change detector, frontend validation, and PR
+E2E jobs stay read-only. The structural PR/trusted-job split is Pass
+3R.2/3R.3, and the purpose-specific role cutover and live trust read-back are
+Pass 3R.9.
 
 Every untrusted GitHub context used by shell is transferred through step
 `env`, validated for its event-specific shape (`rl_assert_ci_ref`,

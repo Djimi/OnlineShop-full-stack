@@ -73,7 +73,7 @@ Required behavior:
 - Frontend archives, SBOMs, test results, and candidate manifests are owned by the exact Actions run/attempt.
 - No selective builds, component reuse, candidate relabeling, or promotion rebuilds.
 - Candidate publication uses the Artifact Publisher role only.
-- **Trigger isolation (implemented, OP-CUT-01):** `ci.yml` push triggers cover `greenfield/**` only — legacy `build-and-deploy.yml` still owns `main` and `feature/**` pushes, and overlapping triggers would push identical `sha-<fullsha>` tags into the same immutable ECR repositories on one commit. Live push-path proof runs on a `greenfield/**` branch; the push triggers expand to `main` + `feature/**` only at cutover, after legacy triggers are disabled (§7 / OP-CUT-02).
+- **Trigger isolation (implemented, OP-CUT-01):** after the Phase 7 cutover (2026-08-18) the legacy `build-and-deploy.yml` is an inert stub with no triggers, so `ci.yml` is the single producer for both `main` and `feature/**` pushes — exactly one `sha-<fullsha>` push per commit into the immutable ECR repositories. See `LIVE-ACCEPTANCE-PLAN.md` Phase 7 for the swap and its verification.
 
 ### 4. Implement shared staging
 
