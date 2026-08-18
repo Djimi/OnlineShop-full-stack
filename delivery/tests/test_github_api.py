@@ -497,3 +497,49 @@ def test_invalid_json_response_is_read_error(monkeypatch):
     )
     with pytest.raises(ReadError):
         GitHubApi(REPO, token="t").list_releases()
+
+
+def test_download_artifact_zip_sends_token_only_to_github_host(monkeypatch):
+    seen = {}
+
+    class BytesResponse:
+        def __init__(self, payload):
+            self.payload = payload
+
+        def read(self):
+            return self.payload
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc_info):
+            return False
+
+    def urlopen(request, timeout=None):
+        seen["url"] = request.full_url
+        seen["authorization"] = request.get_header("Authorization")
+        return BytesResponse(b"zip-bytes")
+
+    monkeypatch.setattr("delivery.github.urllib.request.urlopen", urlopen)
+    api = GitHubApi(REPO, token="secret-token")
+
+    github_url = "https://api.github.com/repos/owner/repo/actions/artifacts/11/zip"
+    assert api.download_artifact_zip(github_url) == b"zip-bytes"
+    assert seen["url"] == github_url
+    assert seen["authorization"] == "Bearer secret-token"
+
+    s3_url = "https://example.s3.amazonaws.com/artifacts/11.zip"
+    assert api.download_artifact_zip(s3_url) == b"zip-bytes"
+    assert seen["url"] == s3_url
+    assert seen["authorization"] is None
+
+
+def test_download_artifact_zip_github_host_without_token_fails_closed(monkeypatch):
+    def urlopen(request, timeout=None):
+        raise AssertionError("urlopen must not be called without a token")
+
+    monkeypatch.setattr("delivery.github.urllib.request.urlopen", urlopen)
+    with pytest.raises(ReadError):
+        GitHubApi(REPO, token=None).download_artifact_zip(
+            "https://api.github.com/repos/owner/repo/actions/artifacts/11/zip"
+        )
