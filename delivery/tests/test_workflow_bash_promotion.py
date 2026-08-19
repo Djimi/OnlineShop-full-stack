@@ -245,62 +245,106 @@ def test_both_jobs_carry_identical_guard_and_validation_scripts() -> None:
 APPROVAL_SCRIPT = _named_step(WORKFLOW, APPROVAL_STEP_NAME, job_name="promote")["run"]
 
 
-def _fake_gh(tmp_path: Path, response: list[dict]) -> dict[str, str]:
-    """A stand-in for `gh api ... --jq <expr>` that applies the jq filter to a
-    fixture response, mirroring gh's pass-through of the filter result and its
-    non-zero exit when the filter calls error()."""
-    response_file = tmp_path / "approvals-response.json"
-    response_file.write_text(json.dumps(response))
+def _fixture_gh(tmp_path: Path, fixtures: dict[str, object]) -> dict[str, str]:
+    """A stand-in for `gh api <url> --jq <expr>` that applies the jq filter to
+    the fixture file for the requested URL, mirroring gh's pass-through of the
+    filter result and its non-zero exit when the filter calls error()."""
+    fixture_dir = tmp_path / "gh-fixtures"
+    fixture_dir.mkdir(exist_ok=True)
+    for url, payload in fixtures.items():
+        key = url.replace("/", "_").replace("?", "_").replace("&", "_").replace("=", "_")
+        (fixture_dir / f"{key}.json").write_text(json.dumps(payload))
     bin_dir = tmp_path / "bin"
-    bin_dir.mkdir()
+    bin_dir.mkdir(exist_ok=True)
     fake = bin_dir / "gh"
     fake.write_text(
         "#!/usr/bin/env bash\n"
         "set -euo pipefail\n"
+        'url="$2"\n'
         'jq_expr="."\n'
         'prev=""\n'
         'for arg in "$@"; do\n'
-        '  if [ "$prev" = "--jq" ]; then jq_expr="$arg"; break; fi\n'
+        '  if [ "$prev" = "--jq" ]; then jq_expr="$arg"; fi\n'
         '  prev="$arg"\n'
         "done\n"
-        f'jq "$jq_expr" "{response_file}"\n'
+        'key=$(printf "%s" "$url" | tr "/?&=" "____")\n'
+        'jq "$jq_expr" "$GH_FIXTURE_DIR/$key.json"\n'
     )
     fake.chmod(0o755)
-    return {"PATH": f"{bin_dir}:{os.environ['PATH']}"}
+    return {"PATH": f"{bin_dir}:{os.environ['PATH']}", "GH_FIXTURE_DIR": str(fixture_dir)}
 
 
-def _approval_env(tmp_path: Path, response: list[dict]) -> dict[str, str]:
-    env = _fake_gh(tmp_path, response)
+RUN_SHA = "a" * 40
+
+APPROVALS_URL = "repos/octo-org/octo-repo/actions/runs/42/approvals"
+DEPLOYMENTS_URL = (
+    f"repos/octo-org/octo-repo/deployments?environment=production&sha={RUN_SHA}&per_page=1"
+)
+STATUSES_URL = "repos/octo-org/octo-repo/deployments/123456/statuses"
+
+
+def _approval_env(
+    tmp_path: Path,
+    approvals: list[dict],
+    statuses: list[dict],
+    deployments: list[dict] | None = None,
+) -> dict[str, str]:
+    env = _fixture_gh(
+        tmp_path,
+        {
+            APPROVALS_URL: approvals,
+            DEPLOYMENTS_URL: deployments
+            if deployments is not None
+            else [{"id": 123456, "sha": RUN_SHA, "environment": "production"}],
+            STATUSES_URL: statuses,
+        },
+    )
     env.update(
         {
             "GH_TOKEN": "fake-token",
             "REPOSITORY": "octo-org/octo-repo",
             "RUN_ACTOR": "operator",
             "RUN_ID": "42",
+            "RUN_SHA": RUN_SHA,
         }
     )
     return env
 
 
-def _approved_response(overrides: dict | None = None, drop: tuple[str, ...] = ()) -> list[dict]:
-    event: dict = {
-        "environments": [{"name": "production"}],
-        "state": "approved",
-        "user": {"login": "owner-reviewer"},
-        "comment": "",
-        "created_at": "2026-08-16T10:30:00Z",
-    }
-    if overrides:
-        event.update(overrides)
-    for field in drop:
-        event.pop(field, None)
-    return [event]
+def _approved_review() -> list[dict]:
+    # The actions approvals API on this repo returns NO timestamp fields —
+    # even for web-UI approvals — so the fixture realistically omits them.
+    return [
+        {
+            "environments": [{"name": "production"}],
+            "state": "approved",
+            "user": {"login": "owner-reviewer"},
+            "comment": "",
+        }
+    ]
 
 
-def test_approval_evidence_uses_api_timestamp_not_the_clock(tmp_path: Path) -> None:
+def _in_progress_statuses() -> list[dict]:
+    return [
+        {
+            "state": "waiting",
+            "created_at": "2026-08-16T10:25:00Z",
+            "creator": {"login": "octocat"},
+        },
+        {
+            "state": "in_progress",
+            "created_at": "2026-08-16T10:30:00Z",
+            "creator": {"login": "octocat"},
+        },
+    ]
+
+
+def test_approval_evidence_uses_deployment_status_timestamp_not_the_clock(
+    tmp_path: Path,
+) -> None:
     result = _bash(
         APPROVAL_SCRIPT,
-        _approval_env(tmp_path, _approved_response()),
+        _approval_env(tmp_path, _approved_review(), _in_progress_statuses()),
         cwd=tmp_path,
     )
     assert result.returncode == 0, result.stdout + result.stderr
@@ -310,45 +354,82 @@ def test_approval_evidence_uses_api_timestamp_not_the_clock(tmp_path: Path) -> N
         "approver": "owner-reviewer",
         "requester": "operator",
         "workflowUrl": "https://github.com/octo-org/octo-repo/actions/runs/42",
-        # F16: created_at from the API response — not the shell clock
+        # F16: the in_progress deployment status created_at (server-side),
+        # not the shell clock
         "approvedAt": "2026-08-16T10:30:00Z",
     }
 
 
-def test_approval_evidence_prefers_approved_at_over_created_at(tmp_path: Path) -> None:
+def test_approval_evidence_takes_the_first_in_progress_status(tmp_path: Path) -> None:
+    statuses = _in_progress_statuses() + [
+        {
+            "state": "in_progress",
+            "created_at": "2026-08-16T11:00:00Z",
+            "creator": {"login": "octocat"},
+        }
+    ]
     result = _bash(
         APPROVAL_SCRIPT,
-        _approval_env(
-            tmp_path,
-            _approved_response(
-                {"approved_at": "2026-08-16T09:00:00Z", "created_at": "2026-08-16T10:30:00Z"}
-            ),
-        ),
+        _approval_env(tmp_path, _approved_review(), statuses),
         cwd=tmp_path,
     )
     assert result.returncode == 0, result.stdout + result.stderr
     evidence = json.loads((tmp_path / "approval-evidence.json").read_text())
-    assert evidence["approvedAt"] == "2026-08-16T09:00:00Z"
+    assert evidence["approvedAt"] == "2026-08-16T10:30:00Z"
 
 
-def test_approval_evidence_fails_closed_without_api_timestamp(tmp_path: Path) -> None:
+def test_approval_evidence_fails_closed_without_in_progress_status(tmp_path: Path) -> None:
     result = _bash(
         APPROVAL_SCRIPT,
-        _approval_env(tmp_path, _approved_response(drop=("created_at",))),
+        _approval_env(
+            tmp_path,
+            _approved_review(),
+            [
+                {
+                    "state": "waiting",
+                    "created_at": "2026-08-16T10:25:00Z",
+                    "creator": {"login": "octocat"},
+                }
+            ],
+        ),
         cwd=tmp_path,
     )
-    assert result.returncode == 1
-    assert "no valid ISO-8601 approval timestamp" in result.stderr
+    assert result.returncode != 0
+    assert "no in_progress deployment status" in result.stderr
+    assert not (tmp_path / "approval-evidence.json").exists()
+
+
+def test_approval_evidence_fails_closed_without_matching_deployment(
+    tmp_path: Path,
+) -> None:
+    result = _bash(
+        APPROVAL_SCRIPT,
+        _approval_env(tmp_path, _approved_review(), _in_progress_statuses(), deployments=[]),
+        cwd=tmp_path,
+    )
+    assert result.returncode != 0
+    assert "no production deployment for this run sha" in result.stderr
     assert not (tmp_path / "approval-evidence.json").exists()
 
 
 def test_approval_evidence_fails_closed_on_malformed_timestamp(tmp_path: Path) -> None:
     result = _bash(
         APPROVAL_SCRIPT,
-        _approval_env(tmp_path, _approved_response({"created_at": "not-a-timestamp"})),
+        _approval_env(
+            tmp_path,
+            _approved_review(),
+            [
+                {
+                    "state": "in_progress",
+                    "created_at": "not-a-timestamp",
+                    "creator": {"login": "octocat"},
+                }
+            ],
+        ),
         cwd=tmp_path,
     )
     assert result.returncode == 1
+    assert "no valid ISO-8601 approval timestamp" in result.stderr
     assert "no valid ISO-8601 approval timestamp" in result.stderr
     assert not (tmp_path / "approval-evidence.json").exists()
 
@@ -356,7 +437,7 @@ def test_approval_evidence_fails_closed_on_malformed_timestamp(tmp_path: Path) -
 def test_approval_evidence_fails_closed_when_no_production_approval(tmp_path: Path) -> None:
     result = _bash(
         APPROVAL_SCRIPT,
-        _approval_env(tmp_path, []),
+        _approval_env(tmp_path, [], _in_progress_statuses()),
         cwd=tmp_path,
     )
     # the gh --jq error() surfaces as a non-zero exit (gh propagates jq's
@@ -368,7 +449,8 @@ def test_approval_evidence_fails_closed_when_no_production_approval(tmp_path: Pa
 def test_approval_evidence_rejects_hostile_actor_logins(tmp_path: Path) -> None:
     result = _bash(
         APPROVAL_SCRIPT,
-        _approval_env(tmp_path, _approved_response()) | {"RUN_ACTOR": "$(touch marker)"},
+        _approval_env(tmp_path, _approved_review(), _in_progress_statuses())
+        | {"RUN_ACTOR": "$(touch marker)"},
         cwd=tmp_path,
     )
     assert result.returncode == 1
@@ -467,7 +549,7 @@ def test_changed_builder_rejects_hostile_step_outputs(tmp_path: Path) -> None:
 
 def test_restore_step_passes_quoted_original_failure_to_recover(tmp_path: Path) -> None:
     bin_dir = tmp_path / "bin"
-    bin_dir.mkdir()
+    bin_dir.mkdir(exist_ok=True)
     argv_file = tmp_path / "python-argv.txt"
     shim = bin_dir / "python"
     shim.write_text(
@@ -501,7 +583,7 @@ def test_restore_step_passes_quoted_original_failure_to_recover(tmp_path: Path) 
 
 def test_restore_step_prefers_the_failure_context(tmp_path: Path) -> None:
     bin_dir = tmp_path / "bin"
-    bin_dir.mkdir()
+    bin_dir.mkdir(exist_ok=True)
     argv_file = tmp_path / "python-argv.txt"
     shim = bin_dir / "python"
     shim.write_text(
@@ -601,7 +683,7 @@ VERIFY_SCRIPT = _named_step(
 
 def test_verify_step_runs_production_verification_against_the_snapshot(tmp_path: Path) -> None:
     bin_dir = tmp_path / "bin"
-    bin_dir.mkdir()
+    bin_dir.mkdir(exist_ok=True)
     argv_file = tmp_path / "python-argv.txt"
     shim = bin_dir / "python"
     shim.write_text(

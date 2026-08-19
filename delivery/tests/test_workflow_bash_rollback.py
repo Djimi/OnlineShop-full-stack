@@ -143,72 +143,112 @@ def test_guard_proceeds_when_legacy_workflow_has_no_mutation_path(tmp_path: Path
 
 APPROVAL_SCRIPT = _named_step(WORKFLOW, APPROVAL_STEP_NAME, job_name="rollback")["run"]
 
-APPROVED_EVENT = json.dumps(
-    [
-        {
-            "state": "approved",
-            "environments": [{"name": "production"}],
-            "user": {"login": "owner-login"},
-            "approved_at": "2026-08-16T09:00:00Z",
-        }
-    ]
-)
-
-NOT_APPROVED_EVENT = json.dumps(
-    [
-        {
-            "state": "pending",
-            "environments": [{"name": "production"}],
-            "user": {"login": "owner-login"},
-            "approved_at": "2026-08-16T09:00:00Z",
-        }
-    ]
-)
-
-WRONG_ENV_EVENT = json.dumps(
-    [
-        {
-            "state": "approved",
-            "environments": [{"name": "staging"}],
-            "user": {"login": "owner-login"},
-            "approved_at": "2026-08-16T09:00:00Z",
-        }
-    ]
-)
-
-NO_TIMESTAMP_EVENT = json.dumps(
-    [
-        {
-            "state": "approved",
-            "environments": [{"name": "production"}],
-            "user": {"login": "owner-login"},
-        }
-    ]
-)
-
-
-def _approval_bash(tmp_path: Path, event: str) -> subprocess.CompletedProcess[str]:
-    gh_stub = tmp_path / "gh"
-    gh_stub.write_text(
-        "#!/bin/bash\n"
-        "FILTER=\"\"\n"
-        "while [[ $# -gt 0 ]]; do\n"
-        "  if [[ \"$1\" == \"--jq\" ]]; then FILTER=\"$2\"; shift 2; else shift; fi\n"
+def _fixture_gh(tmp_path: Path, fixtures: dict[str, object]) -> dict[str, str]:
+    """A stand-in for `gh api <url> --jq <expr>` that applies the jq filter to
+    the fixture file for the requested URL, mirroring gh's pass-through of the
+    filter result and its non-zero exit when the filter calls error()."""
+    fixture_dir = tmp_path / "gh-fixtures"
+    fixture_dir.mkdir(exist_ok=True)
+    for url, payload in fixtures.items():
+        key = url.replace("/", "_").replace("?", "_").replace("&", "_").replace("=", "_")
+        (fixture_dir / f"{key}.json").write_text(json.dumps(payload))
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir(exist_ok=True)
+    fake = bin_dir / "gh"
+    fake.write_text(
+        "#!/usr/bin/env bash\n"
+        "set -euo pipefail\n"
+        'url="$2"\n'
+        'jq_expr="."\n'
+        'prev=""\n'
+        'for arg in "$@"; do\n'
+        '  if [ "$prev" = "--jq" ]; then jq_expr="$arg"; fi\n'
+        '  prev="$arg"\n'
         "done\n"
-        "printf \"%s\\n\" \"$EVENT_PAYLOAD\" | jq -r \"$FILTER\"\n"
+        'key=$(printf "%s" "$url" | tr "/?&=" "____")\n'
+        'jq "$jq_expr" "$GH_FIXTURE_DIR/$key.json"\n'
     )
-    gh_stub.chmod(0o755)
-    env = {
-        "PATH": f"{tmp_path}:{os.environ.get('PATH', '')}",
-        "EVENT_PAYLOAD": event,
-        "REPOSITORY": "owner/repo",
-        "RUN_ACTOR": "requester-login",
-        "RUN_ID": "4713",
+    fake.chmod(0o755)
+    return {"PATH": f"{bin_dir}:{os.environ['PATH']}", "GH_FIXTURE_DIR": str(fixture_dir)}
+
+
+RUN_SHA = "b" * 40
+
+APPROVALS_URL = "repos/owner/repo/actions/runs/4713/approvals"
+DEPLOYMENTS_URL = (
+    f"repos/owner/repo/deployments?environment=production&sha={RUN_SHA}&per_page=1"
+)
+STATUSES_URL = "repos/owner/repo/deployments/987654/statuses"
+
+APPROVED_EVENT = [
+    {
+        "state": "approved",
+        "environments": [{"name": "production"}],
+        "user": {"login": "owner-login"},
+        "comment": "",
     }
+]
+
+NOT_APPROVED_EVENT = [
+    {
+        "state": "pending",
+        "environments": [{"name": "production"}],
+        "user": {"login": "owner-login"},
+        "comment": "",
+    }
+]
+
+WRONG_ENV_EVENT = [
+    {
+        "state": "approved",
+        "environments": [{"name": "staging"}],
+        "user": {"login": "owner-login"},
+        "comment": "",
+    }
+]
+
+IN_PROGRESS_STATUSES = [
+    {
+        "state": "waiting",
+        "created_at": "2026-08-16T08:55:00Z",
+        "creator": {"login": "octocat"},
+    },
+    {
+        "state": "in_progress",
+        "created_at": "2026-08-16T09:00:00Z",
+        "creator": {"login": "octocat"},
+    },
+]
+
+
+def _approval_bash(
+    tmp_path: Path, approvals: list[dict], statuses: list[dict] | None = None
+) -> subprocess.CompletedProcess[str]:
+    env = _fixture_gh(
+        tmp_path,
+        {
+            APPROVALS_URL: approvals,
+            DEPLOYMENTS_URL: [
+                {"id": 987654, "sha": RUN_SHA, "environment": "production"}
+            ],
+            STATUSES_URL: statuses if statuses is not None else IN_PROGRESS_STATUSES,
+        },
+    )
+    env.update(
+        {
+            "GH_TOKEN": "fake-token",
+            "REPOSITORY": "owner/repo",
+            "RUN_ACTOR": "requester-login",
+            "RUN_ID": "4713",
+            "RUN_SHA": RUN_SHA,
+        }
+    )
     return _bash(APPROVAL_SCRIPT, env, cwd=tmp_path)
 
 
-def test_approval_resolves_approver_and_strict_timestamp(tmp_path: Path) -> None:
+def test_approval_resolves_approver_and_deployment_status_timestamp(
+    tmp_path: Path,
+) -> None:
     result = _approval_bash(tmp_path, APPROVED_EVENT)
     assert result.returncode == 0, result.stdout + result.stderr
     evidence = json.loads((tmp_path / "approval-evidence.json").read_text())
@@ -225,13 +265,22 @@ def test_approval_fails_when_no_approved_production_review(tmp_path: Path) -> No
         assert "no approved production environment review" in result.stderr
 
 
-def test_approval_fails_when_timestamp_missing_or_malformed(tmp_path: Path) -> None:
-    result = _approval_bash(tmp_path, NO_TIMESTAMP_EVENT)
-    assert result.returncode == 1
-    assert "ISO-8601 approval timestamp" in result.stderr
-    malformed = json.loads(APPROVED_EVENT)
-    malformed[0]["approved_at"] = "2026-08-16T09:00:00+02:00"
-    result = _approval_bash(tmp_path, json.dumps(malformed))
+def test_approval_fails_when_deployment_status_missing_or_malformed(
+    tmp_path: Path,
+) -> None:
+    result = _approval_bash(
+        tmp_path, APPROVED_EVENT, statuses=[{"state": "waiting", "created_at": "x"}]
+    )
+    assert result.returncode != 0
+    assert "no in_progress deployment status" in result.stderr
+    malformed = [
+        {
+            "state": "in_progress",
+            "created_at": "2026-08-16T09:00:00+02:00",
+            "creator": {"login": "octocat"},
+        }
+    ]
+    result = _approval_bash(tmp_path, APPROVED_EVENT, statuses=malformed)
     assert result.returncode == 1
     assert "ISO-8601 approval timestamp" in result.stderr
 
@@ -420,7 +469,7 @@ def test_verify_step_runs_production_verification_against_the_snapshot(
     tmp_path: Path,
 ) -> None:
     bin_dir = tmp_path / "bin"
-    bin_dir.mkdir()
+    bin_dir.mkdir(exist_ok=True)
     argv_file = tmp_path / "python-argv.txt"
     shim = bin_dir / "python"
     shim.write_text(

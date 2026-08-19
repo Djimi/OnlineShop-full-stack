@@ -325,13 +325,15 @@ def test_approver_derived_from_approvals_api_not_actor() -> None:
     assert '.state == "approved"' in run
     assert 'any(.name == "production")' in run
     assert ".user.login" in run
-    assert ".approved_at // .created_at // empty" in run
+    assert ".state == \"in_progress\"" in run
+    assert "deployments?environment=production&sha=$RUN_SHA&per_page=1" in run
     assert "--arg approvedAt \"$APPROVED_AT\"" in run
     assert "date" not in run
     assert (
         "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$" in run
     )
     assert "$RUN_ACTOR" in run
+    assert "$RUN_SHA" in run
     assert '--arg approver "$APPROVED_BY"' in run
     assert '--arg requester "$RUN_ACTOR"' in run
     # github.actor is only ever the requester, never the approver

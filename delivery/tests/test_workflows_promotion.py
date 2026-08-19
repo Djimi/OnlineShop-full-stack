@@ -305,10 +305,14 @@ def test_approver_derived_from_approvals_api_not_actor() -> None:
     assert '.state == "approved"' in run
     assert 'any(.name == "production")' in run
     assert ".user.login" in run
-    # F16 (CT-AUDIT-01): approvedAt comes from the approvals API response
-    # (approved_at, falling back to created_at), strictly validated as
-    # non-empty ISO-8601; the runner clock (`date`) is never consulted.
-    assert ".approved_at // .created_at // empty" in run
+    # F16 (CT-AUDIT-01): the approvals API carries no approval timestamp
+    # (even for web-UI approvals), so approvedAt comes from the production
+    # deployment statuses for this run's SHA — the in_progress status is
+    # created server-side the moment the review is accepted — strictly
+    # validated as non-empty ISO-8601; the runner clock (`date`) is never
+    # consulted.
+    assert ".state == \"in_progress\"" in run
+    assert "deployments?environment=production&sha=$RUN_SHA&per_page=1" in run
     assert "--arg approvedAt \"$APPROVED_AT\"" in run
     assert "date" not in run
     assert "NOW=" not in run
@@ -316,7 +320,7 @@ def test_approver_derived_from_approvals_api_not_actor() -> None:
         "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$" in run
     )
     assert (
-        "ERROR: the approved production review carries no valid ISO-8601 approval timestamp"
+        "ERROR: the approved production deployment carries no valid ISO-8601 approval timestamp"
         in run
     )
     assert '.approver != "" and .requester != "" and .approvedAt != ""' in run
@@ -327,6 +331,7 @@ def test_approver_derived_from_approvals_api_not_actor() -> None:
     )
     # github.actor is only ever the requester, never the approver
     assert "$RUN_ACTOR" in run
+    assert "$RUN_SHA" in run
     assert '--arg approver "$APPROVED_BY"' in run
     assert '--arg requester "$RUN_ACTOR"' in run
     # GITHUB_OUTPUT is never used with key=value injection
