@@ -78,11 +78,16 @@ def batch_get_image_digests(client: Any, repository: str, tags: list[str]) -> di
         raise ReadError(f"describe_images failed for {repository}") from error
 
 
-def put_image(client: Any, repository: str, tag: str, image_manifest: bytes) -> dict:
+def put_image(client: Any, repository: str, tag: str, image_manifest: bytes | str) -> dict:
     """Mint an image tag server-side from the recorded manifest bytes."""
+    manifest = (
+        image_manifest.decode("utf-8")
+        if isinstance(image_manifest, bytes)
+        else image_manifest
+    )
     try:
         return client.put_image(
-            repositoryName=repository, imageTag=tag, imageManifest=image_manifest
+            repositoryName=repository, imageTag=tag, imageManifest=manifest
         )
     except ClientError as error:
         code = error.response.get("Error", {}).get("Code", "")

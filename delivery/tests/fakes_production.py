@@ -503,7 +503,7 @@ class FakeEcr:
     def put_image(self, repositoryName, imageTag, imageManifest):
         self.put_calls.append((repositoryName, imageTag))
         key = self._key(repositoryName)
-        digest = json.loads(imageManifest.decode())["config"]
+        digest = json.loads(imageManifest)["config"]
         self.tags[(key, imageTag)] = digest
         return {}
 

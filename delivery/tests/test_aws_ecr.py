@@ -48,6 +48,7 @@ class FakeEcr:
 
     def put_image(self, repositoryName, imageTag, imageManifest):
         self._maybe_fail()
+        self.last_manifest = imageManifest
         self.images[imageTag] = DIGEST_A
         return {"repositoryName": repositoryName, "imageTag": imageTag}
 
@@ -176,6 +177,9 @@ def test_put_image_ok():
     response = put_image(fake, REPOSITORY, "release-0001", b'{"schemaVersion": 2}')
     assert response["imageTag"] == "release-0001"
     assert fake.images["release-0001"] == DIGEST_A
+    # ECR's imageManifest parameter is a string, never raw bytes
+    assert fake.last_manifest == '{"schemaVersion": 2}'
+    assert isinstance(fake.last_manifest, str)
 
 
 def test_put_image_policy_rejection_is_mutation_verification_error():
