@@ -424,6 +424,8 @@ jobs:
       # switch, live marker names the CANDIDATE (not an unfinalized release).
       - name: Deploy frontend (immutable prefix + live switch)
         id: deploy-frontend
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           python -m delivery.cli deploy frontend \
