@@ -397,6 +397,13 @@ Learned during staging provisioning (2026-08-02). Full narrative: [AWS_COMMANDS_
 |--------|---------------|------|
 | `describe_load_balancers failed for <alb>` at verify time despite an Allow statement | ELBv2 `Describe*` actions (`DescribeLoadBalancers`, `DescribeTargetHealth`, ...) **do not support resource-level permissions**; an Allow with a scoped ARN (e.g. `.../loadbalancer/app/onlineshop-alb/*`) is inert — IAM never matches it and the call gets implicit deny | Grant ELB describe actions with `Resource: "*"` (they are read-only; the scoping is impossible). Verify with `aws iam simulate-principal-policy --action-names elasticloadbalancing:DescribeLoadBalancers --resource-arns '*'`. The live `github-actions-production` role drifted from the repo policy copy (which was already correct); after any manual IAM edit, diff the read-back against the committed JSON |
 
+## GitHub Environment Approvals (REST)
+
+| Gotcha | Why It Happens | Rule |
+|--------|---------------|------|
+| The "Resolve the environment approver" step fails: the approvals API carries no timestamp — not even for a real web-UI approval | `GET /repos/{owner}/{repo}/actions/runs/{run}/approvals` returns only `user`, `state`, `comment`, `environments` on this repo; the documented `created_at`/`approved_at` fields are never present, so `approved_at // created_at` is always empty | Derive the approver login from the approvals API (`.user.login`) but the approval timestamp from the environment deployment evidence: list `deployments?environment=production&sha=<run sha>` → the deployment id, then its `/statuses` → the **`in_progress` status `created_at`** (created server-side the moment the review is accepted; exists identically for web-UI and API approvals). `gh api --jq` prints scalar strings JSON-encoded (with quotes) — pipe through `jq -r .` before regex-validating. Never use the runner clock (`date`) |
+| Approving an environment review via `POST /pending_deployments` | API approvals are fully valid, produce the same `in_progress` deployment status, and are preferred for delegated operation — the strict evidence step above accepts them | POST `{"environment_ids": [<id>], "state": "approved", "comment": "..."}` with `--input` (the ids MUST be a JSON array; a `-f` string 422s); a second POST after approval returns "No pending deployment requests" (expected) |
+
 ---
 
 ## Private RDS Access
