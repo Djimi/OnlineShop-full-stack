@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import binascii
 import hashlib
+from pathlib import Path
 from typing import Any
 
 from botocore.exceptions import ClientError
@@ -53,10 +54,39 @@ def get_object_sha256(client: Any, bucket: str, key: str) -> str:
     return hashlib.sha256(body.read()).hexdigest()
 
 
+_CONTENT_TYPES = {
+    ".html": "text/html",
+    ".js": "application/javascript",
+    ".mjs": "application/javascript",
+    ".css": "text/css",
+    ".json": "application/json",
+    ".map": "application/json",
+    ".svg": "image/svg+xml",
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".gif": "image/gif",
+    ".webp": "image/webp",
+    ".ico": "image/x-icon",
+    ".woff": "font/woff",
+    ".woff2": "font/woff2",
+    ".ttf": "font/ttf",
+    ".otf": "font/otf",
+    ".txt": "text/plain",
+    ".xml": "application/xml",
+    ".webmanifest": "application/manifest+json",
+    ".wasm": "application/wasm",
+}
+
+
 def put_object(client: Any, bucket: str, key: str, body: bytes) -> str:
-    """Upload with a SHA-256 checksum and verify size and checksum read-back."""
+    """Upload with a SHA-256 checksum, a MIME type, and verified read-back."""
+    content_type = _CONTENT_TYPES.get(Path(key).suffix.lower())
+    kwargs = {"Bucket": bucket, "Key": key, "Body": body, "ChecksumAlgorithm": "SHA256"}
+    if content_type is not None:
+        kwargs["ContentType"] = content_type
     head = mutate_and_read_back(
-        lambda: client.put_object(Bucket=bucket, Key=key, Body=body, ChecksumAlgorithm="SHA256"),
+        lambda: client.put_object(**kwargs),
         lambda: client.head_object(
             Bucket=bucket, Key=key, ChecksumMode="ENABLED"
         ),

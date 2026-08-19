@@ -28,6 +28,7 @@ class FakeS3:
         self.checksums = checksums or {}
         self.error = None
         self.checksum_mode_required = False
+        self.puts = []
 
     def _maybe_fail(self):
         if self.error:
@@ -50,8 +51,9 @@ class FakeS3:
             raise client_error("NoSuchKey", "Not Found")
         return {"Body": io.BytesIO(self.objects[Key])}
 
-    def put_object(self, Bucket, Key, Body, ChecksumAlgorithm="SHA256"):
+    def put_object(self, Bucket, Key, Body, ChecksumAlgorithm="SHA256", ContentType=None):
         self._maybe_fail()
+        self.puts.append({"Key": Key, "ContentType": ContentType})
         self.objects[Key] = Body
         self.checksums[Key] = base64.b64encode(hashlib.sha256(Body).digest()).decode()
         return {"ETag": '"etag-fake"'}
@@ -63,14 +65,14 @@ class FakeS3:
 
 
 class LyingFakeS3(FakeS3):
-    def put_object(self, Bucket, Key, Body, ChecksumAlgorithm="SHA256"):
+    def put_object(self, Bucket, Key, Body, ChecksumAlgorithm="SHA256", ContentType=None):
         self.objects[Key] = Body + b"-corrupt"
         self.checksums[Key] = base64.b64encode(hashlib.sha256(Body).digest()).decode()
         return {"ETag": '"etag-fake"'}
 
 
 class WrongChecksumFakeS3(FakeS3):
-    def put_object(self, Bucket, Key, Body, ChecksumAlgorithm="SHA256"):
+    def put_object(self, Bucket, Key, Body, ChecksumAlgorithm="SHA256", ContentType=None):
         self.objects[Key] = Body
         self.checksums[Key] = base64.b64encode(hashlib.sha256(b"other").digest()).decode()
         return {"ETag": '"etag-fake"'}
@@ -120,6 +122,23 @@ def test_put_object_ok_returns_canonical_hex():
     fake = FakeS3()
     assert put_object(fake, BUCKET, KEY, BODY) == BODY_HEX
     assert fake.objects[KEY] == BODY
+
+
+def test_put_object_sets_content_type_for_known_extensions():
+    fake = FakeS3()
+    put_object(fake, BUCKET, "index.html", BODY)
+    put_object(fake, BUCKET, "assets/app.js", BODY)
+    put_object(fake, BUCKET, "assets/style.css", BODY)
+    put_object(fake, BUCKET, "assets/logo.svg", BODY)
+    put_object(fake, BUCKET, "release.json", BODY)
+    put_object(fake, BUCKET, "unknown.bin", BODY)
+    by_key = {entry["Key"]: entry["ContentType"] for entry in fake.puts}
+    assert by_key["index.html"] == "text/html"
+    assert by_key["assets/app.js"] == "application/javascript"
+    assert by_key["assets/style.css"] == "text/css"
+    assert by_key["assets/logo.svg"] == "image/svg+xml"
+    assert by_key["release.json"] == "application/json"
+    assert by_key["unknown.bin"] is None
 
 
 def test_put_object_size_mismatch_raises():
