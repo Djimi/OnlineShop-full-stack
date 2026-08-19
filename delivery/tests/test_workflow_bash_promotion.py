@@ -268,7 +268,7 @@ def _fixture_gh(tmp_path: Path, fixtures: dict[str, object]) -> dict[str, str]:
         '  prev="$arg"\n'
         "done\n"
         'key=$(printf "%s" "$url" | tr "/?&=" "____")\n'
-        'jq "$jq_expr" "$GH_FIXTURE_DIR/$key.json"\n'
+        'jq -r "$jq_expr" "$GH_FIXTURE_DIR/$key.json"\n'
     )
     fake.chmod(0o755)
     return {"PATH": f"{bin_dir}:{os.environ['PATH']}", "GH_FIXTURE_DIR": str(fixture_dir)}
