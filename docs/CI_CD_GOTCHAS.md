@@ -391,6 +391,14 @@ Learned during staging provisioning (2026-08-02). Full narrative: [AWS_COMMANDS_
 
 ---
 
+## AWS ELB (IAM)
+
+| Gotcha | Why It Happens | Rule |
+|--------|---------------|------|
+| `describe_load_balancers failed for <alb>` at verify time despite an Allow statement | ELBv2 `Describe*` actions (`DescribeLoadBalancers`, `DescribeTargetHealth`, ...) **do not support resource-level permissions**; an Allow with a scoped ARN (e.g. `.../loadbalancer/app/onlineshop-alb/*`) is inert — IAM never matches it and the call gets implicit deny | Grant ELB describe actions with `Resource: "*"` (they are read-only; the scoping is impossible). Verify with `aws iam simulate-principal-policy --action-names elasticloadbalancing:DescribeLoadBalancers --resource-arns '*'`. The live `github-actions-production` role drifted from the repo policy copy (which was already correct); after any manual IAM edit, diff the read-back against the committed JSON |
+
+---
+
 ## Private RDS Access
 
 The RDS instance has `PubliclyAccessible: No` — **no route from your machine, ever** (private subnets, no IGW route). Do NOT attempt local `psql` (it hangs until timeout) and do NOT make RDS public.
