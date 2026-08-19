@@ -34,7 +34,9 @@ def object_exists(client: Any, bucket: str, key: str) -> bool:
 def get_object_sha256(client: Any, bucket: str, key: str) -> str:
     """Return the canonical hex SHA-256, preferring server-side checksums."""
     try:
-        head = client.head_object(Bucket=bucket, Key=key)
+        head = client.head_object(
+            Bucket=bucket, Key=key, ChecksumMode="ENABLED"
+        )
     except ClientError as error:
         if absent_or_read(error):
             raise AbsentResourceError(f"s3://{bucket}/{key} not found") from error
@@ -55,7 +57,9 @@ def put_object(client: Any, bucket: str, key: str, body: bytes) -> str:
     """Upload with a SHA-256 checksum and verify size and checksum read-back."""
     head = mutate_and_read_back(
         lambda: client.put_object(Bucket=bucket, Key=key, Body=body, ChecksumAlgorithm="SHA256"),
-        lambda: client.head_object(Bucket=bucket, Key=key),
+        lambda: client.head_object(
+            Bucket=bucket, Key=key, ChecksumMode="ENABLED"
+        ),
         label=f"s3://{bucket}/{key}",
         check=lambda observed: observed.get("ContentLength") == len(body)
         and bool(observed.get("ChecksumSHA256")),
