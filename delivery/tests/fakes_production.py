@@ -555,7 +555,7 @@ class FakeS3:
             "ChecksumSHA256": base64.b64encode(hashlib.sha256(body).digest()).decode(),
         }
 
-    def put_object(self, Bucket, Key, Body, ChecksumAlgorithm=None):
+    def put_object(self, Bucket, Key, Body, ChecksumAlgorithm=None, ContentType=None):
         self.put_calls.append(Key)
         self.objects[Key] = Body
         return {}
