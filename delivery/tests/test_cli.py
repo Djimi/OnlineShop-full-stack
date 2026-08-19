@@ -171,7 +171,7 @@ class FakeS3:
             raise client_error("NoSuchKey")
         return {"Body": io.BytesIO(self.objects[Key])}
 
-    def head_object(self, Bucket, Key):
+    def head_object(self, Bucket, Key, ChecksumMode=None):
         if Key not in self.objects:
             raise client_error("NoSuchKey")
         body = self.objects[Key]

@@ -27,13 +27,16 @@ class FakeS3:
         self.objects = objects or {}
         self.checksums = checksums or {}
         self.error = None
+        self.checksum_mode_required = False
 
     def _maybe_fail(self):
         if self.error:
             raise self.error
 
-    def head_object(self, Bucket, Key):
+    def head_object(self, Bucket, Key, ChecksumMode=None):
         self._maybe_fail()
+        if self.checksum_mode_required and ChecksumMode != "ENABLED":
+            return {"ContentLength": len(self.objects[Key]), "ETag": '"etag-fake"'}
         if Key not in self.objects:
             raise client_error("404", "Not Found")
         head = {"ContentLength": len(self.objects[Key]), "ETag": '"etag-fake"'}
@@ -129,6 +132,19 @@ def test_put_object_checksum_mismatch_raises():
     fake = WrongChecksumFakeS3()
     with pytest.raises(MutationVerificationError):
         put_object(fake, BUCKET, KEY, BODY)
+
+
+def test_put_object_requests_checksum_mode_enabled_read_back():
+    fake = FakeS3()
+    fake.checksum_mode_required = True
+    assert put_object(fake, BUCKET, KEY, BODY) == BODY_HEX
+    assert fake.objects[KEY] == BODY
+
+
+def test_get_object_sha256_requests_checksum_mode_enabled():
+    fake = FakeS3(objects={KEY: BODY}, checksums={KEY: BODY_B64})
+    fake.checksum_mode_required = True
+    assert get_object_sha256(fake, BUCKET, KEY) == BODY_HEX
 
 
 def test_list_objects_returns_matching_keys():
