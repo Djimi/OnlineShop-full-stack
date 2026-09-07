@@ -62,7 +62,7 @@ docker compose up -d --build <service-name>
 # cd <service-directory> && ./mvnw clean package -DskipTests
 
 # Run unit + integration tests (from service directory)
-./mvnw clean test
+./mvnw clean verify
 
 # Run application with local profile without docker containers.
 ./mvnw spring-boot:run -Dspring-boot.run.profiles=local

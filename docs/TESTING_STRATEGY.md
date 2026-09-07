@@ -12,7 +12,7 @@
 
 **Run tests after EVERY code change — BEFORE committing.** This is a hard requirement:
 
-1. `./mvnw clean test` from the affected service directory (e.g., `Items/`, `Auth/`)
+1. `./mvnw clean verify` from the affected service directory (e.g., `Items/`, `Auth/`). This runs Surefire unit tests and Failsafe integration tests.
 2. If E2E tests apply to the change, also run `./mvnw clean test` from `e2e-tests/`
 3. Only commit if ALL tests pass — never commit failing tests or skip testing
 
@@ -144,7 +144,7 @@ Resist the urge to write production code without a failing test first. The disci
 |------|-------|
 | Running tests | [CLAUDE.md](../../CLAUDE.md) — Essential Commands |
 | Unit test example | `Items/src/test/java/**/ItemServiceTest.java` |
-| Integration test example | `Items/src/test/java/**/*IntegrationTest.java` |
+| Integration test example | `Items/src/integrationTest/java/**/*IntegrationTest.java` |
 | E2E tests | `e2e-tests/src/test/java/` |
 | JaCoCo configuration | Service `pom.xml` files — search for `jacoco-maven-plugin` |
 | Test data utilities | `*/src/test/java/**/testutil/` | -->
@@ -255,13 +255,13 @@ approval, AWS mutations, and GitHub Release publication to 3R.10.
 
 ```bash
 # Unit + Integration (per service), run from the respective service folder
-cd Items/ && ./mvnw clean test
-cd Auth/ && ./mvnw clean test
+cd Items/ && ./mvnw clean verify
+cd Auth/ && ./mvnw clean verify
 
 # E2E tests (from e2e-tests/, requires docker compose up first)
 cd e2e-tests/ && ./mvnw clean test
 
 # With coverage report
-./mvnw clean test jacoco:report
+./mvnw clean verify jacoco:report
 # Report at: target/site/jacoco/index.html
 ```
