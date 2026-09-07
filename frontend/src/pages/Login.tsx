@@ -1,4 +1,4 @@
-import { useNavigate, Link } from 'react-router';
+import { useNavigate, useLocation, Link } from 'react-router';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
@@ -19,6 +19,7 @@ type LoginFormData = z.infer<typeof loginSchema>;
 
 export default function Login() {
   const navigate = useNavigate();
+  const location = useLocation();
   const [isLoading, setIsLoading] = useState(false);
   const setAuth = useAuthStore((state) => state.setAuth);
 
@@ -40,7 +41,12 @@ export default function Login() {
 
       setAuth(response.token, response.userId, response.username);
       toast.success(`Welcome back, ${response.username}.`);
-      setTimeout(() => navigate('/items', { replace: true }), 500);
+      const from = (location.state as { from?: { pathname?: string; search?: string; hash?: string } } | null)?.from;
+      const destination = from?.pathname
+        ? `${from.pathname}${from.search ?? ''}${from.hash ?? ''}`
+        : sessionStorage.getItem('onlineshop_redirect_from') ?? '/items';
+      sessionStorage.removeItem('onlineshop_redirect_from');
+      navigate(destination, { replace: true });
     } catch (error: unknown) {
       const errorMessage = getApiErrorMessage(error, 'Login failed. Please check your credentials.');
       toast.error(errorMessage);
@@ -51,15 +57,15 @@ export default function Login() {
   };
 
   return (
-    <div className="min-h-[calc(100vh-120px)] flex items-center justify-center px-6 py-16">
+    <div className="page-min flex items-center justify-center px-6 py-16">
       <div className="w-full max-w-md">
         <div className="text-center mb-10">
-          <div className="w-px h-14 bg-[#1f1a14] opacity-40 mx-auto mb-6" />
+          <div className="w-px h-14 bg-ink opacity-40 mx-auto mb-6" />
           <div className="eyebrow mb-5">— Sign in —</div>
           <h1 className="font-display font-light text-5xl leading-[1] tracking-[-0.015em]">
-            Welcome <em className="italic text-[#7a3b2c] font-normal">back</em>.
+            Welcome <em className="italic text-accent font-normal">back</em>.
           </h1>
-          <p className="mt-5 text-[#5b524a] text-sm font-light">
+          <p className="mt-5 text-soft text-sm font-light">
             Sign in to continue to your shelf.
           </p>
         </div>
@@ -86,9 +92,9 @@ export default function Login() {
           </div>
         </form>
 
-        <p className="text-center mt-10 text-sm text-[#5b524a] font-light">
+        <p className="text-center mt-10 text-sm text-soft font-light">
           New here?{' '}
-          <Link to="/register" className="text-[#7a3b2c] border-b border-[#7a3b2c] pb-0.5 hover:text-[#1f1a14] hover:border-[#1f1a14]">
+          <Link to="/register" className="text-accent border-b border-accent pb-0.5 hover:text-ink hover:border-ink">
             Create an account
           </Link>
         </p>

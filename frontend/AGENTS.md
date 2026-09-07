@@ -115,9 +115,41 @@ This allows direct navigation to routes like `/login` and `/items` without serve
 
 - `axios` — HTTP client
 - `zustand` — State management (auth store)
-- `@tanstack/react-query` — Server state management
 - `react-router` — Client-side routing
 - `react-hook-form` + `zod` — Form handling and validation
+
+## UI Behavior and Verification
+
+The catalog filters locally loaded items by name/description and can toggle an
+in-stock-only view. Product details remain reachable for out-of-stock items;
+only the purchase action is disabled because the cart API is not implemented.
+The catalog distinguishes an API failure from a successful empty response and
+offers a retry action.
+
+After frontend changes, run the checks inside the running Compose frontend
+container (the worktree may use allocated host ports rather than 5173):
+
+```bash
+docker compose exec -T frontend npm run lint
+docker compose exec -T frontend npm run build
+```
+
+Manual browser smoke flow:
+
+```text
+home → login failure/success → catalog search/filter → out-of-stock details
+     → protected deep link → login → original detail route → logout
+```
+
+Check mobile widths at 320px, 375px, and 414px for horizontal overflow, and
+respect `prefers-reduced-motion` when reviewing loading and hover animations.
+The optional screenshot helper accepts allocated worktree URLs instead of
+assuming the default port:
+
+```bash
+FRONTEND_URL="http://127.0.0.1:$(docker compose port frontend 5173 | awk -F: '{print $NF}')" \
+  SCREENSHOT_PATH=/tmp/onlineshop.png npm run screenshot
+```
 
 ## AWS CLI Conventions
 

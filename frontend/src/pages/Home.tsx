@@ -7,12 +7,12 @@ export default function Home() {
           A small shop
           <br />
           of <em className="italic">quiet</em>,{' '}
-          <span className="italic text-[#7a3b2c] font-normal">well-made</span>
+          <span className="italic text-accent font-normal">well-made</span>
           <br />
           things.
         </h1>
 
-        <p className="mt-10 text-[#5b524a] max-w-xl mx-auto text-base md:text-[17px] leading-[1.7] font-light">
+        <p className="mt-10 text-soft max-w-xl mx-auto text-base md:text-[17px] leading-[1.7] font-light">
           We curate fewer items, more carefully — for kitchens, desks, and
           rooms that deserve to feel calm.
         </p>
@@ -20,9 +20,9 @@ export default function Home() {
 
       {/* FEATURED PRODUCT STRIP */}
       <section className="max-w-[1320px] mx-auto px-6 md:px-16 pb-28">
-        <div className="relative aspect-[21/9] overflow-hidden bg-gradient-to-b from-[#e8e1d3] to-[#dcd2bf]">
-          <div className="absolute inset-0 grid place-items-center">
-            <svg viewBox="0 0 240 240" fill="none" className="w-[30%] max-w-[260px]">
+        <div className="relative aspect-[16/10] md:aspect-[21/9] overflow-hidden bg-gradient-to-b from-parchment to-parchment-deep">
+          <div className="absolute top-2 right-6 md:top-0 md:right-0 md:bottom-0 md:left-0 md:grid md:place-items-center">
+            <svg viewBox="0 0 240 240" fill="none" className="w-14 md:w-[30%] max-w-[260px]">
               <ellipse cx="120" cy="226" rx="80" ry="5" fill="#1f1a14" opacity=".15" />
               <path
                 d="M75 80 Q75 60 100 60 L100 50 L140 50 L140 60 Q165 60 165 80 L172 210 Q120 230 68 210 Z"
@@ -40,27 +40,29 @@ export default function Home() {
             </svg>
           </div>
 
-          <div className="absolute bottom-8 left-9">
-            <span className="block font-display italic text-[#1f1a14] text-2xl">
-              No. 04 — The Maren Carafe
+          <div className="absolute inset-x-6 bottom-4 md:inset-x-9 md:bottom-8 flex md:block items-end justify-between gap-6">
+            <div>
+              <span className="block font-display italic text-ink text-xl md:text-2xl">
+                No. 04 — The Maren Carafe
+              </span>
+              <span className="hidden md:block text-[11px] tracking-[0.18em] uppercase text-soft mt-1.5">
+                Hand-blown glass · 1L
+              </span>
+            </div>
+            <span className="font-display italic text-accent text-2xl md:text-[28px] md:absolute md:bottom-8 md:right-9">
+              €48
             </span>
-            <span className="block text-[11px] tracking-[0.18em] uppercase text-[#5b524a] mt-1.5">
-              Hand-blown glass · 1L
-            </span>
-          </div>
-          <div className="absolute bottom-8 right-9 font-display italic text-[#7a3b2c] text-[28px]">
-            €48
           </div>
         </div>
       </section>
 
       {/* THREE THINGS WE BELIEVE */}
-      <section className="border-t border-[#dcd5c7] max-w-[1320px] mx-auto px-6 md:px-16 py-24">
+      <section className="border-t border-hair max-w-[1320px] mx-auto px-6 md:px-16 py-24">
         <div className="text-center mb-16">
           <h2 className="font-display font-light text-5xl leading-[1.05]">
-            Three things we <em className="italic text-[#7a3b2c] font-normal">believe</em>.
+            Three things we <em className="italic text-accent font-normal">believe</em>.
           </h2>
-          <p className="mt-4 text-[#5b524a] text-sm font-light max-w-lg mx-auto">
+          <p className="mt-4 text-soft text-sm font-light max-w-lg mx-auto">
             Our shop is small on purpose. These three ideas guide every item we add to it.
           </p>
         </div>
@@ -84,7 +86,7 @@ export default function Home() {
         </div>
       </section>
 
-      <footer className="border-t border-[#dcd5c7] py-10 text-center text-[11px] tracking-[0.18em] uppercase text-[#5b524a]">
+      <footer className="border-t border-hair py-10 text-center text-[11px] tracking-[0.18em] uppercase text-soft">
         OnlineShop · Made in small batches · MMXXVI
       </footer>
     </>
@@ -100,11 +102,11 @@ interface BeliefProps {
 function Belief({ numeral, title, text }: BeliefProps) {
   return (
     <div className="text-center">
-      <div className="font-display italic text-5xl text-[#7a3b2c] font-light leading-none mb-6">
+      <div className="font-display italic text-5xl text-accent font-light leading-none mb-6">
         {numeral}
       </div>
       <h3 className="font-display font-normal text-2xl tracking-[0.005em] mb-3.5">{title}</h3>
-      <p className="text-[#5b524a] text-sm leading-[1.7] font-light max-w-[280px] mx-auto">
+      <p className="text-soft text-sm leading-[1.7] font-light max-w-[280px] mx-auto">
         {text}
       </p>
     </div>

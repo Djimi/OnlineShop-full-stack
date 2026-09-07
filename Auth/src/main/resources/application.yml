@@ -40,6 +40,8 @@ spring:
 
 session:
   expiration: 3600
+  cleanup:
+    interval-ms: 3600000
 
 
 management:

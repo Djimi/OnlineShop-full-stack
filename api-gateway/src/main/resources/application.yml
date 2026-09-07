@@ -77,4 +77,7 @@ gateway:
     authenticated:
       requests-per-minute: 5
       burst: 50
+    # Direct peers in private/link-local/loopback ranges are automatically trusted
+    # (the ALB case); add explicitly trusted proxy IPs here when needed.
+    trusted-proxies: []
 

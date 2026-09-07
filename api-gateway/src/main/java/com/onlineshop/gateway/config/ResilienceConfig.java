@@ -55,7 +55,7 @@ public class ResilienceConfig {
     }
 
     @Bean
-    public CircuitBreaker authServiceCircuitBreaker() {
+    public CircuitBreakerRegistry circuitBreakerRegistry() {
         CircuitBreakerConfig config = CircuitBreakerConfig.custom()
                 .slidingWindowSize(3)
                 .failureRateThreshold(50)
@@ -75,11 +75,11 @@ public class ResilienceConfig {
                         "Auth service returned unparseable response: {}",
                         event.getThrowable().getMessage()));
 
-        return circuitBreaker;
+        return registry;
     }
 
     @Bean
-    public Retry authServiceRetry() {
+    public RetryRegistry authServiceRetry() {
         RetryConfig config = RetryConfig.custom()
                 .maxAttempts(3)
                 .waitDuration(Duration.ofMillis(500))
@@ -88,7 +88,8 @@ public class ResilienceConfig {
                 .build();
 
         RetryRegistry registry = RetryRegistry.of(config);
-        return registry.retry("authService");
+        registry.retry("authService");
+        return registry;
     }
 
     @Bean
@@ -120,7 +121,7 @@ public class ResilienceConfig {
      * 3. Virtual threads handle waiting gracefully without thread pool overhead
      */
     @Bean
-    public Bulkhead authServiceBulkhead() {
+    public BulkheadRegistry bulkheadRegistry() {
         BulkheadConfig config = BulkheadConfig.custom()
                 // Maximum number of concurrent calls allowed
                 // This prevents overwhelming the auth service with too many simultaneous requests
@@ -140,6 +141,7 @@ public class ResilienceConfig {
                 .build();
 
         BulkheadRegistry registry = BulkheadRegistry.of(config);
-        return registry.bulkhead("authService");
+        registry.bulkhead("authService");
+        return registry;
     }
 }

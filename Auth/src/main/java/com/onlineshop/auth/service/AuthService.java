@@ -43,7 +43,17 @@ public class AuthService {
 
     public RegisterResponse register(RegisterRequest request) {
         long requestStartedAt = System.nanoTime();
-        String normalizedUsername = request.getUsername().toLowerCase();
+        String username = request.getUsername();
+        String password = request.getPassword();
+
+        if (username == null || username.length() < 3 || username.length() > 50) {
+            throw new IllegalArgumentException("Username must be between 3 and 50 characters");
+        }
+        if (password == null || password.length() < 6 || password.length() > 100) {
+            throw new IllegalArgumentException("Password must be between 6 and 100 characters");
+        }
+
+        String normalizedUsername = username.toLowerCase();
         long existsCheckStartedAt = System.nanoTime();
         boolean userExists = userRepository.existsByNormalizedUsername(normalizedUsername);
         log.info("Register operation db.existsByNormalizedUsername completed in {} ms",

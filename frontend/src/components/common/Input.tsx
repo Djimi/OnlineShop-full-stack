@@ -1,5 +1,5 @@
 import type { InputHTMLAttributes } from 'react';
-import { forwardRef } from 'react';
+import { forwardRef, useId } from 'react';
 import { clsx } from 'clsx';
 
 interface InputProps extends InputHTMLAttributes<HTMLInputElement> {
@@ -9,25 +9,36 @@ interface InputProps extends InputHTMLAttributes<HTMLInputElement> {
 }
 
 export const Input = forwardRef<HTMLInputElement, InputProps>(
-  ({ label, error, helpText, className, ...rest }, ref) => {
+  ({ label, error, helpText, className, id, ...rest }, ref) => {
+    const generatedId = useId();
+    const inputId = id ?? generatedId;
+    const describedBy = error
+      ? `${inputId}-error`
+      : helpText
+        ? `${inputId}-help`
+        : undefined;
+
     return (
       <div className="w-full">
         {label && (
-          <label className="form-label">
+          <label htmlFor={inputId} className="form-label">
             {label}
           </label>
         )}
         <input
           ref={ref}
+          id={inputId}
           className={clsx(
             'input-field',
-            error && 'border-b-[#7a3b2c] focus:border-b-[#7a3b2c]',
+            error && 'border-b-accent focus:border-b-accent',
             className
           )}
+          aria-invalid={error ? true : undefined}
+          aria-describedby={describedBy}
           {...rest}
         />
-        {error && <p className="form-error">{error}</p>}
-        {helpText && !error && <p className="text-gray-500 text-sm mt-1">{helpText}</p>}
+        {error && <p id={`${inputId}-error`} role="alert" className="form-error">{error}</p>}
+        {helpText && !error && <p id={`${inputId}-help`} className="text-soft text-sm mt-1">{helpText}</p>}
       </div>
     );
   }

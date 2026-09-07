@@ -6,7 +6,7 @@ type ProblemDetails = {
 
 export function getApiErrorMessage(error: unknown, fallback: string): string {
   if (axios.isAxiosError<ProblemDetails>(error)) {
-    return error.response?.data?.detail ?? error.message ?? fallback;
+    return error.response?.data?.detail || error.message || fallback;
   }
 
   return error instanceof Error ? error.message : fallback;

@@ -100,6 +100,23 @@ public class GlobalExceptionHandler {
         return new ResponseEntity<>(errorResponse, HttpStatus.BAD_REQUEST);
     }
 
+    @ExceptionHandler(IllegalArgumentException.class)
+    public ResponseEntity<ErrorResponse> handleIllegalArgumentException(
+            IllegalArgumentException ex,
+            WebRequest request) {
+        logger.warn("Invalid registration input on {}: {}", request.getDescription(false), ex.getMessage());
+
+        ErrorResponse errorResponse = ErrorResponse.builder()
+                .type("https://api.onlineshop.com/errors/validation-failed")
+                .title("Bad Request")
+                .status(HttpStatus.BAD_REQUEST.value())
+                .detail(ex.getMessage())
+                .instance(request.getDescription(false).replace("uri=", ""))
+                .build();
+
+        return new ResponseEntity<>(errorResponse, HttpStatus.BAD_REQUEST);
+    }
+
     @ExceptionHandler(InvalidUsernameOrPasswordException.class)
     public ResponseEntity<ErrorResponse> handleInvalidCredentialsException(
             InvalidUsernameOrPasswordException ex,

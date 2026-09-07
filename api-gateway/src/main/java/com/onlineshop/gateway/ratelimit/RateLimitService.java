@@ -1,0 +1,143 @@
+package com.onlineshop.gateway.ratelimit;
+
+import io.github.bucket4j.Bandwidth;
+import io.github.bucket4j.Bucket;
+import io.github.bucket4j.BucketConfiguration;
+import io.github.bucket4j.Refill;
+import io.github.bucket4j.distributed.proxy.ProxyManager;
+import jakarta.servlet.http.HttpServletRequest;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.stereotype.Component;
+
+import java.time.Duration;
+import java.util.List;
+
+@Component
+@Slf4j
+@ConditionalOnProperty(name = "gateway.ratelimit.enabled", havingValue = "true", matchIfMissing = true)
+public class RateLimitService {
+
+    private final ProxyManager<String> proxyManager;
+    private final RateLimitConfigProperties rateLimitConfigProperties;
+    private volatile boolean loggedRedisDown;
+
+    public RateLimitService(
+            ProxyManager<String> proxyManager,
+            RateLimitConfigProperties rateLimitConfigProperties) {
+        this.proxyManager = proxyManager;
+        this.rateLimitConfigProperties = rateLimitConfigProperties;
+    }
+
+    public boolean tryConsumeAnonymous(HttpServletRequest request) {
+        return tryConsume("ip:" + resolveClientIp(request), createAnonymousConfig());
+    }
+
+    public boolean tryConsumeFailedAuth(HttpServletRequest request) {
+        return tryConsume("failed:ip:" + resolveClientIp(request), createAnonymousConfig());
+    }
+
+    public boolean tryConsumeAuthenticated(String userId) {
+        return tryConsume("user:" + userId, createAuthenticatedConfig());
+    }
+
+    public String resolveClientIp(HttpServletRequest request) {
+        String remoteAddr = request.getRemoteAddr();
+        if (isTrustedProxy(remoteAddr)) {
+            // Prefer the CloudFront-Viewer-Address header (overwritten by
+            // CloudFront, so per-client keys behind CF). This is only safe
+            // while the ALB ingress is restricted to CloudFront's managed
+            // prefix list; if the ALB stays publicly reachable, the header
+            // can be forged by direct ALB traffic. The XFF fallback takes
+            // the LAST entry, which the ALB appends and a client cannot
+            // spoof; it resolves to the CF edge IP when CF is in front
+            // (shared per-edge bucket), which is why CF takes precedence.
+            String cloudFrontViewer = request.getHeader("CloudFront-Viewer-Address");
+            if (cloudFrontViewer != null && !cloudFrontViewer.isEmpty()) {
+                return stripPort(cloudFrontViewer);
+            }
+            String xForwardedFor = request.getHeader("X-Forwarded-For");
+            if (xForwardedFor != null && !xForwardedFor.isEmpty()) {
+                String[] entries = xForwardedFor.split(",");
+                String lastEntry = entries[entries.length - 1].trim();
+                if (!lastEntry.isEmpty()) {
+                    return lastEntry;
+                }
+            }
+        }
+        return remoteAddr;
+    }
+
+    private boolean isTrustedProxy(String remoteAddr) {
+        List<String> trustedProxies = rateLimitConfigProperties.trustedProxies();
+        if (trustedProxies != null && trustedProxies.contains(remoteAddr)) {
+            return true;
+        }
+        return isPrivateAddress(remoteAddr);
+    }
+
+    private boolean isPrivateAddress(String address) {
+        try {
+            java.net.InetAddress inetAddress = java.net.InetAddress.getByName(address);
+            if (inetAddress.isSiteLocalAddress()
+                    || inetAddress.isLinkLocalAddress()
+                    || inetAddress.isLoopbackAddress()) {
+                return true;
+            }
+            if (inetAddress instanceof java.net.Inet6Address inet6) {
+                byte[] bytes = inet6.getAddress();
+                return bytes[0] == (byte) 0xfc || bytes[0] == (byte) 0xfd;
+            }
+            return false;
+        } catch (java.net.UnknownHostException e) {
+            return false;
+        }
+    }
+
+    private String stripPort(String value) {
+        String candidate = value.trim();
+        if (candidate.startsWith("[")) {
+            int close = candidate.indexOf(']');
+            if (close > 0) {
+                return candidate.substring(1, close);
+            }
+        }
+        int lastColon = candidate.lastIndexOf(':');
+        if (lastColon > 0 && candidate.indexOf(':') == lastColon) {
+            String suffix = candidate.substring(lastColon + 1);
+            if (suffix.chars().allMatch(Character::isDigit)) {
+                return candidate.substring(0, lastColon);
+            }
+        }
+        return candidate;
+    }
+
+    private boolean tryConsume(String key, BucketConfiguration config) {
+        try {
+            Bucket bucket = proxyManager.builder().build(key, () -> config);
+            return bucket.tryConsume(1);
+        } catch (Exception e) {
+            if (!loggedRedisDown) {
+                loggedRedisDown = true;
+                log.warn("Rate limiter unavailable (Redis down?), failing open: {}", e.getMessage());
+            }
+            return true;
+        }
+    }
+
+    private BucketConfiguration createAnonymousConfig() {
+        return BucketConfiguration.builder().addLimit(createLimit(
+                rateLimitConfigProperties.anonymous().burst(),
+                rateLimitConfigProperties.anonymous().requestsPerMinute())).build();
+    }
+
+    private BucketConfiguration createAuthenticatedConfig() {
+        return BucketConfiguration.builder().addLimit(createLimit(
+                rateLimitConfigProperties.authenticated().burst(),
+                rateLimitConfigProperties.authenticated().requestsPerMinute())).build();
+    }
+
+    private Bandwidth createLimit(int burst, int requestsPerMinute) {
+        return Bandwidth.classic(burst, Refill.greedy(requestsPerMinute, Duration.ofMinutes(1)));
+    }
+}
