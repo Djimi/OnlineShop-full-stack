@@ -70,7 +70,7 @@ When using Maven commands you MUST use the Maven wrapper (`./mvnw`) inside the s
 
 ## Before Committing
 **ALWAYS run tests first** — see [docs/TESTING_STRATEGY.md](./docs/TESTING_STRATEGY.md) for which tests to run. Never commit without passing tests.
-1. Run unit + integration tests for the affected service from its directory: `./mvnw clean test`
+1. Run unit + integration tests for the affected service from its directory: `./mvnw clean verify`
 2. If available, also run E2E tests from `e2e-tests/`: `./mvnw clean test`
 3. Only commit if ALL tests pass.
 

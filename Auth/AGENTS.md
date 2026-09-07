@@ -16,7 +16,7 @@
 ./mvnw clean install        # Build
 ./mvnw spring-boot:run      # Run
 ./mvnw spring-boot:run -Dspring-boot.run.arguments="--spring.profiles.active=db-troubleshooting"  # Run with DB diagnostics
-./mvnw test                 # Run all tests
+./mvnw verify               # Run all unit + integration tests
 ```
 
 ## Docker Compose Build

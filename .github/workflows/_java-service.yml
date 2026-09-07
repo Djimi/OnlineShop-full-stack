@@ -41,19 +41,21 @@ jobs:
       - name: Build common dependency
         if: inputs.needs-common
         working-directory: common
-        run: chmod +x mvnw && ./mvnw install -DskipTests
+        run: ./mvnw install -DskipTests
 
       # 4. Unit + integration tests via the service Maven wrapper
       - name: Run unit and integration tests
         working-directory: ${{ inputs.working-directory }}
-        run: chmod +x mvnw && ./mvnw clean test
+        run: ./mvnw clean verify
 
-      # 5. Surefire reports owned by the exact caller run/attempt
-      - name: Upload surefire test results
+      # 5. Surefire and Failsafe reports owned by the exact caller run/attempt
+      - name: Upload test results
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: ${{ inputs.service }}-test-results-${{ github.run_id }}-${{ github.run_attempt }}
-          path: ${{ inputs.working-directory }}/target/surefire-reports/
+          path: |
+            ${{ inputs.working-directory }}/target/surefire-reports/
+            ${{ inputs.working-directory }}/target/failsafe-reports/
           if-no-files-found: ignore
           retention-days: 30

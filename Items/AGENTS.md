@@ -29,10 +29,10 @@ cd Items
 ./mvnw clean compile
 
 # Run unit + integration tests
-./mvnw clean test
+./mvnw clean verify
 
 # Run tests with coverage
-./mvnw clean test jacoco:report
+./mvnw clean verify jacoco:report
 # Report at: target/site/jacoco/index.html
 ```
 
@@ -135,9 +135,11 @@ Items/
 │   │   └── exception/   # Global exception handler (maps domain exceptions to HTTP errors)
 │   └── ItemsApplication.java
 ├── src/test/java/com/onlineshop/items/
-│   ├── application/usecase/   # Use case integration tests
+│   ├── application/usecase/   # Use case unit tests
 │   ├── domain/                # Domain unit tests (ItemTest, ValueObjectTest)
 │   └── web/controller/        # Controller integration tests
+├── src/integrationTest/java/com/onlineshop/items/
+│   └── application/usecase/   # Use case integration tests
 ├── init-db/             # Database initialization scripts
 └── pom.xml
 ```
@@ -156,7 +158,7 @@ Items/
 ## Testing Guidelines
 
 ### Before committing any changes:
-1. Run unit + integration tests: `./mvnw clean test` from `Items/` directory
+1. Run unit + integration tests: `./mvnw clean verify` from `Items/` directory
 2. Run E2E tests if available: `./mvnw clean test` from `e2e-tests/` directory
 3. Only commit if ALL tests pass
 
