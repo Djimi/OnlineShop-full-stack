@@ -1,0 +1,17 @@
+{
+  "schemaVersion": "1.0",
+  "rollbackId": "rollback-0002",
+  "releaseId": "release-0002",
+  "requester": "owner@example.com",
+  "approver": "approver@example.com",
+  "fromReleaseId": "release-0001",
+  "workflowRunId": 4713,
+  "workflowRunAttempt": 1,
+  "startedAt": "2026-08-11T09:00:00Z",
+  "completedAt": "2026-08-11T09:20:00Z",
+  "outcome": "completed",
+  "deploymentConclusion": "passed",
+  "verificationConclusion": "passed",
+  "restoreConclusion": "passed",
+  "workflowUrl": "https://github.com/Djimi@8793507/OnlineShop-full-stack/actions/runs/4713"
+}

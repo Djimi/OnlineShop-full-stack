@@ -42,6 +42,34 @@ rl_assert_full_sha() {
   fi
 }
 
+rl_assert_ci_ref() {
+  local ref="${1:-}"
+  [[ "$ref" == "refs/heads/main" || "$ref" == refs/heads/feature/* ]] || {
+    rl_die "invalid CI branch ref: $ref"
+    return 1
+  }
+  local branch="${ref#refs/heads/}"
+  [[ "$branch" =~ ^[A-Za-z0-9._/-]+$ ]] || {
+    rl_die "invalid CI branch ref characters: $ref"
+    return 1
+  }
+  [[ "$branch" != *..* && "$branch" != */ && "$branch" != .* && "$branch" != */.* ]] || {
+    rl_die "invalid CI branch ref form: $ref"
+    return 1
+  }
+}
+
+rl_assert_ci_pr_ref() {
+  local ref="${1:-}"
+  [[ "$ref" =~ ^refs/pull/[1-9][0-9]*/merge$ ]] || {
+    rl_die "invalid CI pull-request ref: $ref"
+    return 1
+  }
+  local number="${ref#refs/pull/}"
+  number="${number%/merge}"
+  rl_assert_positive_integer "$number"
+}
+
 rl_assert_sha256_hex() {
   local hex="${1:-}"
   if [[ ! "$hex" =~ ^[0-9a-f]{64}$ ]]; then
@@ -53,6 +81,13 @@ rl_assert_image_digest() {
   local digest="${1:-}"
   if [[ ! "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]; then
     rl_die "invalid image digest (expected sha256:<64 lowercase hex>): $digest"
+  fi
+}
+
+rl_assert_task_definition_arn() {
+  local arn="${1:-}"
+  if [[ ! "$arn" =~ ^arn:aws:ecs:[a-z0-9-]+:[0-9]{12}:task-definition/[A-Za-z0-9_-]+:[0-9]+$ ]]; then
+    rl_die "invalid ECS task-definition ARN: $arn"
   fi
 }
 

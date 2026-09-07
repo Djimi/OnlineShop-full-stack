@@ -924,6 +924,44 @@ Before any live policy application, run IAM Access Analyzer
 `environment:production` subject must be verified from a real job's JWT, not
 guessed.
 
+## E2.1. Pass 3R.1 — Promotion handoff and checksum preconditions (offline)
+
+The 3R.1 implementation keeps the live role cutover (3R.9) and owner-approved
+live run (3R.10) deferred. Its offline gates are:
+
+```bash
+bash tests/scripts/ci_security_contract_test.sh
+bash tests/scripts/promotion_handoff_test.sh
+```
+
+The workflow boundary is `permissions: contents: read` at workflow scope with
+job-specific read/OIDC/deployment opt-ins. Untrusted GitHub contexts are passed
+through step `env`, validated for event-specific refs and full SHA/IDs, and
+used only as quoted argv. Pull-request credential bootstrap and ECR
+publication remain disabled; Pass 3R.2/3R.3 later separates PR validation from
+trusted publication jobs structurally.
+
+The promotion input is a schema-valid candidate manifest plus the production
+snapshot. The candidate must not contain task-definition ARNs; the snapshot is
+the sole source of current service ARNs. `deploy-production.sh` registers
+digest-pinned revisions and emits the deployment manifest; only that output is
+rendered official after verification. Candidate evidence is consumed from the
+exact run and attempt. The GitHub workflow-run REST response uses bare
+`head_branch: "main"`; the wrapper normalizes it to `refs/heads/main` and
+rejects a missing/different numeric `id` or `run_attempt`. Jobs are read only
+from `actions/runs/{run}/attempts/{attempt}/jobs`, never an unscoped/latest
+endpoint.
+
+Before mutating ECS/frontend, `snapshot-production.sh` requires the actual live
+marker, matching immutable `_releases/v<version>/` marker and `index.html`,
+the exact canonical `v<version>` Git tag/source SHA (including annotated-tag
+peeling), and a service-reported full-object S3 `ChecksumSHA256` for the live
+index. The checksum is base64-decoded to canonical SHA-256 hex; an ETag is not
+a substitute. `publish-frontend.sh`, `restore-frontend.sh`, and
+`compensate-production.sh` request `--checksum-algorithm SHA256` on every S3
+write. The stateful handoff and promotion/rollback gates exercise missing,
+malformed, composite, and stale-checksum cases without contacting AWS.
+
 ---
 
 ## Pass 3, subphase 3.5 — Production hardening (read-only + deferred mutations)

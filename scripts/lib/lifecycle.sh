@@ -41,7 +41,6 @@ lc_init() {
   local required=(
     LC_ENVIRONMENT LC_ACCOUNT_ID LC_PROFILE LC_REGION LC_VPC_ID LC_CLUSTER
     LC_DB_INSTANCE LC_DB_SUBNET_GROUP LC_DB_SECURITY_GROUP LC_ALB_NAME
-    LC_RDS_KMS_KEY_ARN LC_RDS_SECRET_KMS_KEY_ARN
     LC_ALB_SECURITY_GROUP LC_ECS_SECURITY_GROUP LC_TARGET_GROUP_ARN LC_GATEWAY_SERVICE
     LC_GATEWAY_CONTAINER LC_GATEWAY_PORT
   )
@@ -60,6 +59,7 @@ lc_init() {
   [ "$LC_REGION" = "eu-north-1" ] ||
     lc_die "LC_REGION must be eu-north-1 (got $LC_REGION); the region is not overridable"
   command -v aws >/dev/null || lc_die "aws CLI is required"
+  command -v jq >/dev/null || lc_die "jq is required"
   LC_AWS=(aws --profile "$LC_PROFILE" --region "$LC_REGION")
 }
 
@@ -291,6 +291,46 @@ lc_alb_dns() {
     --query 'LoadBalancers[0].DNSName' --output text
 }
 
+lc_repoint_cloudfront_alb_origin() {
+  # The ALB is disposable: every pause deletes it and every resume recreates it
+  # with a NEW DNS name. CloudFront's `alb-api` origin (the /auth* and /items*
+  # behaviors used by the live frontend) would silently keep pointing at the
+  # deleted ALB, so resume must re-point it to the current ALB DNS. No-op when
+  # the origin already matches; skip entirely when no distribution is
+  # configured (staging). Read-back verifies the update took effect.
+  local dns="$1" etag current
+  [ "$LC_ENVIRONMENT" = "production" ] || return 0
+  [ -n "${LC_CLOUDFRONT_DISTRIBUTION:-}" ] || return 0
+  lc_log "Verifying CloudFront $LC_CLOUDFRONT_DISTRIBUTION alb-api origin points at $dns."
+  etag=$("${LC_AWS[@]}" cloudfront get-distribution --id "$LC_CLOUDFRONT_DISTRIBUTION" \
+    --query 'ETag' --output text)
+  current=$("${LC_AWS[@]}" cloudfront get-distribution --id "$LC_CLOUDFRONT_DISTRIBUTION" \
+    --query "Distribution.DistributionConfig.Origins.Items[?Id=='alb-api'].DomainName | [0]" \
+    --output text)
+  if [ "$current" = "$dns" ]; then
+    lc_log "CloudFront alb-api origin already matches; no update needed."
+    return 0
+  fi
+  lc_log "Re-pointing CloudFront alb-api origin from $current to $dns; deploy takes 5–15 minutes."
+  "${LC_AWS[@]}" cloudfront get-distribution-config --id "$LC_CLOUDFRONT_DISTRIBUTION" \
+    --query 'DistributionConfig' --output json > /tmp/lc-cloudfront-config.json
+  jq --arg dns "$dns" \
+    '.Origins.Items |= map(if .Id == "alb-api" then .DomainName = $dns else . end)' \
+    /tmp/lc-cloudfront-config.json > /tmp/lc-cloudfront-config-new.json
+  "${LC_AWS[@]}" cloudfront update-distribution --id "$LC_CLOUDFRONT_DISTRIBUTION" \
+    --if-match "$etag" --distribution-config file:///tmp/lc-cloudfront-config-new.json \
+    --query 'Distribution.Status' --output text >/dev/null
+  "${LC_AWS[@]}" cloudfront wait distribution-deployed --id "$LC_CLOUDFRONT_DISTRIBUTION"
+  readback=$("${LC_AWS[@]}" cloudfront get-distribution --id "$LC_CLOUDFRONT_DISTRIBUTION" \
+    --query "Distribution.DistributionConfig.Origins.Items[?Id=='alb-api'].DomainName | [0]" \
+    --output text)
+  if [ "$readback" != "$dns" ]; then
+    lc_die "CloudFront alb-api origin read-back $readback != $dns"
+    return 1
+  fi
+  lc_log "CloudFront alb-api origin read-back confirms $dns."
+}
+
 lc_wait_http_unauthorized() {
   local dns="$1" label="$2" status attempt
   lc_log "Checking API readiness at $dns; a 401 for an invalid token proves the request reached the application."
@@ -319,6 +359,16 @@ lc_staging_db_status() {
 lc_create_clean_staging_db() {
   lc_require_environment staging || return 1
   local status endpoint public vpc encrypted
+  # The RDS encryption key and master-user-secret key are consumed only by
+  # the clean staging DB creation path; require them here, where they are
+  # used, rather than in lc_init (production RDS is retained, not created).
+  local required=(
+    LC_RDS_KMS_KEY_ARN LC_RDS_SECRET_KMS_KEY_ARN
+  )
+  local name
+  for name in "${required[@]}"; do
+    [ -n "${!name:-}" ] || lc_die "missing lifecycle configuration: $name"
+  done
   status=$(lc_staging_db_status)
   if lc_is_present "$status"; then
     lc_die "staging database $LC_DB_INSTANCE already exists ($status); run pause-staging.sh before a clean start"

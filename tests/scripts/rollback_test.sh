@@ -6,15 +6,15 @@
 # CloudFront mutations and read-backs — is deferred to the consolidated Pass 3
 # verification pass and is NOT claimed here. This gate proves the offline
 # implementation: the `release_contract.rollback` decision layer, the
-# `rollback-release.yml` static checks, the rollback shell scripts against a
-# stateful AWS stub, the mandatory profile/region + no-secrets + no-tag-minting
-# scans, and ruff/shellcheck/`git diff --check`.
+# `rollback-release-greenfield.yml` static checks, the rollback shell scripts
+# against a stateful AWS stub, the mandatory profile/region + no-secrets +
+# no-tag-minting scans, and ruff/shellcheck/`git diff --check`.
 set -euo pipefail
 
 REPO_ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)
 RELEASE="$REPO_ROOT/plans/AUTOMATIC-BUILDS-AND-DEPLOY/release"
 FX="$RELEASE/fixtures/rollback"
-ROLLBACK_WF="$REPO_ROOT/.github/workflows/rollback-release.yml"
+ROLLBACK_WF="$REPO_ROOT/.github/workflows/rollback-release-greenfield.yml"
 
 fail() {
   echo "FAIL: $*" >&2
@@ -133,7 +133,7 @@ OUT=$(run_rollback compensate --snapshot "$FX/snapshot.json" --changed "$RELEASE
 jq -e '.valid == true' <<<"$OUT" >/dev/null || fail "rollback compensate must pass"
 
 # ---------------------------------------------------------------------------
-echo "[ 3/9] rollback-release.yml workflow static checks"
+echo "[ 3/9] rollback-release-greenfield.yml workflow static checks"
 python3 - "$ROLLBACK_WF" "$RELEASE" <<'PY' || fail "rollback workflow YAML checks failed"
 import re
 import sys
@@ -146,17 +146,17 @@ with open(workflow_path, encoding="utf-8") as handle:
 
 problems = []
 
-# Manual dispatch only, with the required inputs. PyYAML parses the YAML `on:`
-# trigger key as boolean True (YAML 1.1), so read it that way.
+# Manual dispatch only, with the single version input. PyYAML parses the YAML
+# `on:` trigger key as boolean True (YAML 1.1), so read it that way.
 trigger = wf.get("on") or wf.get(True) or {}
 dispatch_inputs = (trigger.get("workflow_dispatch") or {}).get("inputs", {}) if isinstance(trigger, dict) else {}
 if "version" not in dispatch_inputs:
-    problems.append("rollback-release.yml must take a version dispatch input")
-if "requester" not in dispatch_inputs or "schema_change" not in dispatch_inputs or "migration_reviewed" not in dispatch_inputs:
-    problems.append("rollback-release.yml must take requester/schema_change/migration_reviewed inputs")
+    problems.append("rollback-release-greenfield.yml must take a version dispatch input")
+if "requester" in dispatch_inputs or "schema_change" in dispatch_inputs or "migration_reviewed" in dispatch_inputs:
+    problems.append("rollback-release-greenfield.yml must not take requester/schema_change/migration_reviewed inputs (they are engine decisions)")
 
-# The production mutation job must use the protected production Environment and
-# the shared non-cancelling production-mutation concurrency group.
+# The production mutation job must use the protected production Environment
+# and the shared non-cancelling production concurrency group.
 jobs = wf.get("jobs", {})
 rollback = jobs.get("rollback")
 if rollback is None:
@@ -168,11 +168,24 @@ else:
         problems.append("rollback job must use the production Environment")
     if not rollback.get("timeout-minutes"):
         problems.append("rollback job must set a timeout")
-concurrency = wf.get("concurrency", {})
-if concurrency.get("group") != "production-mutation":
-    problems.append("workflow must use the shared production-mutation concurrency group")
-if concurrency.get("cancel-in-progress") is not False:
-    problems.append("production concurrency must set cancel-in-progress: false")
+    rollback_concurrency = rollback.get("concurrency", {})
+    if rollback_concurrency.get("group") != "production":
+        problems.append("rollback job must hold the shared production concurrency group")
+    if rollback_concurrency.get("cancel-in-progress") is not False:
+        problems.append("production concurrency must set cancel-in-progress: false")
+
+# The pre-approval preflight job is read-only: it must not hold the production
+# concurrency group and must not be behind the production Environment.
+preflight = jobs.get("preflight")
+if preflight is None:
+    problems.append("preflight job missing")
+else:
+    if preflight.get("concurrency"):
+        problems.append("the pre-approval preflight job must not hold the production concurrency group")
+    preflight_env = preflight.get("environment")
+    preflight_env_name = preflight_env if isinstance(preflight_env, str) else (preflight_env or {}).get("name")
+    if preflight_env_name == "production":
+        problems.append("the pre-approval preflight job must not be behind the production Environment")
 
 # Every job that assumes the AWS role must be able to mint an OIDC token: a
 # job-level `permissions:` block REPLACES the workflow-level permissions, so a
@@ -207,25 +220,32 @@ text = str(wf)
 for forbidden in ("build-push-action", "publish-candidate-image.sh", "promote-image-digest.sh",
                   "gh release create", "put-image", "ecr:PutImage", "batch-get-image"):
     if forbidden in text:
-        problems.append(f"rollback-release.yml must never {forbidden}")
+        problems.append(f"rollback-release-greenfield.yml must never {forbidden}")
 
-# The full preflight is repeated post-approval (time-of-check race closure).
+# The full preflight is repeated post-approval (time-of-check race closure):
+# rollback execute repeats it internally against the fresh snapshot.
 rollback_text = str(rollback)
-if "rollback-preflight.sh" not in rollback_text:
-    problems.append("rollback job must re-run the full rollback preflight after approval")
+if "rollback execute" not in rollback_text:
+    problems.append("rollback job must run the approved rollback execute (which repeats the full preflight)")
+if "delivery.cli rollback execute" not in rollback_text:
+    problems.append("rollback job must execute the rollback through the engine")
 
-# The pre-approval preflight job is read-only: it runs rollback-preflight.sh but
-# never mutates (no deploy/restore).
-preflight = jobs.get("preflight")
-if preflight is None:
-    problems.append("preflight job missing")
-else:
-    preflight_text = str(preflight)
-    if "rollback-preflight.sh" not in preflight_text:
-        problems.append("the pre-approval preflight job must run rollback-preflight.sh")
-    for forbidden in ("deploy-rollback.sh", "restore-frontend.sh", "snapshot-production.sh", "compensate-production.sh"):
-        if forbidden in preflight_text:
-            problems.append(f"the pre-approval preflight job must be read-only (no {forbidden})")
+# The pre-approval preflight job is read-only: it runs the engine preflight but
+# never mutates (no execute/restore).
+preflight_text = str(preflight)
+if "delivery.cli rollback preflight" not in preflight_text:
+    problems.append("the pre-approval preflight job must run the engine rollback preflight")
+for forbidden in ("rollback execute", "delivery.cli recover", "compensate"):
+    if forbidden in preflight_text:
+        problems.append(f"the pre-approval preflight job must be read-only (no {forbidden})")
+
+# Bring-up guard: the greenfield workflow must refuse while either legacy
+# production-mutation workflow still declares its path (OP-CUT-01). The guard
+# must exist in preflight, rollback, and compensate.
+for label, block in (("preflight", preflight_text), ("rollback", rollback_text),
+                     ("compensate", str(jobs.get("compensate") or {}))):
+    if "finalize-release.sh" not in block or "deploy-rollback.sh" not in block:
+        problems.append(f"{label} must run the legacy-mutation bring-up guard (both markers)")
 
 # approvedBy is derived from the environment-approval evidence via the
 # actions/runs/{run}/approvals API, never from github.actor or user input.
@@ -233,12 +253,13 @@ if "approvals" not in rollback_text:
     problems.append("rollback job must derive approvedBy from actions/runs/{run}/approvals")
 if re.search(r"approvedBy:\s*\$\{\{\s*github\.actor", text):
     problems.append("approvedBy must never be set from the run actor (github.actor)")
+if "approved_at" not in rollback_text and "approvedAt" not in rollback_text:
+    problems.append("rollback job must derive approvedAt from the approval evidence, never the runner clock")
 
-# The validated target manifest is consumed from the exact producing run (the
-# pre-approval preflight) via download-artifact pinned to this run. `str(wf)`
-# is a Python repr where string values are quoted, so a literal
-# "run-id: ${{ github.run_id }}" search can never match; read the parsed
-# structure instead.
+# The pre-approval preflight report is consumed from the exact producing run
+# (download-artifact pinned to this run). `str(wf)` is a Python repr where
+# string values are quoted, so a literal "run-id: ${{ github.run_id }}" search
+# can never match; read the parsed structure instead.
 download_steps = [
     (job_name, step)
     for job_name, job in jobs.items()
@@ -248,7 +269,7 @@ download_steps = [
     and str(step.get("uses", "")).startswith("actions/download-artifact@")
 ]
 if "download-artifact" not in text or not download_steps:
-    problems.append("the rollback target manifest must be consumed from the exact producing run")
+    problems.append("the pre-approval preflight report must be consumed from the exact producing run")
 for job_name, step in download_steps:
     download_with = step.get("with") or {}
     if download_with.get("run-id") != "${{ github.run_id }}":
@@ -257,31 +278,31 @@ for job_name, step in download_steps:
             "${{ github.run_id }} of this exact run"
         )
 
-# Snapshot/compensation compatibility: the workflow reuses the shared
-# snapshot-production.sh and compensate-production.sh tooling.
-if "snapshot-production.sh" not in rollback_text:
-    problems.append("rollback job must snapshot pre-rollback state with snapshot-production.sh")
-if "restore-frontend.sh" not in rollback_text:
-    problems.append("rollback job must restore the frontend with restore-frontend.sh")
-if "verify-rollback.sh" not in rollback_text:
-    problems.append("rollback job must verify production after rollback")
+# Snapshot + full target set (backends -> gateway -> frontend) are engine
+# responsibilities (delivery.cli): the workflow drives the engine and consumes
+# the release manifest whose components include the frontend checksum.
+if "delivery.cli snapshot production" not in rollback_text:
+    problems.append("rollback job must snapshot pre-rollback state with the engine snapshot")
+if "--manifest preflight/release-manifest.json" not in rollback_text:
+    problems.append("rollback job must consume the target release manifest (complete component set incl. frontend)")
 
-# The compensate job restores the frontend too (rollback can mutate it) and is
-# automatic (not approval-gated).
+# The compensate job is automatic (not approval-gated) and derives the changed
+# array from the honest per-component conclusions of the rollback result —
+# including the frontend when it completed — never hardcoded or guessed.
 compensate = jobs.get("compensate")
 if compensate is None:
     problems.append("compensate job missing")
 else:
-    if "compensate-production.sh" not in str(compensate):
-        problems.append("compensate job must call compensate-production.sh")
-    if str(compensate.get("if", "")) != "failure() && needs.rollback.result == 'failure'":
-        problems.append("compensate job must run only when rollback failed")
+    if "delivery.cli recover" not in str(compensate):
+        problems.append("compensate job must call the recover engine")
+    if "changed-count" not in str(compensate) or "needs.rollback.outputs" not in str(compensate):
+        problems.append("compensate job must run only when the rollback job reports completed components")
+    if "conclusion == \"passed\"" not in str(compensate):
+        problems.append("compensate job must derive changed components only from passed conclusions")
     comp_env = compensate.get("environment")
     comp_env_name = comp_env if isinstance(comp_env, str) else (comp_env or {}).get("name")
     if comp_env_name == "production":
         problems.append("compensate job must not be approval-gated by the production Environment (automatic restore)")
-    if '"frontend"' not in str(compensate):
-        problems.append("compensate job must include frontend in the changed components")
 
 # Release-critical Actions pinned by full commit SHA.
 sha_ref = re.compile(r"^([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)@([0-9a-f]{40})$")
@@ -309,6 +330,8 @@ write_stub_clis() {
   mkdir -p "$TMP/bin"
   cat > "$TMP/bin/aws" <<'PY'
 #!/usr/bin/env python3
+import base64
+import hashlib
 import json
 import os
 import sys
@@ -436,23 +459,50 @@ elif service == "s3api" and sub == "get-object":
             handle.write(str(content))
 elif service == "s3api" and sub == "head-object":
     key = arg("--key") or ""
-    record(f"s3api head-object {key}")
-    text(state["frontend"].get(key, "etag"))
+    checksum_mode = arg("--checksum-mode")
+    record(f"s3api head-object {key} checksum-mode={checksum_mode or '<missing>'}")
+    if checksum_mode != "ENABLED":
+        fail_not_found()
+    frontend = state["frontend"]
+    if "headChecksumSha256" in frontend:
+        checksum = frontend["headChecksumSha256"]
+    else:
+        checksum_hex = frontend.get("checksums", {}).get(key)
+        if checksum_hex is None:
+            checksum = None
+        else:
+            try:
+                checksum = base64.b64encode(bytes.fromhex(checksum_hex)).decode("ascii")
+            except ValueError:
+                checksum = checksum_hex
+    emit({
+        "checksum": checksum,
+        "checksumType": frontend.get("headChecksumType", "FULL_OBJECT"),
+    })
 elif service == "s3" and sub == "cp":
-    record("s3 cp")
+    checksum_algorithm = arg("--checksum-algorithm")
+    record(f"s3 cp checksum-algorithm={checksum_algorithm or '<missing>'}")
     uri = [a for a in args if a.startswith("s3://")]
     if uri:
         uri_index = args.index(uri[0])
         src = args[uri_index - 1] if uri_index > 0 else ""
         bucket, key = uri[0][len("s3://"):].split("/", 1)
         if src:
-            with open(src, encoding="utf-8") as handle:
-                content = handle.read()
+            with open(src, "rb") as handle:
+                raw = handle.read()
+            content = raw.decode("utf-8")
             try:
                 content = json.loads(content)
             except ValueError:
                 pass
-            state.setdefault("frontend", {})[key] = content
+            frontend = state.setdefault("frontend", {})
+            frontend[key] = content
+            checksums = frontend.setdefault("checksums", {})
+            if checksum_algorithm == "SHA256":
+                checksums[key] = hashlib.sha256(raw).hexdigest()
+            else:
+                checksums.pop(key, None)
+            frontend.pop("headChecksumSha256", None)
             persist()
     text("")
 elif service == "s3" and sub == "sync":
@@ -784,11 +834,44 @@ assert_success bash "$RELEASE/bin/restore-frontend.sh" \
   --profile dpm-profile --region eu-north-1
 jq -e '.frontend["release.json"].version == "1.1.0"' "$TMP/state.json" >/dev/null \
   || fail "restore-frontend must re-point the live root to the target release"
+RESTORED_INDEX_SHA=$(printf '%s' '<html>v1.1.0</html>' | sha256sum | awk '{print $1}')
+jq -e --arg sha "$RESTORED_INDEX_SHA" '
+  (.frontend.checksums["release.json"] | type == "string" and test("^[0-9a-f]{64}$")) and
+  .frontend.checksums["index.html"] == $sha
+' "$TMP/state.json" >/dev/null \
+  || fail "restore-frontend must establish SHA-256 metadata for the live marker and index"
+EXPECTED_INDEX_CHECKSUM=$(python3 - "$RESTORED_INDEX_SHA" <<'PY'
+import base64
+import sys
+
+print(base64.b64encode(bytes.fromhex(sys.argv[1])).decode("ascii"))
+PY
+)
+LIVE_INDEX_HEAD=$(aws s3api head-object --profile dpm-profile --region eu-north-1 \
+  --bucket onlineshop-frontend-799111666795 --key index.html \
+  --checksum-mode ENABLED \
+  --query '{checksum: ChecksumSHA256, checksumType: ChecksumType}' --output json)
+printf '%s' "$LIVE_INDEX_HEAD" | jq -e --arg checksum "$EXPECTED_INDEX_CHECKSUM" \
+  '.checksum == $checksum and .checksumType == "FULL_OBJECT"' >/dev/null \
+  || fail "restore-frontend must leave a valid live ChecksumSHA256"
+[[ "$(grep -c 's3 cp checksum-algorithm=SHA256' "$TMP/calls.txt")" -eq 2 ]] \
+  || fail "restore-frontend must request SHA-256 for both live-root writes"
 grep -q "cloudfront create-invalidation" "$TMP/calls.txt" \
   || fail "restore-frontend must invalidate the SPA entry paths"
 if grep -q -- "--delete" "$TMP/calls.txt"; then
   fail "restore-frontend must never use --delete"
 fi
+# The stub must not retain stale checksum metadata when a later overwrite omits
+# the checksum request; this makes a missing --checksum-algorithm catchable.
+printf '%s' '<html>omitted-checksum</html>' > "$TMP/omitted-index.html"
+aws s3 cp --profile dpm-profile --region eu-north-1 \
+  "$TMP/omitted-index.html" "s3://onlineshop-frontend-799111666795/index.html" \
+  --content-type text/html >/dev/null
+OUT=$(aws s3api head-object --profile dpm-profile --region eu-north-1 \
+  --bucket onlineshop-frontend-799111666795 --key index.html \
+  --checksum-mode ENABLED --output json)
+printf '%s' "$OUT" | jq -e '.checksum == null' >/dev/null \
+  || fail "rollback stub must remove checksum metadata when SHA-256 is omitted"
 # Dry-run must not mutate.
 stub_state_rollback
 OUT=$(bash "$RELEASE/bin/restore-frontend.sh" \
@@ -870,11 +953,15 @@ for script in \
   grep -q "get-caller-identity" "$script" \
     || fail "$(basename "$script") must run the mandatory identity preflight"
 done
-# Rollback never mints tags or publishes releases.
+# Rollback never mints tags or publishes releases. Comments may legitimately
+# document the read-only role scope (e.g. the preflight role's batch-get-image
+# read), so strip comment lines before scanning, like the --delete check below.
+# shellcheck disable=SC2094  # read-only scan; $ROLLBACK_WF is only read, never written
 if rg -n 'promote-image-digest|gh release create|put-image|ecr:PutImage|batch-get-image' \
+  <(grep -v '^[[:space:]]*#' "$ROLLBACK_WF") \
   "$RELEASE"/bin/rollback-preflight.sh "$RELEASE"/bin/deploy-rollback.sh \
   "$RELEASE"/bin/restore-frontend.sh "$RELEASE"/bin/verify-rollback.sh \
-  "$RELEASE"/bin/record-rollback-result.sh "$ROLLBACK_WF"; then
+  "$RELEASE"/bin/record-rollback-result.sh; then
   fail "a rollback tool mints images/tags or publishes releases"
 fi
 # No secrets anywhere in the rollback tooling.
@@ -890,10 +977,10 @@ fi
 if grep -- "--delete" <(grep -v '^[[:space:]]*#' "$RELEASE/bin/restore-frontend.sh"); then
   fail "restore-frontend.sh must never use --delete"
 fi
-# The rollback scripts must consume the shared snapshot/compensation tooling
-# (snapshot/compensation compatibility).
-if ! grep -q "snapshot-production.sh" "$ROLLBACK_WF" || ! grep -q "compensate-production.sh" "$ROLLBACK_WF"; then
-  fail "the rollback workflow must reuse the shared snapshot/compensation tooling"
+# The rollback workflow must use the engine snapshot/recovery path (the legacy
+# shell tooling is retired; the greenfield workflow drives delivery.cli).
+if ! grep -q "delivery.cli snapshot production" "$ROLLBACK_WF" || ! grep -q "delivery.cli recover" "$ROLLBACK_WF"; then
+  fail "the rollback workflow must drive the engine snapshot and recovery path"
 fi
 # The compensate wiring must work end-to-end with the same literal JSON array
 # the rollback workflow passes as --changed (compensate-production.sh accepts

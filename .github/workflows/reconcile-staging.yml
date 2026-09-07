@@ -1,0 +1,97 @@
+name: Reconcile Staging
+
+# OP-STG-05: every 15 minutes, detect a running staging RDS without an active
+# staging owner, stop it, verify the stopped state, and surface the event by
+# failing visibly. Read errors fail the run and are never treated as absence;
+# production resources are never touched. workflow_dispatch enables manual
+# bring-up testing of the reconcile path.
+#
+# OP-CUT-01 / AD-09 bring-up guard: until the legacy build-and-deploy.yml
+# path is removed at cutover, the first job step no-ops the whole run when
+# the legacy staging path is still active. REMOVE THE GUARD STEP AT CUTOVER
+# together with this note.
+on:
+  schedule:
+    - cron: '*/15 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  AWS_REGION: eu-north-1
+  AWS_ROLE_ARN_STAGING: arn:aws:iam::799111666795:role/github-actions-staging
+
+jobs:
+  reconcile:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # Same queued, non-canceling staging group as stage-candidate.yml: the
+    # reconcile run queues behind any active staging lifecycle and revalidates
+    # the fresh marker state after acquisition (AD-09 / OP-GEN-01).
+    concurrency:
+      group: staging
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      # OP-CUT-01 / AD-09 bring-up guard (REMOVE AT CUTOVER): while the legacy
+      # build-and-deploy.yml still owns main/feature pushes and its e2e-staging
+      # job mutates staging under its own concurrency group with no ownership
+      # marker, a reconcile run could stop a legacy run's RDS mid-E2E (marker
+      # absent -> "ownerless"). Until the legacy path is disabled, reconcile
+      # no-ops WITHOUT touching AWS: no credentials, no mutation, no failure.
+      # Deterministic detection: the legacy workflow file exists AND contains
+      # the string e2e-staging. Delete this step when the legacy workflow is
+      # removed or its e2e-staging job is disabled.
+      - name: "Bring-up guard: skip while legacy staging path is active"
+        run: |
+          set -euo pipefail
+          LEGACY_WORKFLOW=".github/workflows/build-and-deploy.yml"
+          if [ -f "$LEGACY_WORKFLOW" ] && grep -q -F -- 'e2e-staging' "$LEGACY_WORKFLOW"; then
+            echo "NOTICE: the legacy e2e-staging path is still active"
+            echo "reconcile-staging no-ops until cutover (OP-CUT-01 / AD-09)"
+            echo "No AWS credentials were used; nothing was mutated."
+            exit 0
+          fi
+          echo "legacy staging path inactive; reconcile proceeds"
+
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: '3.12'
+
+      - name: Install delivery package
+        run: python -m pip install --disable-pip-version-check -q ./delivery
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4.3.1
+        with:
+          role-to-assume: ${{ env.AWS_ROLE_ARN_STAGING }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      # Reconcile exits non-zero when it stops an ownerless RDS (visible
+      # event) or on any AWS read error; the record artifact is uploaded in
+      # both cases for evidence.
+      - name: Reconcile ownerless staging RDS
+        run: |
+          set -euo pipefail
+          python -m delivery.cli staging reconcile \
+            --environment staging \
+            --identifiers scripts/config/staging-identifiers.json \
+            --out reconcile-record.json
+
+      - name: Upload reconcile record
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: reconcile-record-${{ github.run_id }}-${{ github.run_attempt }}
+          path: reconcile-record.json
+          if-no-files-found: warn
+          retention-days: 14

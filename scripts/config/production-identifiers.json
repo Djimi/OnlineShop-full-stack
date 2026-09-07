@@ -1,0 +1,22 @@
+{
+  "environment": "production",
+  "accountId": "799111666795",
+  "cluster": "onlineshop-cluster",
+  "services": [
+    "onlineshop-auth",
+    "onlineshop-items",
+    "onlineshop-api-gateway"
+  ],
+  "ecrRepositories": {
+    "auth": "onlineshop-auth",
+    "items": "onlineshop-items",
+    "gateway": "onlineshop-api-gateway"
+  },
+  "dbInstance": "onlineshop-postgres-db",
+  "frontendBucket": "onlineshop-frontend-799111666795",
+  "frontendLiveMarker": "release.json",
+  "frontendReleasesPrefix": "_releases/",
+  "cloudfrontDistributionId": "EPS8MI3FV3B7X",
+  "albName": "onlineshop-alb",
+  "targetGroupArn": "arn:aws:elasticloadbalancing:eu-north-1:799111666795:targetgroup/onlineshop-gateway-tg/29ba79a624079a04"
+}

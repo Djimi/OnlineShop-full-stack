@@ -97,27 +97,29 @@ fi
 # traceability and release-identity checks read) and the live root (last).
 PREFIX_DEST="$TMP/prefix-upload"
 cp -r "$DIST" "$PREFIX_DEST"
-aws s3 sync "${AWS_ARGS[@]}" "$PREFIX_DEST/" "s3://$BUCKET/$PREFIX"
+aws s3 sync "${AWS_ARGS[@]}" "$PREFIX_DEST/" "s3://$BUCKET/$PREFIX" \
+  --checksum-algorithm SHA256
 jq -n --arg version "$VERSION" \
   --arg sourceSha "$(jq -r '.release.sourceSha' "$MANIFEST")" \
   --arg frontendSha256 "$CHECKSUM" \
   '{version: $version, sourceSha: $sourceSha, frontendSha256: $frontendSha256}' \
   > "$TMP/marker.json"
 aws s3 cp "${AWS_ARGS[@]}" "$TMP/marker.json" "s3://$BUCKET/$PREFIX$MARKER" \
-  --content-type application/json
+  --content-type application/json --checksum-algorithm SHA256
 # Verify a sample: the assets must be readable and checksum-matched to the
 # manifest.
 ASSET_COUNT=$(find "$PREFIX_DEST" -type f | wc -l)
 [ "$ASSET_COUNT" -gt 0 ] || { echo "ERROR: no assets to publish" >&2; exit 1; }
 
 # 2. Live root assets WITHOUT --delete (old hashed assets retained).
-aws s3 sync "${AWS_ARGS[@]}" "$DIST/" "s3://$BUCKET/" --exclude "index.html" --exclude "$MARKER"
+aws s3 sync "${AWS_ARGS[@]}" "$DIST/" "s3://$BUCKET/" \
+  --exclude "index.html" --exclude "$MARKER" --checksum-algorithm SHA256
 
 # 3. Root release.json + index.html LAST (assets-first/index-last).
 aws s3 cp "${AWS_ARGS[@]}" "$TMP/marker.json" "s3://$BUCKET/$MARKER" \
-  --content-type application/json
+  --content-type application/json --checksum-algorithm SHA256
 aws s3 cp "${AWS_ARGS[@]}" "$DIST/index.html" "s3://$BUCKET/index.html" \
-  --content-type text/html
+  --content-type text/html --checksum-algorithm SHA256
 
 # 4. CloudFront invalidation of the SPA entry paths (/* is one acceptable
 #    wildcard) + read back the invalidation id.

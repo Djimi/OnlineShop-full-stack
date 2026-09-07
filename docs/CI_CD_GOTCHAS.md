@@ -12,6 +12,67 @@
 
 ---
 
+## Pass 3R.1 — CI security and promotion handoff repair (offline)
+
+Pass 3R.1 hardens the existing release-v1 workflows and wrappers. It does not
+change the manifest schema or staging design, and its gates are offline only.
+The three in-scope workflows set workflow-level `permissions: contents: read`;
+job-level permissions add only the required `pull-requests`, `actions`,
+`deployments`, or OIDC permissions. The existing backend jobs still combine PR
+validation with branch-push publication, so they remain OIDC-capable at job
+scope; PR credential/publication steps are guarded off and the role trust does
+not admit a `pull_request` subject. Pass 3R.2/3R.3 performs the structural job
+split, and Pass 3R.9 applies the purpose-specific role cutover.
+
+Never embed an untrusted GitHub expression in a `run:` script. Transfer event,
+ref, SHA, dispatch inputs, run/attempt IDs, repository names, and actor values
+through that step's `env`, validate them for the event-specific shape, and pass
+only quoted shell variables/argv. `rl_assert_ci_ref` accepts only `main` or a
+well-formed `feature/**` ref; `rl_assert_ci_pr_ref` accepts only
+`refs/pull/<positive-int>/merge`. The security gate proves hostile quotes,
+spaces, command substitutions, backticks, separators, redirection, and
+newlines cannot create a marker command/file.
+
+Promotion is an explicit handoff:
+
+1. The exact candidate run/attempt and optional `source_sha` are validated;
+   `source_sha`, when supplied, must equal the downloaded evidence exactly.
+2. GitHub workflow-run reads use the attempt-scoped REST shape
+   `actions/runs/{run}/attempts/{attempt}` and
+   `actions/runs/{run}/attempts/{attempt}/jobs`; the API returns bare
+   `head_branch: "main"`, which is normalized to `refs/heads/main`. The
+   response `id` and `run_attempt` must be positive JSON numbers matching the
+   requested values. Never consume the unscoped/latest attempt.
+3. `deploy-production.sh` accepts a schema-valid candidate manifest plus a
+   read-only production snapshot. The candidate cannot contain task-definition
+   ARNs; the snapshot supplies and validates the current service ARNs. The
+   script emits a deployment manifest with the newly registered ARNs, and only
+   that output is rendered as official after production verification.
+4. The snapshot fails closed unless the live marker has canonical version,
+   source SHA, and frontend SHA-256 identity; the immutable
+   `_releases/v<version>/` marker and `index.html` match it; the live index has
+   an S3 full-object `ChecksumSHA256`; and the exact canonical `v<version>`
+   GitHub tag resolves to the same source SHA (including annotated-tag
+   peeling). It never chooses a newer tag merely because it sorts higher.
+5. `publish-frontend.sh`, `restore-frontend.sh`, and compensation pass
+   `--checksum-algorithm SHA256` on every S3 writer. Snapshot decodes the
+   service-reported full-object checksum from base64 to canonical SHA-256 hex
+   and never falls back to an ETag.
+
+Run the 3R.1 offline gates:
+
+```bash
+bash tests/scripts/ci_security_contract_test.sh
+bash tests/scripts/promotion_handoff_test.sh
+bash tests/scripts/promotion_test.sh
+bash tests/scripts/rollback_test.sh
+```
+
+These stateful stubs/static checks do not claim live AWS, staging, GitHub
+approval, role-split, or release-publication verification.
+
+---
+
 ## Release contract (Pass 3, subphase 3.1)
 
 The versioned release-manifest JSON Schema, deterministic local validator,
@@ -71,7 +132,7 @@ bash tests/scripts/candidate_evidence_test.sh
 | Candidate evidence could be emitted for a failed staging run | A dependent job with its own `if:` can run even when a needed job failed | The `candidate-evidence` job requires every `needs.*.result == 'success'` AND `emit-candidate-evidence.sh` refuses to emit unless all five conclusions are `success` |
 | A rerun's evidence misattributed the produced bytes | The rerun reuses, it does not produce | Evidence records `candidateWorkflow` = artifact-producing run (from the images' producer labels) and `artifactWorkflow` = the current staging-validation run; `emit-candidate-evidence.sh` takes `--producer-run-id/--producer-run-attempt` |
 | Candidate manifest needed a version at build time | The owner assigns SemVer at promotion (Decision 3) | The bundle records immutable facts (`candidate-evidence.json`); `emit-candidate-manifest.sh` renders a schema-valid candidate manifest when the version is supplied |
-| Release-critical Actions drifting by mutable tag | `@v4`-style tags move | All release-critical third-party Actions in `build-and-deploy.yml` are pinned by full commit SHA with a version comment; the gate enforces it |
+| Release-critical Actions drifting by mutable tag | `@v4`-style tags move | All release-critical third-party Actions in `ci.yml` (the candidate producer since the Phase 7 trigger swap) are pinned by full commit SHA with a version comment; the gate enforces it |
 | Item images missing the `common` revision | Items embeds `common` at the monorepo SHA | Items images additionally carry `org.onlineshop.common-revision=<sha>`; the canonical-set check requires it |
 
 Live ECR label read-back, real digests, real artifact IDs and service-reported
@@ -307,6 +368,8 @@ Learned during staging provisioning (2026-08-02). Full narrative: [AWS_COMMANDS_
 | `SC service is already used by ...namespace...` | Service Connect maps `portName` → Cloud Map service name, which must be **unique per namespace**. Production uses `auth-port`, `items-port`, `gateway-port`; staging has its own namespace and uses `auth-staging-port`, etc. | Within a single namespace port names must be unique in BOTH the container `portMappings[].name` and the SC config. Production and staging now use separate namespaces, so cross-environment collisions are moot — the isolation is enforced by `scripts/verify-production-staging-separation.sh` |
 | `portName(X) does not refer to any named PortMapping` | SC `portName` must exactly match a `portMappings[].name` in the task definition | Rename the portMapping name in the TD, not just the SC config |
 | `Specifying both a launch type and capacity provider strategy is not supported` | `--launch-type` and `--capacity-provider-strategy` are mutually exclusive on `create-service`/`update-service` | Pick one. We use `--capacity-provider-strategy "capacityProvider=FARGATE_SPOT,weight=1"` |
+| `Unknown parameter in input: "LoadBalancerNames"` / `'ElasticLoadBalancing' object has no attribute 'describe_target_health'` / `LoadBalancerNotFound` for a real ALB | The boto3 service name `elb` is the CLASSIC ELBv1 API — it has no `describe_target_health`, returns `LoadBalancerDescriptions` (not `LoadBalancers`), and raises `LoadBalancerNotFound` for ALB names. And the two clients take DIFFERENT parameters: classic `elb.describe_load_balancers` takes `LoadBalancerNames`, while `elbv2` takes `Names` — a fix that makes one client pass breaks the other | Use `client_for(ctx, "elbv2")` with `describe_load_balancers(Names=[name])` for ALB reads/writes; keep fake clients parameter-named identically to the real API and add a lifecycle test without `e2eBaseUrl` so the ALB DNS path is exercised |
+| Staging COMPATIBILITY journey gets 404 (not 401) on the items API | The journey hit `/api/v1/items`, the items SERVICE's internal path — but the gateway only routes `/items/**` (rewritten downstream to `/api/v1/items/**`); the frontend, E2E suite, and CloudFront behaviors all use `/items` | Journeys must use the gateway's PUBLIC route: `GET /items` (expect 200/401/403 + JSON). Service-internal `/api/v1/*` paths 404 on the gateway and belong only in the rewrite rule |
 | `you must also specify a value for 'executionRoleArn'` | Container `secrets` (Secrets Manager injection) requires an execution role | Always include `executionRoleArn` when the TD has `secrets` |
 | Service stops launching tasks after repeated crashes | ECS gives up retrying a failing deployment; `desired:1, running:0`, rollout "COMPLETED" | Fix the root cause, then `update-service --force-new-deployment` |
 | Task health stuck `UNKNOWN` for minutes | Container `healthCheck.startPeriod: 180` = no checks for 3 min. This is NORMAL | Don't wait blindly — check `list-tasks --desired-status STOPPED` for crash loops first |
@@ -316,11 +379,30 @@ Learned during staging provisioning (2026-08-02). Full narrative: [AWS_COMMANDS_
 | `taskId length should be one of [32,36]` / `Unexpected number of separators` | An empty/`None` task ARN was passed to `describe-tasks` | Guard: `[ "$TASK_ARN" != "None" ] && [ -n "$TASK_ARN" ]` before describing |
 | `Invalid control character` parsing `--container-definitions` | Multi-line strings (SQL, JSON) inline in CLI params | Never inline complex JSON: build with python `json.dump` to a temp file, use `--cli-input-json file://` |
 | `The Systems Manager parameter name specified for secret ... is invalid` | `secrets[].valueFrom` with the `:json-key::` suffix requires the **full ARN** (name alone is treated as an SSM parameter) | Resolve names via `describe-secret --query ARN` before building TD JSON |
+| `Tags can not be empty` from `RegisterTaskDefinition` | `describe-task-definition --include TAGS` returns `tags: []`, but registration rejects an explicit empty tag list | Omit `tags` from the registration payload when the observed list is empty; preserve and pass it only when non-empty |
+| `running_digests` never converged on the gateway while auth/items passed | The gateway TD runs a non-essential `redis-sidecar` container whose digest is included in `describe-tasks` containers, so the observed digest set can never equal `{expected}` | `running_digests` builds the application digest set from the **essential** containers declared in each task's task definition — the `essential` flag never exists in `describe-tasks` output (it lives only in the TD), so filtering on task containers can never exclude sidecars; non-essential sidecars and ECS-managed `ecs-service-connect-*` proxies are excluded |
+| `CannotPullContainerError ... not found` on resume after services ran earlier | The ECR **newest-5** lifecycle policy expires images not in the newest 5 per repo; task definitions pinned to an older `sha-<commit>` digest (or even `main-latest`) silently lose their image when newer builds are pushed | Re-point the service to a digest that still exists (verify via `ecr describe-images` first — `ImageNotFoundException` = expired). Production must never assume an ECR tag/digest is permanent; the greenfield release pipeline solves this with immutable release tagging + retention |
+| Live frontend API calls 502 after a `pause`/`resume` cycle | The ALB is disposable: every resume creates a new ALB with a **new DNS name**, but CloudFront's `alb-api` origin (behaviors `/auth*`, `/items*`) keeps pointing at the deleted ALB | `resume-playground.sh` now calls `lc_repoint_cloudfront_alb_origin` (lifecycle.sh) — re-points the origin to the current ALB DNS via `get-distribution-config` + `update-distribution` with the top-level ETag, waits for `distribution-deployed`, and fails closed on read-back mismatch. Manual one-off: same flow with `--if-match "$(aws cloudfront get-distribution ... --query ETag)"` |
 
 ### ECS anti-patterns
 
 - **Blocking poll loops** (`for i in $(seq 1 48); sleep 10; done`) in a single shell call — they burn session time and risk losing everything to a hard timeout. Prefer `aws ecs wait services-stable`, or short bounded loops (<2 min) and re-invoke.
 - **Passwords in task definitions** — a plaintext `PGPASSWORD` env var or a password embedded in `command` is visible to anyone with `ecs:DescribeTaskDefinition`. Always inject via `secrets[].valueFrom`. Deregister **and** `delete-task-definitions` one-off helper revisions after use (deregister alone keeps them describable as INACTIVE).
+
+---
+
+## AWS ELB (IAM)
+
+| Gotcha | Why It Happens | Rule |
+|--------|---------------|------|
+| `describe_load_balancers failed for <alb>` at verify time despite an Allow statement | ELBv2 `Describe*` actions (`DescribeLoadBalancers`, `DescribeTargetHealth`, ...) **do not support resource-level permissions**; an Allow with a scoped ARN (e.g. `.../loadbalancer/app/onlineshop-alb/*`) is inert — IAM never matches it and the call gets implicit deny | Grant ELB describe actions with `Resource: "*"` (they are read-only; the scoping is impossible). Verify with `aws iam simulate-principal-policy --action-names elasticloadbalancing:DescribeLoadBalancers --resource-arns '*'`. The live `github-actions-production` role drifted from the repo policy copy (which was already correct); after any manual IAM edit, diff the read-back against the committed JSON |
+
+## GitHub Environment Approvals (REST)
+
+| Gotcha | Why It Happens | Rule |
+|--------|---------------|------|
+| The "Resolve the environment approver" step fails: the approvals API carries no timestamp — not even for a real web-UI approval | `GET /repos/{owner}/{repo}/actions/runs/{run}/approvals` returns only `user`, `state`, `comment`, `environments` on this repo; the documented `created_at`/`approved_at` fields are never present, so `approved_at // created_at` is always empty | Derive the approver login from the approvals API (`.user.login`) but the approval timestamp from the environment deployment evidence: list `deployments?environment=production&sha=<run sha>` → the deployment id, then its `/statuses` → the **`in_progress` status `created_at`** (created server-side the moment the review is accepted; exists identically for web-UI and API approvals). `gh api --jq` prints scalar results RAW (quotes stripped, `jq -r` semantics) — capture the scalar directly, never pipe it into another `jq` (an unquoted `2026-08-19T06:23:25Z` is invalid JSON input → "jq: parse error: Invalid numeric literal"). Never use the runner clock (`date`) |
+| Approving an environment review via `POST /pending_deployments` | API approvals are fully valid, produce the same `in_progress` deployment status, and are preferred for delegated operation — the strict evidence step above accepts them | POST `{"environment_ids": [<id>], "state": "approved", "comment": "..."}` with `--input` (the ids MUST be a JSON array; a `-f` string 422s); a second POST after approval returns "No pending deployment requests" (expected) |
 
 ---
 
@@ -374,3 +456,28 @@ scripts/ecs-run-sql.sh --database <db> --file <schema.sql> --verify "\dt"
   snapshot or 10–20 minutes with one. These are operational guidance, not hard
   timeouts—AWS capacity, image pulls, JVM health checks, and RDS control-plane
   load can extend them.
+## ECS RunTask and RDS cleanup
+
+`ecs:RunTask` is authorized against the task-definition ARN, not the cluster
+ARN. Scope the resource to the staging SQL-runner family and constrain the
+cluster with `ArnEquals` on `ecs:cluster`. Likewise, `ecs:DescribeTasks` uses
+task ARNs; `ecs:ListTasks` requires `Resource: "*"` and should be constrained
+with the same `ecs:cluster` condition. For cleanup, RDS accepts
+`StopDBInstance` only from `available`; wait through transient start or
+configuration states, and if the instance is already `stopping`, wait for
+`stopped` without issuing a duplicate stop.
+
+ECS injects Service Connect runtime containers named `ecs-service-connect-*`.
+They are not application task-definition containers and can omit
+`imageDigest`; running-image verification ignores only this managed prefix and
+still fails closed for every application or user-defined sidecar container.
+
+Staging retries can encounter a service task definition already pinned to the
+candidate digest after an earlier failure. Reuse that exact revision and
+continue start/verification; do not call the shared image-only transform with
+an empty diff. The shared transform remains fail-closed for production paths.
+
+Deployment-primary does not guarantee that every old task has drained under a
+100/200 rolling policy. Use the bounded running-digest waiter after the
+deployment waiter; tolerate only known old/new overlap and finish only when
+the observed digest set converges to the exact candidate digest.

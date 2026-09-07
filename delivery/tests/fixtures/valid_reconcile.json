@@ -1,0 +1,17 @@
+{
+  "schemaVersion": "1.0",
+  "observedAt": "2026-08-10T10:05:00Z",
+  "dbInstance": "onlineshop-staging-postgres",
+  "dbStatus": "available",
+  "marker": {
+    "schemaVersion": "1.0",
+    "operationId": "stg-4711-1",
+    "workflowRunId": 4711,
+    "workflowRunAttempt": 1,
+    "owner": "owner@example.com",
+    "acquiredAt": "2026-08-10T10:00:00Z",
+    "expiresAt": "2026-08-10T13:00:00Z"
+  },
+  "action": "none",
+  "conclusion": "active staging owner stg-4711-1; leaving running"
+}

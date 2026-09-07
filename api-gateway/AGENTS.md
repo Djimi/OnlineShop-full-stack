@@ -44,6 +44,17 @@ mutation is applied in the consolidated Pass 3 verification pass. The
 `release-<version>` tag is minted server-side from the candidate bytes by
 `release/bin/promote-image-digest.sh` (never a rebuild).
 
+Pass 3R.1 keeps the API Gateway handoff scoped to its component: workflow
+contexts reach shell through step `env`, event-specific refs/full SHAs are
+validated, and the workflow has `contents: read` by default with job-scoped
+opt-ins. Pull requests do not bootstrap AWS credentials or publish ECR images.
+Promotion accepts the schema-valid candidate without a task-definition ARN,
+takes the current gateway task-definition ARN from the production snapshot,
+and records the new ARN only in the deployment manifest; an official manifest
+is rendered after production verification. The PR/trusted-job split is Pass
+3R.2/3R.3, the purpose-specific role cutover is Pass 3R.9, and live proof is
+Pass 3R.10.
+
 ## Responsibilities
 
 - **Routing**: `/auth/**` → Auth (rewritten to `/api/v1/auth/**`), `/items/**` → Items (rewritten to `/api/v1/items/**`).

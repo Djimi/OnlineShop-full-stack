@@ -91,6 +91,7 @@ RELEASE_TAG=$(jq -r '.components.auth.releaseTag' "$MANIFEST")
 rl_assert_semver "$VERSION" || exit 2
 rl_assert_full_sha "$SOURCE_SHA" || exit 2
 rl_assert_positive_integer "$RUN_ID" || exit 2
+rl_assert_positive_integer "$RUN_ATTEMPT" || exit 2
 
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
@@ -121,8 +122,40 @@ else
     cat "$TMP/run.err" >&2 || true
     exit 1
   fi
+  # The attempt-scoped endpoint is still an untrusted API response. Require
+  # its id to be a JSON number representing a positive integer and to equal
+  # the validated run selected from the candidate manifest before consuming
+  # any attempt metadata. A missing, string-typed, fractional, or different
+  # value must never be able to authorize the jobs read below.
+  if ! printf '%s' "$RUN_JSON" | jq -e --argjson expected "$RUN_ID" '
+    if (.id | type) != "number" then false
+    elif (.id | floor) != .id then false
+    elif .id < 1 then false
+    else .id == $expected
+    end
+  ' >/dev/null 2>"$TMP/id.err"; then
+    echo "ERROR: candidate run id does not match requested run ID ${RUN_ID} (fail closed):" >&2
+    cat "$TMP/id.err" >&2 || true
+    exit 1
+  fi
+  # The attempt-scoped endpoint is still an untrusted API response. Require
+  # its run_attempt to be a JSON number representing a positive integer and to
+  # equal the validated attempt selected from the candidate manifest. A
+  # missing, string-typed, fractional, or different value must never be able
+  # to authorize the jobs read below, even when those jobs otherwise pass.
+  if ! printf '%s' "$RUN_JSON" | jq -e --argjson expected "$RUN_ATTEMPT" '
+    if (.run_attempt | type) != "number" then false
+    elif (.run_attempt | floor) != .run_attempt then false
+    elif .run_attempt < 1 then false
+    else .run_attempt == $expected
+    end
+  ' >/dev/null 2>"$TMP/attempt.err"; then
+    echo "ERROR: candidate run attempt does not match requested attempt ${RUN_ATTEMPT} (fail closed):" >&2
+    cat "$TMP/attempt.err" >&2 || true
+    exit 1
+  fi
   set +e
-  JOBS_JSON=$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${RUN_ID}/jobs" \
+  JOBS_JSON=$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${RUN_ID}/attempts/${RUN_ATTEMPT}/jobs" \
     --paginate --jq '.jobs[] | {name, conclusion}' 2>"$TMP/jobs.err")
   JOBS_RC=$?
   set -e
@@ -131,8 +164,15 @@ else
     cat "$TMP/jobs.err" >&2 || true
     exit 1
   fi
-  printf '%s' "$RUN_JSON" | jq '{runId: .id, runAttempt: .run_attempt, url: .html_url, event: .event, ref: .head_branch, headSha: .head_sha, conclusion: .conclusion}' > "$TMP/run-base.json"
-  printf '%s' "$JOBS_JSON" | jq '{jobs: (map({key: .name, value: .conclusion}) | from_entries)}' > "$TMP/jobs.json"
+  # The GitHub workflow-run API returns `head_branch: "main"` for an
+  # allowed push candidate, while the local contract deliberately stores the
+  # fully-qualified `refs/heads/main`.  Normalize only that exact
+  # event/branch pair.  Any other shape (including an already-qualified ref,
+  # another branch, a non-string, or a missing value) becomes null and is
+  # rejected by the run decision; never blindly prefix attacker-controlled
+  # branch text or trust a contract-shaped value from the API.
+  printf '%s' "$RUN_JSON" | jq '{runId: .id, runAttempt: .run_attempt, url: .html_url, event: .event, ref: (if (.event == "push" and (.head_branch | type) == "string" and .head_branch == "main") then "refs/heads/main" else null end), headSha: .head_sha, conclusion: .conclusion}' > "$TMP/run-base.json"
+  printf '%s' "$JOBS_JSON" | jq -s '{jobs: (map({key: .name, value: .conclusion}) | from_entries)}' > "$TMP/jobs.json"
   jq -s '.[0] * .[1]' "$TMP/run-base.json" "$TMP/jobs.json" > "$TMP/run.json"
 fi
 RUN_ISSUES=$(PYTHONPATH="$RELEASE/src" python3 -m release_contract.promotion run \

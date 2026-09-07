@@ -41,6 +41,11 @@ lc_log_step "5/6" "2–6 minutes" "Wait for Auth, Items, and API Gateway to beco
 lc_wait_services_stable
 ALB_DNS=$(lc_alb_dns "$ALB_ARN")
 
+# The ALB is disposable and its DNS changes on every resume. Re-point the
+# CloudFront alb-api origin so the live frontend's /auth* and /items* paths
+# keep reaching the new ALB (no-op when it already matches; skipped for staging).
+lc_repoint_cloudfront_alb_origin "$ALB_DNS"
+
 lc_log_step "6/6" "5–60 seconds" "Probe the public route until the gateway returns the expected authentication response."
 lc_wait_http_unauthorized "$ALB_DNS" production
 

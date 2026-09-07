@@ -181,9 +181,9 @@ restore_frontend() {
   # Publish the previous prefix marker + index.html to the live root and
   # invalidate the SPA entry paths.
   aws s3 cp "${AWS_ARGS[@]}" "$TMP/prev-marker.json" "s3://$LC_FRONTEND_BUCKET/release.json" \
-    --content-type application/json
+    --content-type application/json --checksum-algorithm SHA256
   aws s3 cp "${AWS_ARGS[@]}" "$TMP/prev-index.html" "s3://$LC_FRONTEND_BUCKET/index.html" \
-    --content-type text/html
+    --content-type text/html --checksum-algorithm SHA256
   if [ -n "${LC_CLOUDFRONT_DISTRIBUTION:-}" ]; then
     aws cloudfront create-invalidation "${AWS_ARGS[@]}" \
       --distribution-id "$LC_CLOUDFRONT_DISTRIBUTION" --paths "/*" \

@@ -136,9 +136,9 @@ jq -e --arg v "$VERSION" \
 # 2. Publish the prefix marker + index.html to the live root (assets are already
 #    retained there; no --delete anywhere).
 aws s3 cp "${AWS_ARGS[@]}" "$TMP/prefix-marker.json" "s3://$BUCKET/$MARKER" \
-  --content-type application/json
+  --content-type application/json --checksum-algorithm SHA256
 aws s3 cp "${AWS_ARGS[@]}" "$TMP/prefix-index.html" "s3://$BUCKET/index.html" \
-  --content-type text/html
+  --content-type text/html --checksum-algorithm SHA256
 
 # 3. CloudFront invalidation of the SPA entry paths + read back the id.
 INVALIDATION_ID=$(aws cloudfront create-invalidation "${AWS_ARGS[@]}" \

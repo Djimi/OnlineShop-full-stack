@@ -52,6 +52,11 @@ source "$REPO_ROOT/scripts/config/staging.env"
 [[ "$LC_CLUSTER" = *staging* ]] || fail "staging cluster guard is not explicit"
 [[ "$LC_DB_INSTANCE" = *staging* ]] || fail "staging database guard is not explicit"
 
+# Staging has no CloudFront distribution: the re-point must be a silent no-op
+# (no AWS calls) so staging resume never touches the production distribution.
+unset LC_CLOUDFRONT_DISTRIBUTION
+assert_success lc_repoint_cloudfront_alb_origin example.com
+
 assert_success bash "$REPO_ROOT/scripts/resume-staging.sh" --help
 assert_success bash "$REPO_ROOT/scripts/pause-staging.sh" --help
 assert_success bash "$REPO_ROOT/scripts/resume-playground.sh" --help

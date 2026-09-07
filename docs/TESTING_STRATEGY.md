@@ -28,6 +28,10 @@ Tests for repository automation must also follow the story-oriented guidance in
 behavior, keep scenario setup explicit, and avoid mirroring implementation
 helpers or retaining coverage for removed modes.
 
+Aggregate frontend content checksums must be path-independent: hash
+newline-terminated per-file SHA-256 hex values sorted by canonical relative
+path, never tool output containing environment-specific path prefixes.
+
 **Test output must show clean (zero failures).** Warnings from libraries (Mockito self-attach, Jansi, etc.) are expected and can be ignored.
 
 ## Testing Philosophy
@@ -67,6 +71,10 @@ helpers or retaining coverage for removed modes.
 Test business logic in isolation. Mock all dependencies. These are your primary safety net—fast, focused, and numerous. Test edge cases, validation rules, and error handling. Don't test simple getters/setters or framework code.
 
 **Domain events:** When testing code that emits domain events, assert event properties — never only the event type. The right event type with wrong data is still a bug.
+
+**Real time:** Unit tests must never burn real time in retry/backoff loops. Bounded retries keep their attempt budgets in tests, but the sleep must be injectable or disabled (e.g., the `delivery/tests/conftest.py` autouse fixture no-ops `ecr._sleep`; the production delay stays 5s/6 attempts). Test fakes must also mirror the real AWS response shape — `describe_images` responses carry `imageDigest` plus the `imageTags` list on `imageDetails` entries — or retry logic keyed on those fields never converges and tests fail after minutes of wall time.
+
+**ECR digest resolution:** `aws ecr batch-get-image` returns a null `imageDigest` in the image `imageId` for multi-arch OCI index manifests (`application/vnd.oci.image.index.v1+json`), so tag/digest resolution must go through `describe_images` (`imageDetails[0].imageDigest`); `batch-get-image` remains only for fetching manifest bytes (e.g., server-side tag minting).
 
 ### Integration Tests
 Verify components work together with real dependencies. Use Testcontainers for PostgreSQL and Redis—never H2 or in-memory substitutes. Test repository queries, controller request handling, and database constraints. These catch issues unit tests miss.
@@ -212,6 +220,34 @@ production, and the real owner-approved promotion — the `production`
 Environment approval, ECR/ECS/S3/CloudFront mutations and read-backs, and the
 GitHub Release publication) is verified in the consolidated Pass 3 verification
 pass, not by these offline gates.
+
+## Pass 3R.1 CI security and promotion handoff gate (offline)
+
+The 3R.1 gate covers the workflow security boundary and the exact candidate →
+snapshot → deployment → official handoff. It executes only local static checks
+and stateful AWS/GitHub stubs; it does not start staging or contact live AWS,
+GitHub, or production. The checks prove that GitHub contexts reach shell only
+through step `env`, hostile values stay inert, permissions are job-scoped,
+candidate evidence is bound to the exact run/attempt and optional `source_sha`,
+the real GitHub `head_branch: "main"` / attempt-jobs API shape is handled, the
+snapshot binds the actual live release/tag/immutable frontend prefix and
+full-object SHA-256 checksum, and publication/restore/compensation request
+SHA-256 object checksums.
+
+```bash
+bash tests/scripts/ci_security_contract_test.sh
+bash tests/scripts/promotion_handoff_test.sh
+bash tests/scripts/promotion_test.sh
+bash tests/scripts/rollback_test.sh
+```
+
+`promotion_handoff_test.sh` runs the real shell wrappers against a stateful
+offline stub and checks that the candidate remains unchanged, the snapshot
+provides current task-definition ARNs, deployment emits final ARNs, only the
+deployment manifest becomes official, verification precedes finalization, and
+the finalization decision is dry-run/idempotent. The structural PR/trusted-job
+split is deferred to 3R.2/3R.3, the live role cutover to 3R.9, and environment
+approval, AWS mutations, and GitHub Release publication to 3R.10.
 
 ### Running Tests
 

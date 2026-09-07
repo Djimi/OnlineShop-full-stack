@@ -1,0 +1,36 @@
+{
+  "schemaVersion": "1.0",
+  "evidenceId": "evidence-4711-1",
+  "workflowRunId": 4711,
+  "workflowRunAttempt": 1,
+  "workflowUrl": "https://github.com/Djimi@8793507/OnlineShop-full-stack/actions/runs/4711",
+  "candidateId": "cand-4711-1-111111111111",
+  "releaseId": "release-0001",
+  "owner": "owner@example.com",
+  "requester": "requester@example.com",
+  "approver": "approver@example.com",
+  "phases": [
+    {
+      "name": "staging",
+      "startedAt": "2026-08-10T10:00:00Z",
+      "endedAt": "2026-08-10T12:00:00Z",
+      "conclusion": "passed"
+    },
+    {
+      "name": "promotion",
+      "startedAt": "2026-08-10T12:30:00Z",
+      "endedAt": "2026-08-10T13:00:00Z",
+      "conclusion": "passed"
+    }
+  ],
+  "expectedObserved": [
+    {
+      "kind": "authDigest",
+      "expected": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "observed": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "equal": true
+    }
+  ],
+  "awsRequestIds": ["req-4711-1"],
+  "failure": null
+}
