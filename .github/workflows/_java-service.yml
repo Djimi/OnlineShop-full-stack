@@ -41,12 +41,12 @@ jobs:
       - name: Build common dependency
         if: inputs.needs-common
         working-directory: common
-        run: chmod +x mvnw && ./mvnw install -DskipTests
+        run: ./mvnw install -DskipTests
 
       # 4. Unit + integration tests via the service Maven wrapper
       - name: Run unit and integration tests
         working-directory: ${{ inputs.working-directory }}
-        run: chmod +x mvnw && ./mvnw clean test
+        run: ./mvnw clean test
 
       # 5. Surefire reports owned by the exact caller run/attempt
       - name: Upload surefire test results

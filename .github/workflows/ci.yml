@@ -117,11 +117,25 @@ jobs:
 
       - name: Run E2E tests
         working-directory: e2e-tests
-        run: chmod +x mvnw && ./mvnw clean test
+        run: ./mvnw clean test
 
       - name: Capture container diagnostics
         if: failure()
-        run: docker compose ps && docker compose logs --no-color auth-service items-service api-gateway
+        run: |
+          mkdir -p diagnostics
+          docker compose ps --all > diagnostics/compose-ps.txt 2>&1 || true
+          docker compose logs --no-color --timestamps --tail=all \
+            auth-service items-service api-gateway \
+            > diagnostics/compose-logs.txt 2>&1 || true
+
+      - name: Upload container diagnostics
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: compose-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}
+          path: diagnostics/
+          if-no-files-found: warn
+          retention-days: 14
 
       - name: Stop the local stack
         if: always()

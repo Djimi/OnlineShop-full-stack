@@ -188,7 +188,7 @@ jobs:
         working-directory: e2e-tests
         env:
           E2E_BASE_URL: ${{ steps.e2e-url.outputs.base_url }}
-        run: chmod +x mvnw && ./mvnw clean test
+        run: ./mvnw clean test
 
       # Invocation 2: record the real E2E conclusion, stop services/RDS,
       # verify cleanup, release the marker, complete the record.
