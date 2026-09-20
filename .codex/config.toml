@@ -1,0 +1,8 @@
+[features]
+hooks = true
+
+[plugins."caveman@onlineshop-local"]
+enabled = true
+
+[plugins."ponytail@onlineshop-local"]
+enabled = true
