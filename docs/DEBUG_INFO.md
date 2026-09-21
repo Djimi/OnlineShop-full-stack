@@ -12,11 +12,16 @@
 
 ## Multi-Worktree Port Conflicts
 
-New worktrees must be created with the atomic creation command:
+New worktrees must be created with the persisted `wtc` function:
 
 ```bash
-scripts/create-worktree.py <branch> [--base <ref>] [--name <path>]
+wtc <name> [true|false] [-b [<ref>]] [--branch <branch>] [--name <path>]
 ```
+
+It runs `git pull --ff-only` on the current checkout before creating anything.
+If the checkout has no upstream or has diverged, creation stops without a
+merge or rebase. Direct use of `scripts/create-worktree.py` is supported, but
+only the Bash function can change the caller's current directory.
 
 If an external application takes a port after allocation and `docker compose
 up` reports a bind error, stop that application and retry Compose. The
@@ -35,7 +40,8 @@ docker ps --filter publish=<port>  # shows the container
 
 **Missing `.env` claim?** The worktree was not created through the supported
 Python command, or allocation failed after Git created it. Inspect and remove
-the incomplete worktree, then recreate it with `scripts/create-worktree.py`.
+the incomplete worktree, then recreate it with `wtc` or
+`scripts/create-worktree.py`.
 
 See [docs/MULTI_WORKTREE.md](./MULTI_WORKTREE.md) for full multi-worktree guide.
 

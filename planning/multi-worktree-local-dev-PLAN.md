@@ -3,7 +3,8 @@
 > Historical plan: its Bash commands and maintenance modes have been replaced
 > by the completed Python design in
 > [simplify-worktree-creation-PLAN.md](./simplify-worktree-creation-PLAN.md).
-> The only supported creation command is now `scripts/create-worktree.py`.
+> The persisted `wtc <name>` command is now the preferred creation path; it
+> delegates to `scripts/create-worktree.py` when the repository provides it.
 
 > Rationale for every decision: `planning/multi-worktree-local-dev-REVIEW.md` (3-agent review, fixes F1–F10). This file is self-contained.
 

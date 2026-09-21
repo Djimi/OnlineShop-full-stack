@@ -22,6 +22,7 @@ class WorktreeCreationTest(unittest.TestCase):
     def setUp(self) -> None:
         self.temporary_directory = tempfile.TemporaryDirectory()
         self.repository = Path(self.temporary_directory.name) / "shop"
+        self.remote = Path(self.temporary_directory.name) / "origin.git"
         self.repository.mkdir()
 
         self.git("init", "-b", "main")
@@ -35,6 +36,13 @@ class WorktreeCreationTest(unittest.TestCase):
         write_compose_contract(self.repository / "docker-compose.yml")
         self.git("add", "docker-compose.yml")
         self.git("commit", "-m", "add worktree port contract")
+        subprocess.run(
+            ["git", "init", "--bare", str(self.remote)],
+            check=True,
+            stdout=subprocess.DEVNULL,
+        )
+        self.git("remote", "add", "origin", str(self.remote))
+        self.git("push", "--set-upstream", "origin", "main")
 
     def tearDown(self) -> None:
         self.temporary_directory.cleanup()
@@ -157,6 +165,60 @@ class WorktreeCreationTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertTrue(self.target("feature/plain").is_dir())
 
+    def test_false_change_directory_keeps_the_next_step_in_the_current_shell(
+        self,
+    ) -> None:
+        result = self.invoke("feature/no-cd", "false")
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertNotIn("\n  cd ", result.stdout)
+        self.assertIn("docker compose up -d --build", result.stdout)
+
+    def test_existing_branch_is_rejected_before_creating_a_worktree(self) -> None:
+        self.git("branch", "feature/already-exists")
+
+        result = self.invoke("feature/already-exists")
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("branch already exists: feature/already-exists", result.stderr)
+        self.assertFalse(self.target("feature/already-exists").exists())
+
+    def test_pull_fast_forwards_current_checkout_before_creating_the_worktree(
+        self,
+    ) -> None:
+        updater = Path(self.temporary_directory.name) / "updater"
+        subprocess.run(
+            ["git", "clone", "--branch", "main", str(self.remote), str(updater)],
+            check=True,
+            stdout=subprocess.DEVNULL,
+        )
+        subprocess.run(
+            ["git", "-C", str(updater), "config", "user.name", "Test User"],
+            check=True,
+        )
+        subprocess.run(
+            ["git", "-C", str(updater), "config", "user.email", "test@example.com"],
+            check=True,
+        )
+        (updater / "from-remote.txt").write_text("remote change\n")
+        subprocess.run(
+            ["git", "-C", str(updater), "add", "from-remote.txt"], check=True
+        )
+        subprocess.run(
+            ["git", "-C", str(updater), "commit", "-m", "remote change"],
+            check=True,
+            stdout=subprocess.DEVNULL,
+        )
+        subprocess.run(["git", "-C", str(updater), "push"], check=True)
+
+        result = self.invoke("feature/from-remote")
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue((self.repository / "from-remote.txt").exists())
+        self.assertTrue(
+            (self.target("feature/from-remote") / "from-remote.txt").exists()
+        )
+
     def test_name_override_stays_inside_the_worktrees_directory(self) -> None:
         result = self.invoke("feature/nested", "--name", "sub/tree")
 
@@ -182,32 +244,35 @@ class WorktreeCreationTest(unittest.TestCase):
         self.assertTrue((absolute / ".env").exists())
 
     def test_base_ref_can_be_a_commit_sha(self) -> None:
-        base_commit = subprocess.run(
-            ["git", "rev-parse", "HEAD"],
-            cwd=self.repository,
-            text=True,
-            capture_output=True,
-            check=True,
-        ).stdout.strip()
+        base_commit = self.rev_parse(self.repository, "HEAD")
 
-        result = self.invoke("feature/from-sha", "--base", base_commit)
+        result = self.invoke("feature/from-sha", "-b", base_commit)
 
         self.assertEqual(result.returncode, 0, result.stderr)
-        head = subprocess.run(
-            ["git", "rev-parse", "HEAD"],
-            cwd=self.target("feature/from-sha"),
-            text=True,
-            capture_output=True,
-            check=True,
-        ).stdout.strip()
-        self.assertEqual(head, base_commit)
+        self.assertEqual(
+            self.rev_parse(self.target("feature/from-sha"), "HEAD"), base_commit
+        )
+
+    def test_base_flag_without_a_value_uses_the_current_branch(self) -> None:
+        self.git("commit", "--allow-empty", "-m", "advance main")
+        current_commit = self.rev_parse(self.repository, "HEAD")
+
+        result = self.invoke("feature/current-base", "-b")
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(
+            self.rev_parse(self.target("feature/current-base"), "HEAD"),
+            current_commit,
+        )
 
     def create(
         self, name: str, branch: str, base_ref: str = "main"
     ) -> subprocess.CompletedProcess[str]:
-        arguments = [branch, "--name", name]
+        arguments = [name]
+        if branch != name:
+            arguments += ["--branch", branch]
         if base_ref != "main":
-            arguments += ["--base", base_ref]
+            arguments += ["-b", base_ref]
         return self.invoke(*arguments)
 
     def invoke(self, *arguments: str) -> subprocess.CompletedProcess[str]:
@@ -221,7 +286,7 @@ class WorktreeCreationTest(unittest.TestCase):
 
     def start_create(self, name: str, branch: str) -> subprocess.Popen[str]:
         return subprocess.Popen(
-            ["python3", str(SCRIPT), branch, "--name", name],
+            ["python3", str(SCRIPT), name, "--branch", branch],
             cwd=self.repository,
             text=True,
             stdout=subprocess.PIPE,
@@ -235,6 +300,15 @@ class WorktreeCreationTest(unittest.TestCase):
             check=True,
             stdout=subprocess.DEVNULL,
         )
+
+    def rev_parse(self, directory: Path, revision: str) -> str:
+        return subprocess.run(
+            ["git", "rev-parse", revision],
+            cwd=directory,
+            text=True,
+            capture_output=True,
+            check=True,
+        ).stdout.strip()
 
     def target(self, name: str) -> Path:
         return self.repository.parent / "shop-worktrees" / name

@@ -99,8 +99,9 @@ docker compose up -d items-postgres redis kafka
 
 The script installs `common` to the local Maven repo, then starts Items via `./mvnw spring-boot:run`. DevTools monitors `target/classes` — when your IDE recompiles a modified `.java` file, the app context reloads without a full JVM restart.
 
-> **Multi-worktree host-run:** Create the worktree with the root
-> `scripts/create-worktree.py` command. It writes the Items and infrastructure
+> **Multi-worktree host-run:** Create the worktree with the root `wtc <name>`
+> command (use `wtc <name> false` to remain in the current checkout). It runs
+> `scripts/create-worktree.py`, fast-forwards the current checkout first, and writes the Items and infrastructure
 > host ports used by Docker Compose to the root `.env`. Automatic translation
 > of those values into host-run Spring variables is deliberately outside the
 > worktree-creation command.

@@ -2,39 +2,63 @@
 
 ## Create and start a worktree
 
-Run the single supported creation command from any checkout in the clone:
+Run the persisted Bash function from any checkout in the clone:
 
 ```bash
-scripts/create-worktree.py feature/payments
+wtc feature/payments
 ```
 
-The worktree directory defaults to the branch name. A relative name resolves
-against the main checkout's sibling `<repository>-worktrees/` directory, so
-`--name ../shared` creates a sibling of that directory; an absolute path is
-used as-is. A branch name containing `/` nests the directory the same way.
-Override the base ref (commit or branch name, default `main`) and the
-directory when needed:
+The name defaults to both the new branch and the worktree directory. `wtc`
+changes the calling shell into the new worktree by default; pass `false` as the
+second argument to stay where you are:
 
 ```bash
-scripts/create-worktree.py feature/payments --base origin/main
-scripts/create-worktree.py feature/payments --name payments
+wtc feature/payments false
 ```
 
-The selected base must contain `docker-compose.yml` with the project and ten
-port variables shown below. An older base without that contract is left as an
-incomplete worktree and reported with exact cleanup commands.
+A relative directory name resolves against the main checkout's sibling
+`<repository>-worktrees/` directory, so `--name ../shared` creates a sibling of
+that directory; an absolute path is used as-is. A branch name containing `/`
+nests the directory the same way. Override the base ref (commit or branch name,
+default `main`), branch, and directory when needed:
+
+```bash
+wtc feature/payments -b origin/main
+wtc feature/payments -b
+wtc payments --branch feature/payments --name payments
+```
+
+A bare `-b` branches from the current branch (`.`) instead of `main`. The
+underlying command is also available without the wrapper:
+`scripts/create-worktree.py feature/payments false`.
+If a different repository has no local script, `wtc` creates the same
+`<repository>-worktrees/<name>` directory on branch `<name>` with plain Git
+(default base `main`; `-b` selects another base) and neither allocates Compose
+ports nor fast-forwards the checkout.
+
+Before creating anything, the command runs `git pull --ff-only` on the current
+checkout's configured upstream. It stops if the checkout has no upstream or
+cannot be fast-forwarded; it never merges or rebases. Existing local branches
+and target paths are rejected, so a name collision cannot silently create a
+different worktree. The selected base must contain `docker-compose.yml` with
+the project and ten port variables shown below. An older base without that
+contract is left as an incomplete worktree and reported with exact cleanup
+commands.
 
 The command performs these steps in order:
 
-1. Validate the new branch, base ref, and target path.
-2. Create the Git branch and worktree.
-3. Lock allocation for the whole clone.
+1. Lock the clone and fast-forward the current checkout from its upstream.
+2. Validate the new branch, base ref, and target path.
+3. Create the Git branch and worktree.
 4. Verify that the checked-out Compose file consumes the generated values.
-5. Find a slot that no registered worktree claims and whose ports are free.
-6. Write the worktree's Docker Compose values to `.env`.
-7. Print the allocated ports and start command.
+5. Lock allocation for the whole clone.
+6. Find a slot that no registered worktree claims and whose ports are free.
+7. Write the worktree's Docker Compose values to `.env`.
+8. Print the allocated ports and start command; `wtc` then enters the target
+   unless `false` was passed.
 
-It does not start containers or create volumes. After it succeeds:
+It does not start containers or create volumes. After it succeeds with
+`false`, or when using the Python command directly:
 
 ```bash
 cd ../OnlineShop-full-stack-worktrees/feature/payments
