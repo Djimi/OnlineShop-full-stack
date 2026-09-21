@@ -95,7 +95,10 @@ const API_BASE_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:10000';
 
 ### Multi-Worktree (Per-Worktree Frontend)
 
-Create non-main worktrees with the root `scripts/create-worktree.py` command.
+Create non-main worktrees with the persisted root `wtc <name>` command (use
+`wtc <name> false` to remain in the current checkout); it runs
+`scripts/create-worktree.py` and fast-forwards the current checkout with
+`git pull --ff-only` first.
 The frontend's `VITE_API_URL` is then set to
 `http://localhost:<GATEWAY_PORT>` by the compose file via the allocated `.env`.
 The containerized frontend auto-connects to the correct worktree gateway.

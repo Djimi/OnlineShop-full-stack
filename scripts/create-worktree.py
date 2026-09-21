@@ -3,21 +3,22 @@
 
 Contract
 --------
-The command creates a new branch and a worktree directory of the same name
-(unless ``--name`` is given), then configures that worktree; it never starts
-or stops services. A relative directory name resolves against the main
-checkout's sibling ``<repository>-worktrees/`` directory; an absolute path is
-used as-is. The base ref may be a commit or a branch name. The selected base
-commit must contain a ``docker-compose.yml`` that consumes the generated
-project and port variables.
+The command fast-forwards the current checkout from its upstream, then creates
+a new branch and a worktree directory of the same name (unless ``--name`` is
+given), and configures that worktree; it never starts or stops services. A
+relative directory name resolves against the main checkout's sibling
+``<repository>-worktrees/`` directory; an absolute path is used as-is. The
+base ref may be a commit or a branch name; a bare ``-b`` selects the current
+branch. The selected base commit must contain a ``docker-compose.yml`` that
+consumes the generated project and port variables.
 
-Port allocation is serialized by a lock in Git's common directory. While the
-lock is held, the command validates managed claims in every registered
-worktree, starts at a deterministic slot derived from the new directory name,
-and moves forward until it finds an unclaimed 20-port block whose ports can all
-be bound locally. It then atomically writes the selected Compose project, slot,
-and ten currently assigned ports to a marked block in ``.env``. Content outside
-that managed block is preserved.
+Synchronization and port allocation are serialized by a lock in Git's common
+directory. While the lock is held for allocation, the command validates managed
+claims in every registered worktree, starts at a deterministic slot derived
+from the new directory name, and moves forward until it finds an unclaimed
+20-port block whose ports can all be bound locally. It then atomically writes
+the selected Compose project, slot, and ten currently assigned ports to a
+marked block in ``.env``. Content outside that managed block is preserved.
 
 If setup fails after Git creates the worktree, the worktree is deliberately
 kept for inspection and explicit recovery commands are printed. Claims are
@@ -36,6 +37,8 @@ import socket
 import subprocess
 import sys
 import tempfile
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 
 BASE_PORT = 20_000
@@ -63,15 +66,17 @@ def main() -> int:
     """Run the creation workflow in its user-visible order."""
 
     args = parse_arguments()
-    directory_name = args.name or args.branch
+    branch = args.branch or args.worktree_name
+    directory_name = args.directory_name or args.worktree_name
 
     repository = find_repository()
+    synchronize_checkout(repository)
     base_commit = resolve_base_commit(repository, args.base)
-    validate_new_branch(repository, args.branch)
+    validate_new_branch(repository, branch)
     target = resolve_target(repository, directory_name)
     ensure_target_is_available(target)
 
-    create_worktree(repository, target, args.branch, base_commit)
+    create_worktree(repository, target, branch, base_commit)
 
     try:
         validate_compose_contract(target)
@@ -86,42 +91,72 @@ def main() -> int:
             f"ERROR: worktree created, but environment setup failed: {error}",
             file=sys.stderr,
         )
-        print_recovery(repository, target, args.branch)
+        print_recovery(repository, target, branch)
         return 1
 
-    print_result(target, slot)
+    print_result(target, slot, args.change_directory, args.print_path)
     return 0
 
 
 def parse_arguments() -> argparse.Namespace:
-    """Parse the new branch, optional base ref, and worktree directory name."""
+    """Parse the worktree name, optional branch, base, and shell behavior."""
 
     parser = argparse.ArgumentParser(
         description=(
-            "Create a branch and a worktree directory of the same name "
+            "Fast-forward the current checkout, then create a branch and a "
+            "worktree directory of the same name "
             "(relative to the main checkout's sibling worktrees directory), "
             "reserve a unique 20-port block, and write its Docker Compose "
             "values to .env."
         )
     )
     parser.add_argument(
-        "branch",
-        help="new branch name; the worktree directory defaults to this name",
+        "worktree_name",
+        help="worktree name; the new branch and directory default to this name",
     )
     parser.add_argument(
+        "change_directory",
+        nargs="?",
+        type=parse_boolean,
+        default=True,
+        metavar="CHANGE_DIRECTORY",
+        help="whether the caller should enter the worktree (true/false; default: true)",
+    )
+    parser.add_argument(
+        "-b",
         "--base",
         metavar="REF",
+        nargs="?",
+        const=".",
         default="main",
-        help="base commit or branch to branch from (default: main)",
+        help="base commit or branch to branch from (default: main); use -b "
+        "without a value to branch from the current branch",
+    )
+    parser.add_argument(
+        "--branch",
+        metavar="BRANCH",
+        help="new branch name when it differs from the worktree name",
     )
     parser.add_argument(
         "--name",
         metavar="PATH",
         help="worktree directory path; relative paths resolve against the "
         "sibling worktrees directory, absolute paths are used as-is "
-        "(default: the branch name)",
+        "(default: the worktree name)",
+        dest="directory_name",
     )
+    parser.add_argument("--print-path", action="store_true", help=argparse.SUPPRESS)
     return parser.parse_args()
+
+
+def parse_boolean(value: str) -> bool:
+    """Parse the explicit true/false value used by the shell wrapper."""
+
+    if value.lower() == "true":
+        return True
+    if value.lower() == "false":
+        return False
+    raise argparse.ArgumentTypeError("expected true or false")
 
 
 # Git worktree creation -----------------------------------------------------
@@ -138,11 +173,37 @@ def find_repository() -> Path:
         ) from error
 
 
+@contextmanager
+def worktree_lock(repository: Path) -> Iterator[None]:
+    """Lock operations that must be serialized across this clone."""
+
+    git_common_directory = Path(
+        git_output(
+            repository, "rev-parse", "--path-format=absolute", "--git-common-dir"
+        )
+    )
+    lock_path = git_common_directory / "worktree-port-allocation.lock"
+
+    with lock_path.open("w") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        yield
+
+
+def synchronize_checkout(repository: Path) -> None:
+    """Fast-forward the current checkout from its configured upstream."""
+
+    with worktree_lock(repository):
+        print("Updating the current checkout from its upstream...", flush=True)
+        subprocess.run(["git", "pull", "--ff-only"], cwd=repository, check=True)
+
+
 def resolve_base_commit(repository: Path, base_ref: str) -> str:
     """Resolve the requested base ref to one immutable commit."""
 
+    revision = "HEAD" if base_ref == "." else base_ref
+
     try:
-        return git_output(repository, "rev-parse", "--verify", f"{base_ref}^{{commit}}")
+        return git_output(repository, "rev-parse", "--verify", f"{revision}^{{commit}}")
     except RuntimeError as error:
         raise SystemExit(
             f"ERROR: base ref does not resolve to a commit: {base_ref}"
@@ -150,7 +211,7 @@ def resolve_base_commit(repository: Path, base_ref: str) -> str:
 
 
 def validate_new_branch(repository: Path, branch: str) -> None:
-    """Reject branch names that Git cannot create."""
+    """Reject invalid or already-existing local branch names."""
 
     result = subprocess.run(
         ["git", "check-ref-format", "--branch", branch],
@@ -161,6 +222,14 @@ def validate_new_branch(repository: Path, branch: str) -> None:
     )
     if result.returncode != 0:
         raise SystemExit(f"ERROR: invalid branch name: {branch}")
+
+    existing = subprocess.run(
+        ["git", "show-ref", "--verify", "--quiet", f"refs/heads/{branch}"],
+        cwd=repository,
+        check=False,
+    )
+    if existing.returncode == 0:
+        raise SystemExit(f"ERROR: branch already exists: {branch}")
 
 
 def resolve_target(repository: Path, directory_name: str) -> Path:
@@ -219,15 +288,7 @@ def validate_compose_contract(target: Path) -> None:
 def allocate_ports(repository: Path, target: Path, directory_name: str) -> int:
     """Select and persist one slot while holding the clone-wide lock."""
 
-    git_common_directory = Path(
-        git_output(
-            repository, "rev-parse", "--path-format=absolute", "--git-common-dir"
-        )
-    )
-    lock_path = git_common_directory / "worktree-port-allocation.lock"
-
-    with lock_path.open("w") as lock:
-        fcntl.flock(lock, fcntl.LOCK_EX)
+    with worktree_lock(repository):
         claimed_slots = read_claimed_slots(repository, target)
         slot = find_available_slot(directory_name, claimed_slots)
         write_environment(target / ".env", slot)
@@ -466,14 +527,23 @@ Use --force only after checking that the worktree contains nothing valuable.
     )
 
 
-def print_result(target: Path, slot: int) -> None:
+def print_result(
+    target: Path, slot: int, change_directory: bool, print_path: bool
+) -> None:
     """Show the selected ports and the next command to run."""
 
     first_port = BASE_PORT + slot * BLOCK_SIZE
     print(f"\nCreated worktree with port slot {slot}:")
     for offset, name in enumerate(PORT_NAMES):
         print(f"  {name:<22} {first_port + offset}")
-    print(f"\nNext:\n  cd {shlex.quote(str(target))}\n  docker compose up -d --build")
+
+    next_commands = []
+    if change_directory:
+        next_commands.append(f"cd {shlex.quote(str(target))}")
+    next_commands.append("docker compose up -d --build")
+    print("\nNext:\n  " + "\n  ".join(next_commands))
+    if print_path and change_directory:
+        print(f"WORKTREE_PATH={target}")
 
 
 if __name__ == "__main__":

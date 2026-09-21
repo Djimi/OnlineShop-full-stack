@@ -189,7 +189,10 @@ operational estimates, not timeout guarantees.
 
 ## Multi-Worktree Ports
 
-Create non-main worktrees with the root `scripts/create-worktree.py` command.
+Create non-main worktrees with the persisted root `wtc <name>` command (use
+`wtc <name> false` to remain in the current checkout); it runs
+`scripts/create-worktree.py` and fast-forwards the current checkout with
+`git pull --ff-only` first.
 It writes `GATEWAY_PORT` for Docker Compose to the root `.env`. Automatic
 translation of that value into host-run Spring variables is deliberately
 outside the worktree-creation command.

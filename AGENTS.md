@@ -102,21 +102,32 @@ When using Maven commands you MUST use the Maven wrapper (`./mvnw`) inside the s
 ### Create a worktree
 
 ```bash
-scripts/create-worktree.py <branch> [--base <ref>] [--name <dir-name>]
+wtc <name> [true|false] [-b [<ref>]] [--branch <branch>] [--name <dir-name>]
 ```
 
-This is the only supported creation path. In order, it validates the request,
-creates the branch and worktree directory, verifies that the selected base uses
-the worktree Compose variables, atomically writes a managed `.env` block with
-the Compose project, slot, and ten unique host ports, then prints the start
-command. The worktree directory defaults to the branch name; a relative
-`--name` resolves against the main checkout's sibling
+`wtc` is the persisted Bash function in the dotfiles checkout. It runs the
+repository's `scripts/create-worktree.py` when present, then changes the
+calling shell into the new worktree by default. Use `wtc <name> false` to keep
+the current directory. Direct use of the Python command is also supported, but
+an external Python process cannot change its caller's directory.
+
+The command first runs `git pull --ff-only` on the current checkout, then
+validates the request, creates the branch and worktree directory, verifies that
+the selected base uses the worktree Compose variables, atomically writes a
+managed `.env` block with the Compose project, slot, and ten unique host ports,
+then prints the start command. The current checkout must have an upstream that
+can be fast-forwarded; no merge or rebase is attempted. The worktree directory
+defaults to the name; a relative name resolves against the main checkout's
 `<repository>-worktrees/` directory and an absolute path is used as-is.
-`--base` accepts a commit or branch name (default: `main`). The allocator
-checks the slot's complete 20-port block, so ten additional offsets remain
-reserved for future services. It does not start containers or create volumes.
-Do not create development worktrees with a bare `git worktree add`; that
-bypasses port allocation.
+`-b` (`--base`) accepts a commit or branch name and defaults to `main`; bare
+`-b` branches from the current branch. `--branch` overrides the branch name.
+Existing local branches and target paths are rejected. The allocator checks the
+slot's complete 20-port block, so ten additional offsets remain reserved for
+future services. It does not start containers or create volumes.
+Use `wtc` instead of a bare `git worktree add`; for repositories without the
+local script, the fallback creates the same `<repository>-worktrees/<name>`
+directory on branch `<name>` with plain Git, without fast-forwarding and
+without Compose port allocation.
 
 ### Multi-worktree guide
 

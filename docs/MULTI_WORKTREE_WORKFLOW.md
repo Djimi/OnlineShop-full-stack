@@ -3,13 +3,17 @@
 ## Normal path
 
 ```bash
-scripts/create-worktree.py feature/payments
+wtc feature/payments
 ```
 
 The command's control flow mirrors the code:
 
 ```text
-parse and validate the request
+parse the request and find the repository
+        ↓
+lock the clone and fast-forward the current checkout
+        ↓
+resolve and validate the base, branch, and target
         ↓
 create the Git branch and worktree
         ↓
@@ -27,9 +31,11 @@ claimed slot or occupied port? ── yes ──► try the next slot
 atomically write the managed .env block
         ↓
 print the ports and Docker Compose command
+        ↓
+wtc enters the worktree unless false was requested
 ```
 
-After success:
+After success with `false`, or when using the Python command directly:
 
 ```bash
 cd ../OnlineShop-full-stack-worktrees/feature/payments

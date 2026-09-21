@@ -6,12 +6,14 @@ Provide one readable command that creates a development worktree and its Docker
 Compose port configuration:
 
 ```bash
-scripts/create-worktree.py <path-or-name> -b <new-branch> [base-ref]
+wtc <name> [true|false] [-b [<ref>]] [--branch <branch>] [--name <path>]
 ```
 
-The implementation should read from top to bottom like the operation it
-performs. It replaces the Bash wrapper, maintenance CLI, allocation library,
-and legacy modes rather than maintaining compatibility with them.
+The persisted Bash function changes the caller's directory after the Python
+command succeeds. The implementation should read from top to bottom like the
+operation it performs. It keeps the Python allocator as the repository-local
+implementation and removes the need to remember its less-common options for
+normal worktree creation.
 
 ## Design
 
@@ -49,6 +51,8 @@ and legacy modes rather than maintaining compatibility with them.
 - [x] Update root, service, workflow, troubleshooting, and port documentation.
 - [x] Complete independent code review and apply only comments that improve
       correctness or readability without restoring removed complexity.
+- [x] Add the persisted `wtc` Bash wrapper, explicit branch/name defaults,
+      fast-forward-only synchronization, and optional caller-directory change.
 - [x] Record repository-wide script readability and review rules in
       `docs/SCRIPT_GUIDELINES.md` and link them from agent and testing guidance.
 
