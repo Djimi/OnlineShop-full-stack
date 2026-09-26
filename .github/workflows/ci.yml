@@ -150,7 +150,7 @@ jobs:
         if: github.event_name == 'pull_request'
         working-directory: e2e-tests
         env:
-          E2E_BASE_URL: http://localhost:10000
+          E2E_BASE_URL: http://127.0.0.1:1
         run: ./mvnw --batch-mode clean test
 
       - name: Upload PR E2E test reports
