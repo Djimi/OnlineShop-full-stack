@@ -60,6 +60,83 @@ When using Maven commands you MUST use the Maven wrapper (`./mvnw`) inside the s
 2. If available, also run E2E tests from `e2e-tests/`: `./mvnw clean test`
 3. Only commit if ALL tests pass.
 
+## GitHub Actions CI
+
+The unfiltered `push` and `pull_request` events run three independent jobs with
+read-only repository access. No job waits for another, so an image build still
+runs when Java or frontend verification fails.
+
+```text
+push or pull_request
+  -> Java matrix: Auth | API Gateway | common -> Items
+  -> Frontend: Node 24 -> npm ci -> lint -> production build
+  -> Images and PR E2E: build four application images
+       -> pull_request only: Compose -> readiness -> API E2E -> evidence -> cleanup
+```
+
+Java uses Temurin 25. Auth and API Gateway each run `./mvnw --batch-mode clean
+verify` from their own module root. The `common -> Items` lane runs
+`common/./mvnw --batch-mode clean install`, then `Items/./mvnw --batch-mode
+clean verify`, on the same runner. Frontend uses Node 24 with `npm ci`,
+`npm run lint`, and `npm run build` from `frontend/`; it has no current
+unit-test script.
+
+On every push and PR, the independent image job runs this root Compose command:
+
+```bash
+docker compose build auth-service items-service api-gateway frontend
+```
+
+It builds Auth, Items, API Gateway, and frontend images from source. `common`
+is library-only. The images are neither published nor deployed. Image packaging
+does not prove tests passed: Java Dockerfiles use `-DskipTests`, and the
+frontend image starts Vite development mode rather than creating the production
+bundle. Docker build cache, Java/frontend job caches, and the PR E2E host Maven
+repository are separate; no cache or images are transferred between jobs.
+
+Only pull requests continue on the image job's runner, where the just-built
+images are available. The sequence is: set up Java 25 without a Maven cache ->
+`docker compose up -d --no-build --wait --wait-timeout 300` -> bounded gateway
+`/actuator/health` and frontend `/` HTTP probes -> API E2E from `e2e-tests/`
+with `E2E_BASE_URL=http://localhost:10000` -> reports and diagnostics ->
+`docker compose down -v --remove-orphans` under `always()`.
+
+The Java matrix always uploads narrowly scoped Surefire/Failsafe reports under
+the unique `java-test-reports-<lane>` artifact names; PR E2E uploads
+`pr-e2e-test-reports`. PR diagnostics always show a bounded Compose status and,
+on failure, bounded application logs with credential-bearing lines redacted.
+Cleanup is always attempted for PR Compose runs. Current E2E covers the three
+API tests through the gateway, Auth, and Items. It does not browser-test the
+frontend or directly test each infrastructure service or administrative UI.
+
+To reproduce the CI checks locally, keep every Maven wrapper invocation at its
+module root:
+
+```bash
+(cd Auth && ./mvnw --batch-mode clean verify)
+(cd api-gateway && ./mvnw --batch-mode clean verify)
+(cd common && ./mvnw --batch-mode clean install)
+(cd Items && ./mvnw --batch-mode clean verify)
+(cd frontend && npm ci && npm run lint && npm run build)
+docker compose build auth-service items-service api-gateway frontend
+docker compose up -d --no-build --wait --wait-timeout 300
+gateway_port="$(docker compose port api-gateway 10000 | awk -F: '{print $NF}')"
+frontend_port="$(docker compose port frontend 5173 | awk -F: '{print $NF}')"
+gateway_url="http://127.0.0.1:${gateway_port}"
+frontend_url="http://127.0.0.1:${frontend_port}"
+curl --fail --silent --show-error "${gateway_url}/actuator/health"
+curl --fail --silent --show-error "${frontend_url}/"
+(cd e2e-tests && E2E_BASE_URL="${gateway_url}" ./mvnw --batch-mode clean test)
+docker compose down -v --remove-orphans
+```
+
+The Compose startup, readiness, E2E, diagnostics, and cleanup commands are
+PR-only CI behavior; running them locally is optional when an affected change
+needs full-stack validation. The hosted workflow deliberately uses canonical
+`localhost:10000` and `localhost:5173` on clean runners. The local snippet
+instead queries the active published Compose ports, so it works with both those
+defaults and generated worktree ports without sourcing `.env` into the shell.
+
 ## Quick Reference
 
 ### Services & Ports
