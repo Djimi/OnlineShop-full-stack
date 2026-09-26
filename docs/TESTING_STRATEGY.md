@@ -28,6 +28,40 @@ Tests for repository automation must also follow the story-oriented guidance in
 behavior, keep scenario setup explicit, and avoid mirroring implementation
 helpers or retaining coverage for removed modes.
 
+## GitHub Actions Checks
+
+Every push and pull request runs independent Java, frontend, and image/PR-E2E
+jobs. The Java matrix uses Temurin 25: Auth and API Gateway each run
+`./mvnw --batch-mode clean verify` at their module root, while one runner runs
+`common` `clean install` before Items `clean verify`. Frontend uses Node 24 and
+runs `npm ci`, `npm run lint`, and `npm run build` from `frontend/`. There is no
+current frontend unit-test script.
+
+The image job runs `docker compose build auth-service items-service api-gateway
+frontend` on both events. This packages the four deployable applications only;
+`common` is a library. Packaging is not verification: each Java Dockerfile uses
+`-DskipTests`, and the frontend Dockerfile runs Vite development mode instead
+of the production-build command. Images are not published or deployed, and the
+image job has no dependency on the Java or frontend jobs. CI job caches and
+Docker build cache are not shared with the PR E2E Maven invocation.
+
+Only a pull request starts the full default Compose stack after image building:
+
+```text
+Java 25 without Maven cache -> docker compose up -d --no-build --wait --wait-timeout 300
+-> bounded gateway health and frontend-root probes -> API E2E -> reports/diagnostics
+-> always: docker compose down -v --remove-orphans
+```
+
+The E2E command is run from `e2e-tests/` with
+`E2E_BASE_URL=http://localhost:10000` and is limited to the current three API
+tests through the gateway, Auth, and Items. It does not browser-test the
+frontend or directly test every infrastructure service or administrative UI.
+PR runs retain narrowly scoped Surefire/Failsafe report artifacts, a bounded
+Compose status, and bounded redacted application logs on failure; cleanup is
+always attempted. No hosted run or artifact inspection should be inferred from
+these documented commands.
+
 Aggregate frontend content checksums must be path-independent: hash
 newline-terminated per-file SHA-256 hex values sorted by canonical relative
 path, never tool output containing environment-specific path prefixes.
@@ -150,3 +184,33 @@ cd e2e-tests/ && ./mvnw clean test
 ./mvnw clean verify jacoco:report
 # Report at: target/site/jacoco/index.html
 ```
+
+### Local CI Reproduction
+
+Run the following commands from the repository root. Each Maven wrapper remains
+inside its module root, matching CI:
+
+```bash
+(cd Auth && ./mvnw --batch-mode clean verify)
+(cd api-gateway && ./mvnw --batch-mode clean verify)
+(cd common && ./mvnw --batch-mode clean install)
+(cd Items && ./mvnw --batch-mode clean verify)
+(cd frontend && npm ci && npm run lint && npm run build)
+docker compose build auth-service items-service api-gateway frontend
+docker compose up -d --no-build --wait --wait-timeout 300
+gateway_port="$(docker compose port api-gateway 10000 | awk -F: '{print $NF}')"
+frontend_port="$(docker compose port frontend 5173 | awk -F: '{print $NF}')"
+gateway_url="http://127.0.0.1:${gateway_port}"
+frontend_url="http://127.0.0.1:${frontend_port}"
+curl --fail --silent --show-error "${gateway_url}/actuator/health"
+curl --fail --silent --show-error "${frontend_url}/"
+(cd e2e-tests && E2E_BASE_URL="${gateway_url}" ./mvnw --batch-mode clean test)
+docker compose down -v --remove-orphans
+```
+
+The commands from Compose startup onward reproduce the PR-only full-stack path.
+Run the cleanup command after any local Compose attempt, including a failed
+readiness or E2E check. GitHub-hosted CI uses canonical `localhost:10000` and
+`localhost:5173` on a clean runner. Local reproduction queries the active
+Compose mappings, so the same commands honor generated worktree ports and
+default ports without sourcing `.env` into the shell.
