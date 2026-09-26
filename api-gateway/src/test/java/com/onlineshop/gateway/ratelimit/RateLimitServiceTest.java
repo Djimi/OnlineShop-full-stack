@@ -132,37 +132,6 @@ class RateLimitServiceTest {
     }
 
     @Test
-    void cloudFrontViewerAddressIsIgnoredForUntrustedPeer() {
-        RateLimitService service = buildService(bucketBuilderReturning(mock(BucketProxy.class)));
-        MockHttpServletRequest request = new MockHttpServletRequest("GET", "/items");
-        request.setRemoteAddr("198.51.100.7");
-        request.addHeader("CloudFront-Viewer-Address", "203.0.113.99:53049");
-
-        assertThat(service.resolveClientIp(request)).isEqualTo("198.51.100.7");
-    }
-
-    @Test
-    void cloudFrontViewerAddressTakesPrecedenceAndStripsPort() {
-        RateLimitService service = buildService(bucketBuilderReturning(mock(BucketProxy.class)));
-        MockHttpServletRequest request = new MockHttpServletRequest("GET", "/items");
-        request.setRemoteAddr("10.0.0.4");
-        request.addHeader("X-Forwarded-For", "198.51.100.42, 10.0.0.4");
-        request.addHeader("CloudFront-Viewer-Address", "203.0.113.99:53049");
-
-        assertThat(service.resolveClientIp(request)).isEqualTo("203.0.113.99");
-    }
-
-    @Test
-    void cloudFrontViewerAddressStripsBracketsAndPortFromIpv6() {
-        RateLimitService service = buildService(bucketBuilderReturning(mock(BucketProxy.class)));
-        MockHttpServletRequest request = new MockHttpServletRequest("GET", "/items");
-        request.setRemoteAddr("10.0.0.4");
-        request.addHeader("CloudFront-Viewer-Address", "[2001:db8::1]:443");
-
-        assertThat(service.resolveClientIp(request)).isEqualTo("2001:db8::1");
-    }
-
-    @Test
     void failedAuthBucketUsesSeparateKey() {
         BucketProxy bucket = mock(BucketProxy.class);
         RemoteBucketBuilder<String> remoteBuilder = bucketBuilderReturning(bucket);

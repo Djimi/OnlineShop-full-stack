@@ -2,7 +2,6 @@
  * Environment Configuration for Performance Tests
  *
  * Usage: k6 run -e ENV=local smoke-1vu.js
- *        k6 run -e ENV=staging smoke-1vu.js
  */
 
 export const ENVIRONMENTS = {
@@ -13,10 +12,6 @@ export const ENVIRONMENTS = {
     docker: {
         authServiceUrl: 'http://auth-service:9001',
         name: 'Docker Compose',
-    },
-    staging: {
-        authServiceUrl: 'http://staging.onlineshop.com:9001',
-        name: 'Staging',
     },
 };
 

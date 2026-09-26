@@ -136,7 +136,7 @@ tests/performance/
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `ENV` | `local` | Environment to test (`local`, `docker`, `staging`) |
+| `ENV` | `local` | Environment to test (`local`, `docker`) |
 
 Example:
 ```bash
@@ -257,10 +257,6 @@ docker run --rm -i \
    k6 run --out json=reports/current.json load.js
    # Compare manually or with a script
    ```
-
-### Continuous Integration
-
-See the plan document for GitHub Actions integration examples.
 
 ## Contributing
 

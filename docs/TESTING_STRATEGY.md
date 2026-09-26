@@ -72,10 +72,6 @@ Test business logic in isolation. Mock all dependencies. These are your primary 
 
 **Domain events:** When testing code that emits domain events, assert event properties — never only the event type. The right event type with wrong data is still a bug.
 
-**Real time:** Unit tests must never burn real time in retry/backoff loops. Bounded retries keep their attempt budgets in tests, but the sleep must be injectable or disabled (e.g., the `delivery/tests/conftest.py` autouse fixture no-ops `ecr._sleep`; the production delay stays 5s/6 attempts). Test fakes must also mirror the real AWS response shape — `describe_images` responses carry `imageDigest` plus the `imageTags` list on `imageDetails` entries — or retry logic keyed on those fields never converges and tests fail after minutes of wall time.
-
-**ECR digest resolution:** `aws ecr batch-get-image` returns a null `imageDigest` in the image `imageId` for multi-arch OCI index manifests (`application/vnd.oci.image.index.v1+json`), so tag/digest resolution must go through `describe_images` (`imageDetails[0].imageDigest`); `batch-get-image` remains only for fetching manifest bytes (e.g., server-side tag minting).
-
 ### Integration Tests
 Verify components work together with real dependencies. Use Testcontainers for PostgreSQL and Redis—never H2 or in-memory substitutes. Test repository queries, controller request handling, and database constraints. These catch issues unit tests miss.
 
@@ -138,118 +134,7 @@ File naming:
 
 Resist the urge to write production code without a failing test first. The discipline pays dividends in design quality and regression safety.
 
-## References
-
-<!-- | What | Where |
-|------|-------|
-| Running tests | [CLAUDE.md](../../CLAUDE.md) — Essential Commands |
-| Unit test example | `Items/src/test/java/**/ItemServiceTest.java` |
-| Integration test example | `Items/src/integrationTest/java/**/*IntegrationTest.java` |
-| E2E tests | `e2e-tests/src/test/java/` |
-| JaCoCo configuration | Service `pom.xml` files — search for `jacoco-maven-plugin` |
-| Test data utilities | `*/src/test/java/**/testutil/` | -->
-
-## Release Contract, Candidate Evidence, ECR Release Tagging, Promotion, Production Hardening & Traceability Gates (Pass 3)
-
-The release tooling has six independent offline verification gates (read
-`plans/AUTOMATIC-BUILDS-AND-DEPLOY/release/README.md` and
-`docs/CI_CD_GOTCHAS.md` for full context):
-
-```bash
-# 3.1 manifest contract: validator, fixtures, checksums, input helpers
-bash tests/scripts/release_contract_test.sh
-
-# 3.2 candidate evidence: Python suites, workflow static checks,
-# reproducible frontend packaging, safe extraction, publish/reuse/fail-closed,
-# SBOM stub, evidence→manifest flow, artifact identity/digest recording
-bash tests/scripts/candidate_evidence_test.sh
-
-# 3.3 ECR release tagging, immutability, least privilege: immutable-repo
-# apply/read-back with drift fail-closed, server-side digest-preserving
-# mint/reuse/conflict/dry-run promotion, release-identity proceed/resume/
-# collision, IAM + OIDC trust policy validation, workflow job-permission and
-# tag-family static checks, mandatory profile/region + read-back scan
-bash tests/scripts/ecr_release_tagging_test.sh
-
-# 3.4 controlled staging-to-production promotion: the release_contract.promotion
-# decision layer (dispatch/run/ancestry/preflight/snapshot/plan/waiter/
-# frontend/verify/finalize/compensate), promote-release.yml static checks
-# (production Environment, shared non-cancelling production-mutation
-# concurrency, no rebuild, preflight repeated post-approval, compensate on
-# failure, SHA-pinned Actions), and stateful AWS + gh stub runs of
-# promotion-preflight/snapshot-production/verify-production/finalize-release/
-# compensate-production/deploy-production dry-run (fail-closed on unreviewed
-# schema changes, run/ancestry drift, digest/marker/ALB drift, publication
-# before verification, release-tag conflicts), plus a mandatory profile/region
-# + mutation read-back + no-secrets static scan
-bash tests/scripts/promotion_test.sh
-
-# 3.5 production hardening: task-definition + service-config fixtures
-# (CPU/memory, awsvpc, named Service Connect ports, logs, health, graceful
-# termination, digest-only images, versionConsistency, circuit breaker +
-# safe rolling), sanitized task-definition transforms (image-only diff, full-
-# ARN secrets[].valueFrom, no plaintext leaks), stateful AWS-stub runs of the
-# read-only production inventory, production/staging separation (identity +
-# topology), frontend S3 REST + OAC verify, CloudTrail coverage, lifecycle
-# environment guards, and the OAC migration tool with per-step read-back
-bash tests/scripts/production_hardening_test.sh
-
-# 3.7 release traceability: the four read-only lookups (commit/release/
-# running/digest) + the manifest<->ECR<->ECS<->frontend consistency audit via
-# release/bin/trace.sh and release_contract.traceability, offline fixture
-# coverage of consistent/paused/drift state (ECR tag digest, running digest,
-# frontend marker), newest-first ordering independent of index order, mixed/
-# incomplete running digest sets, sha-tag digest mismatch, candidate-run
-# conflicts, by-version immutable prefix-marker verification, malformed-marker
-# and partial describe-services failures closing as OBSERVED_READ_ERROR, a
-# stateful AWS-stub run of the live gather path proving the mandatory identity
-# preflight and read-only behavior, the read-only GitHub Releases index auto-
-# fetch (exact release-manifest.json asset selection), and missing/ambiguous/
-# contradictory fail-closed
-bash tests/scripts/release_traceability_test.sh
-```
-
-All six require Python 3.10+ with `pip install -r
-plans/AUTOMATIC-BUILDS-AND-DEPLOY/release/requirements.txt`
-(`jsonschema==4.26.0`, `PyYAML==6.0.3`) and optionally `ruff` + `shellcheck`.
-Live AWS/GitHub evidence (ECR repository settings read-back, real
-put-image behavior, the real OIDC environment subject, IAM Access Analyzer,
-the real production inventory read-back, the live frontend OAC migration, real
-CloudTrail read-back, the real traceability lookups/audit against live
-production, and the real owner-approved promotion — the `production`
-Environment approval, ECR/ECS/S3/CloudFront mutations and read-backs, and the
-GitHub Release publication) is verified in the consolidated Pass 3 verification
-pass, not by these offline gates.
-
-## Pass 3R.1 CI security and promotion handoff gate (offline)
-
-The 3R.1 gate covers the workflow security boundary and the exact candidate →
-snapshot → deployment → official handoff. It executes only local static checks
-and stateful AWS/GitHub stubs; it does not start staging or contact live AWS,
-GitHub, or production. The checks prove that GitHub contexts reach shell only
-through step `env`, hostile values stay inert, permissions are job-scoped,
-candidate evidence is bound to the exact run/attempt and optional `source_sha`,
-the real GitHub `head_branch: "main"` / attempt-jobs API shape is handled, the
-snapshot binds the actual live release/tag/immutable frontend prefix and
-full-object SHA-256 checksum, and publication/restore/compensation request
-SHA-256 object checksums.
-
-```bash
-bash tests/scripts/ci_security_contract_test.sh
-bash tests/scripts/promotion_handoff_test.sh
-bash tests/scripts/promotion_test.sh
-bash tests/scripts/rollback_test.sh
-```
-
-`promotion_handoff_test.sh` runs the real shell wrappers against a stateful
-offline stub and checks that the candidate remains unchanged, the snapshot
-provides current task-definition ARNs, deployment emits final ARNs, only the
-deployment manifest becomes official, verification precedes finalization, and
-the finalization decision is dry-run/idempotent. The structural PR/trusted-job
-split is deferred to 3R.2/3R.3, the live role cutover to 3R.9, and environment
-approval, AWS mutations, and GitHub Release publication to 3R.10.
-
-### Running Tests
+## Running Tests
 
 > **Important:** Always run from the target service directory — NOT from a parent or sibling directory. Do NOT use `-f ../Service/pom.xml` patterns.
 

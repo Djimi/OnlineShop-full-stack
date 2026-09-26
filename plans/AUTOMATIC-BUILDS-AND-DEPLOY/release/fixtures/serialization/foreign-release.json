@@ -1,6 +1,0 @@
-[
-  { "event": "acquire", "run": 100 },
-  { "event": "acquire", "run": 200 },
-  { "event": "release", "run": 200 },
-  { "event": "release", "run": 100 }
-]
