@@ -48,6 +48,33 @@ docker compose up -d --build items-service
 
 `Items/Dockerfile` uses the repository root as its build context, installs `common`, and packages Items inside Docker. A host-side `target/*.jar` is not required. Use `docker compose up -d --build` to rebuild and start the complete stack.
 
+## CI Verification
+
+On every push and pull request, the independent `common -> Items` Java lane
+uses Temurin 25 and preserves module-root wrappers on one runner:
+
+```bash
+(cd common && ./mvnw --batch-mode clean install)
+(cd Items && ./mvnw --batch-mode clean verify)
+```
+
+The Java matrix uploads narrowly scoped Surefire/Failsafe reports under a
+unique lane-specific artifact name. Separately, the root image job builds Auth,
+Items, API Gateway, and frontend images with `docker compose build
+auth-service items-service api-gateway frontend`; `common` remains a library
+rather than an image. The Items Docker build uses `-DskipTests`, so image
+packaging is not test verification. Images are neither published nor deployed,
+and this image job does not wait for Java or frontend results.
+
+Only pull requests use the image job's locally built images to start the full
+Compose stack with `docker compose up -d --no-build --wait --wait-timeout 300`.
+After bounded gateway and frontend readiness checks, the current three API E2E
+tests run through the gateway, Auth, and Items. They do not browser-test the
+frontend or directly test each infrastructure service or administrative UI.
+PR E2E reports, bounded Compose status, and redacted bounded application logs
+on failure are retained before `docker compose down -v --remove-orphans` is
+always attempted.
+
 ## Dev Mode (Hot Restart with DevTools)
 
 Items has `spring-boot-devtools` for fast development. Edit a Java file, save, and DevTools restarts the application context automatically (~2 seconds).
