@@ -112,7 +112,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Build application images
-        run: docker compose build f3-intentionally-missing-service
+        run: docker compose build auth-service items-service api-gateway frontend
 
       - name: Set up Temurin Java 25 for E2E
         if: github.event_name == 'pull_request'
