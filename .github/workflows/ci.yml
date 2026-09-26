@@ -1,0 +1,180 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  java:
+    name: Java (${{ matrix.lane }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        lane:
+          - Auth
+          - api-gateway
+          - common+Items
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Temurin Java 25
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '25'
+          cache: maven
+          cache-dependency-path: |
+            Auth/pom.xml
+            Auth/.mvn/wrapper/maven-wrapper.properties
+            api-gateway/pom.xml
+            api-gateway/.mvn/wrapper/maven-wrapper.properties
+            common/pom.xml
+            common/.mvn/wrapper/maven-wrapper.properties
+            Items/pom.xml
+            Items/.mvn/wrapper/maven-wrapper.properties
+
+      - name: Verify Auth
+        if: matrix.lane == 'Auth'
+        working-directory: Auth
+        run: ./mvnw --batch-mode clean verify
+
+      - name: Verify API Gateway
+        if: matrix.lane == 'api-gateway'
+        working-directory: api-gateway
+        run: ./mvnw --batch-mode clean verify
+
+      - name: Install common library
+        if: matrix.lane == 'common+Items'
+        working-directory: common
+        run: ./mvnw --batch-mode clean install
+
+      - name: Verify Items
+        if: matrix.lane == 'common+Items'
+        working-directory: Items
+        run: ./mvnw --batch-mode clean verify
+
+      - name: Upload Java test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: java-test-reports-${{ matrix.lane }}
+          path: |
+            Auth/target/surefire-reports/
+            Auth/target/failsafe-reports/
+            api-gateway/target/surefire-reports/
+            api-gateway/target/failsafe-reports/
+            common/target/surefire-reports/
+            common/target/failsafe-reports/
+            Items/target/surefire-reports/
+            Items/target/failsafe-reports/
+          if-no-files-found: ignore
+
+  frontend:
+    name: Frontend
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node 24
+        uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Lint
+        working-directory: frontend
+        run: npm run lint
+
+      - name: Build production bundle
+        working-directory: frontend
+        run: npm run build
+
+  images-and-pr-e2e:
+    name: Images and PR E2E
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build application images
+        run: docker compose build auth-service items-service api-gateway frontend
+
+      - name: Set up Temurin Java 25 for E2E
+        if: github.event_name == 'pull_request'
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '25'
+
+      - name: Start complete stack
+        if: github.event_name == 'pull_request'
+        run: docker compose up -d --no-build --wait --wait-timeout 300
+
+      - name: Verify gateway and frontend readiness
+        if: github.event_name == 'pull_request'
+        run: |
+          deadline=$((SECONDS + 120))
+          until curl --fail --silent --show-error http://localhost:10000/actuator/health; do
+            if (( SECONDS >= deadline )); then
+              echo "Gateway did not become ready within 120 seconds."
+              exit 1
+            fi
+            sleep 5
+          done
+
+          deadline=$((SECONDS + 120))
+          until curl --fail --silent --show-error http://localhost:5173/; do
+            if (( SECONDS >= deadline )); then
+              echo "Frontend did not become ready within 120 seconds."
+              exit 1
+            fi
+            sleep 5
+          done
+
+      - name: Run API E2E tests
+        if: github.event_name == 'pull_request'
+        working-directory: e2e-tests
+        env:
+          E2E_BASE_URL: http://localhost:10000
+        run: ./mvnw --batch-mode clean test
+
+      - name: Upload PR E2E test reports
+        if: ${{ always() && github.event_name == 'pull_request' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: pr-e2e-test-reports
+          path: e2e-tests/target/surefire-reports/
+          if-no-files-found: ignore
+
+      - name: Show PR Compose status
+        if: ${{ always() && github.event_name == 'pull_request' }}
+        run: |
+          set -o pipefail
+          docker compose ps -a --format 'table {{.Name}}\t{{.State}}\t{{.Status}}' | sed -n '1,20p'
+
+      - name: Show failing application logs
+        if: ${{ failure() && github.event_name == 'pull_request' }}
+        run: |
+          set -o pipefail
+          docker compose logs --no-color --tail=100 auth-service items-service api-gateway frontend | sed -E \
+            -e '/(password|token|secret|authorization)/I s/.*/[REDACTED sensitive log line]/' \
+            -e 's#(//[^/:[:space:]]+):[^@[:space:]]+@#\1:[REDACTED]@#g'
+
+      - name: Tear down PR Compose stack
+        if: ${{ always() && github.event_name == 'pull_request' }}
+        run: docker compose down -v --remove-orphans
