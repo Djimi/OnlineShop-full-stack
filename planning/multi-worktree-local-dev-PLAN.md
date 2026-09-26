@@ -23,7 +23,6 @@ Allow multiple git worktrees to run the full stack (`docker compose up -d --buil
 - Host port **numbers** and startup workflow (`docker compose up -d --build`, no `.env` needed) are unchanged.
 - Container names become project-prefixed (`onlineshop-items-postgres-1` instead of `items-postgres`) because all `container_name:` lines are removed — `docker exec <name>` snippets in docs must migrate to `docker compose exec <service>`.
 - Two intentional, justified deltas from "unchanged": (a) published ports bind to `127.0.0.1` instead of `0.0.0.0` (security; kills LAN/phone demos — accepted, nobody does those); (b) Kafka host mappings `9092`/`9093` are dropped (nothing on the host consumes them — see Compose diff spec).
-- CI is unaffected: no workflow changes.
 
 ## Design
 
@@ -194,7 +193,7 @@ Bash, `set -euo pipefail`, runnable from any directory inside the repo. No state
   # <<< dev-env
   ```
   (ports shown are slot 47's; generate from `20000 + slot×20 + offset`.)
-- **Secrets preservation (hard requirement):** if `.env` exists, replace ONLY the lines strictly between `# >>> dev-env` and `# <<< dev-env` (append the block if absent); every other byte of the file stays untouched. Mandatory test: fixture `.env` containing `POSTGRES_AWS_*` lines → run script → run script again → assert the secret lines are byte-identical and exactly one managed block exists.
+- **Secrets preservation (hard requirement):** if `.env` exists, replace ONLY the lines strictly between `# >>> dev-env` and `# <<< dev-env` (append the block if absent); every other byte of the file stays untouched. Mandatory test: fixture `.env` containing `POSTGRES_SECRET_*` lines → run script → run script again → assert the secret lines are byte-identical and exactly one managed block exists.
 - **Output:** human table of frontend URL, gateway, pgAdmin, kafka-ui, DB/Redis/Kafka ports.
 - **`--regenerate` (F3, down-first — exact order):** (1) if a managed block exists, run `docker compose --project-directory "$root" down` using the CURRENT `.env` (old project/ports) — `--volumes` flag additionally passes `-v`; (2) compute next slot = bump from the OLD `DEV_ENV_SLOT` (not a re-hash), bind-check; (3) only then rewrite the managed block; (4) print new table.
 - **`--exports`:** print to stdout the export variables listed in "Host-run dev mode" above, computed from the effective slot (block values if a managed block exists, else slot-0 defaults on main), so `source <(scripts/dev-env.sh --exports)` works on main and worktrees alike. Comments in the output must call out the `VITE_API_URL` wrong-gateway failure mode.
@@ -224,7 +223,7 @@ Bash, `set -euo pipefail`, runnable from any directory inside the repo. No state
 ### 2. `scripts/dev-env.sh` (per Script spec)
 - [x] Root + main-checkout detection (`git-common-dir` realpath, cross-checked with `git worktree list --porcelain`; fail loudly on ambiguity)
 - [x] Hash initial slot (mod 619); `DEV_ENV_SLOT` reuse; bind-check bump loop (max 619); `ss` with `/dev/tcp` fallback
-- [x] Managed-block write/replace preserving all non-managed lines; secrets-preservation test with a `POSTGRES_AWS_*` fixture (run twice, assert byte-identical outside markers)
+- [x] Managed-block write/replace preserving all non-managed lines; secrets-preservation test with a `POSTGRES_SECRET_*` fixture (run twice, assert byte-identical outside markers)
 - [x] URL table output; loud notice when slot deviates from hash
 - [x] `--regenerate` (down-first, then bump+rewrite; `--volumes` passthrough)
 - [x] `--exports` (full list incl. `VITE_API_URL`, `SERVER_PORT` per-service values, `FRONTEND_PORT`, DB URLs, Redis, Kafka — comment the `VITE_API_URL` wrong-gateway failure mode)
@@ -254,7 +253,7 @@ Bash, `set -euo pipefail`, runnable from any directory inside the repo. No state
 - [ ] Regenerate-orphan test: requires full stack up; deferred.
 - [ ] e2e tests: requires full stack up; deferred.
 - [x] Port math: no legacy overlaps, all 6190 unique (bash-verified).
-- [x] Secrets preservation: POSTGRES_AWS_* lines preserved byte-for-byte across regenerations.
+- [x] Secrets preservation: POSTGRES_SECRET_* lines preserved byte-for-byte across regenerations.
 - [x] Compose config: parses cleanly, defaults produce legacy ports, env vars override correctly.
 
 ## Issues
@@ -280,7 +279,7 @@ Bash, `set -euo pipefail`, runnable from any directory inside the repo. No state
 - [x] ✅ Fresh worktrees missing `.env` — superseded by the single
       `scripts/create-worktree.py` creation command; creation and allocation are
       now one fail-closed operation.
-- [x] ✅ `.env` is gitignored — the generator manages only the marked block and never clobbers existing secret lines (e.g., `POSTGRES_AWS_*`) — verified by fixture test.
+- [x] ✅ `.env` is gitignored — the generator manages only the marked block and never clobbers existing secret lines (e.g., `POSTGRES_SECRET_*`) — verified by fixture test.
 - [ ] Perf stack collides with main even today (fixed 5433/9001 + `perf-*` names ×3) — open; follow-up Task 6.
 - [ ] Devcontainer host-global name `onlineshop-workspace` — open; follow-up Task 6.
 - [ ] CORS re-narrowing would silently break per-worktree frontends — open watch item; if gateway CORS is ever restricted again, add a Vite dev-proxy follow-up before merging that change.

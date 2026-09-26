@@ -44,18 +44,6 @@ public class RateLimitService {
     public String resolveClientIp(HttpServletRequest request) {
         String remoteAddr = request.getRemoteAddr();
         if (isTrustedProxy(remoteAddr)) {
-            // Prefer the CloudFront-Viewer-Address header (overwritten by
-            // CloudFront, so per-client keys behind CF). This is only safe
-            // while the ALB ingress is restricted to CloudFront's managed
-            // prefix list; if the ALB stays publicly reachable, the header
-            // can be forged by direct ALB traffic. The XFF fallback takes
-            // the LAST entry, which the ALB appends and a client cannot
-            // spoof; it resolves to the CF edge IP when CF is in front
-            // (shared per-edge bucket), which is why CF takes precedence.
-            String cloudFrontViewer = request.getHeader("CloudFront-Viewer-Address");
-            if (cloudFrontViewer != null && !cloudFrontViewer.isEmpty()) {
-                return stripPort(cloudFrontViewer);
-            }
             String xForwardedFor = request.getHeader("X-Forwarded-For");
             if (xForwardedFor != null && !xForwardedFor.isEmpty()) {
                 String[] entries = xForwardedFor.split(",");
@@ -92,24 +80,6 @@ public class RateLimitService {
         } catch (java.net.UnknownHostException e) {
             return false;
         }
-    }
-
-    private String stripPort(String value) {
-        String candidate = value.trim();
-        if (candidate.startsWith("[")) {
-            int close = candidate.indexOf(']');
-            if (close > 0) {
-                return candidate.substring(1, close);
-            }
-        }
-        int lastColon = candidate.lastIndexOf(':');
-        if (lastColon > 0 && candidate.indexOf(':') == lastColon) {
-            String suffix = candidate.substring(lastColon + 1);
-            if (suffix.chars().allMatch(Character::isDigit)) {
-                return candidate.substring(0, lastColon);
-            }
-        }
-        return candidate;
     }
 
     private boolean tryConsume(String key, BucketConfiguration config) {

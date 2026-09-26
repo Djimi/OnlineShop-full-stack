@@ -79,7 +79,7 @@ class ItemsE2ETest extends BaseTest {
 
         List<Map<String, Object>> items = allItemsResponse.jsonPath().getList("$");
         assertNotNull(items, "Items list should not be null");
-        assertFalse(items.isEmpty(), "Items list should not be empty - staging seeds items deterministically");
+        assertFalse(items.isEmpty(), "Items list should not be empty - the test dataset seeds items deterministically");
 
         // Step 4: Get the first item from the list
         String firstItemId = (String) items.get(0).get("id");

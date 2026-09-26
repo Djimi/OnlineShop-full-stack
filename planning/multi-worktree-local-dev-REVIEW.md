@@ -8,7 +8,7 @@
 **Date:** 2026-08-02
 **Subject of review:** `multi-worktree-local-dev-PLAN.md` (Plan B) vs `local-worktree-port-isolation-PLAN.md` (Plan A, in worktree `/home/dpm/CodingProjects/OnlineShop-port-isolation`)
 **Method:** 3 independent subagent reviews — (1) technical soundness, (2) DX/simplicity, (3) devil's advocate. All claims verified against the actual code and compose files.
-**Verdict:** **Plan B wins 3/3** — correctly sized, idiomatic (stock compose + `.env` + project names), zero workflow change. Plan A is the better *analysis* but prescribes a bespoke 8-subcommand launcher CLI (~50 tasks, locked allocator, state in `~/.local/state`, PowerShell parity, deliberately breaking raw `docker compose up`) — wildly over-engineered for a learning project needing 3–4 worktrees.
+**Verdict:** **Plan B wins 3/3** — correctly sized, idiomatic (stock compose + `.env` + project names). Plan A is the better *analysis* but prescribes a bespoke 8-subcommand launcher CLI (~50 tasks, locked allocator, state in `~/.local/state`, PowerShell parity, deliberately breaking raw `docker compose up`) — wildly over-engineered for a learning project needing 3–4 worktrees.
 
 **However: Plan B as written is NOT ready to implement.** All three reviewers converged on one critical bug (F1) plus several required fixes below. The plan must be revised to address every item in this review before implementation starts.
 
@@ -121,7 +121,7 @@ Any second clone literally named `OnlineShop-full-stack` silently gets slot 0 �
    - Teardown: `docker compose down [-v]` before `git worktree remove`.
    - Host-run dev mode (F5) and e2e against a worktree (`E2E_BASE_URL`).
 5. **Compose diff spec**: every changed line listed (ports, `container_name` removals, Kafka listeners incl. dropping 9093, `VITE_API_URL`, loopback prefix if adopted) — an implementer should not need to re-derive anything.
-6. **Script spec**: flags (`--regenerate`, `--exports`), managed-block format, secrets-preservation requirement with a test against a `.env` containing `POSTGRES_AWS_*` lines, slot-bump behavior incl. F3, main-checkout detection (F10), guardrail for F4.
+6. **Script spec**: flags (`--regenerate`, `--exports`), managed-block format, secrets-preservation requirement with a test against a `.env` containing `POSTGRES_SECRET_*` lines, slot-bump behavior incl. F3, main-checkout detection (F10), guardrail for F4.
 7. **Honest risk section** (F7) and explicit non-goals (perf stack, devcontainer) with follow-up tasks.
 8. **Verification section** updated: 2-stack concurrent run, frontend B → gateway B, main regression (`docker compose config` diff), forgot-to-generate guard test, regenerate-orphan test.
 9. Keep AGENTS.md planning conventions: checkboxes for tasks; Issues list where solved issues get ✅ + brief how-fixed notes.
