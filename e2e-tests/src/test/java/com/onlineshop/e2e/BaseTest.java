@@ -2,6 +2,7 @@ package com.onlineshop.e2e;
 
 import io.restassured.RestAssured;
 import io.restassured.builder.RequestSpecBuilder;
+import io.restassured.config.LogConfig;
 import io.restassured.filter.log.LogDetail;
 import io.restassured.http.ContentType;
 import io.restassured.specification.RequestSpecification;
@@ -16,7 +17,11 @@ public abstract class BaseTest {
     @BeforeAll
     static void setupRestAssured() {
         RestAssured.baseURI = BASE_URL;
-        RestAssured.enableLoggingOfRequestAndResponseIfValidationFails(LogDetail.ALL);
+        RestAssured.config = RestAssured.config().logConfig(
+                LogConfig.logConfig()
+                        .enableLoggingOfRequestAndResponseIfValidationFails(LogDetail.HEADERS)
+                        .blacklistHeader("Authorization")
+        );
 
         requestSpec = new RequestSpecBuilder()
                 .setContentType(ContentType.JSON)
