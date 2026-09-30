@@ -32,6 +32,34 @@ npm run dev
 npm run build
 ```
 
+## CI Verification
+
+On every push and pull request, the independent frontend job uses Node 24 and
+runs these commands from the `frontend/` module root:
+
+```bash
+npm ci
+npm run lint
+npm run build
+```
+
+There is no current frontend unit-test script. Separately, the root image job
+builds Auth, Items, API Gateway, and frontend images with `docker compose build
+auth-service items-service api-gateway frontend`; `common` is library-only.
+The frontend image starts Vite development mode rather than creating a
+production bundle, so the CI `npm run build` check remains required. Images are
+neither published nor deployed, and this image job does not wait for Java or
+frontend verification results.
+
+Only pull requests use the image job's locally built images to start the full
+Compose stack with `docker compose up -d --no-build --wait --wait-timeout 300`.
+After bounded gateway and frontend readiness checks, the current three API E2E
+tests run through the gateway, Auth, and Items. They do not browser-test the
+frontend or directly test each infrastructure service or administrative UI.
+PR E2E reports, bounded Compose status, and redacted bounded application logs
+on failure are retained before `docker compose down -v --remove-orphans` is
+always attempted.
+
 ## API Integration
 
 - **Base URL**: Controlled by `VITE_API_URL` env var at build time
