@@ -235,11 +235,30 @@ not applied on EC2. Generated DB credentials are wired; the current E2E journey
 does not consume the provided generated registration-test password yet. See
 [runtime contract](../infra/aws/runtime/AGENTS.md) for pending boundaries.
 
-The manual `AWS role boundary proof` workflow is being added separately. It uses
+The separate manual `AWS role boundary proof` workflow uses
 trusted-main Environment OIDC for publisher/operator and read-only live APIs,
 requires exact authorization denials (not network/missing-resource errors), and
 retains only operation labels. It cannot publish AWS success or prove mutation
-permissions. Local command stories pass; hosted role proof remains pending.
+permissions. Local command stories and hosted read-boundary proof pass.
+
+PR #76 merged at `a612860` after hosted CI passed. Read-only OIDC role proof
+[37221612286](https://github.com/Djimi/OnlineShop-full-stack/actions/runs/37221612286)
+then passed both roles; artifact digests `11310580872` (publisher) and `11310516124`
+(operator) were independently verified. Publisher can read its fixed ECR images
+but cannot discover hosts or read backend/bootstrap state or dedicated secrets.
+Operator can discover hosts/read the exact profile/list the environment-state
+prefix, but cannot read backend/bootstrap state, list the backend-state prefix,
+read the host role or dedicated secrets. These are selected actual read boundaries,
+not mutation/cancellation/host-runtime proof; no successful AWS result was published.
+
+The generated registration-credential assertion initially failed with HTTP 401
+against the old E2E image. Candidate E2E source now consumes `E2E_TEST_PASSWORD`
+and uses a random per-journey fallback locally; its module-root wrapper passed.
+The rebuilt-image/reset/login regression passed (92.635 seconds): generated
+password login succeeded for the E2E-created user both before and after full
+DB/cache/broker reset. The local image was resolved by immutable Docker image ID;
+the other four app images retained their verified ECR digests. This fix has not
+yet been republished through the trusted candidate workflow or run on AWS.
 
 ### Capacity and pricing — before provisioning
 

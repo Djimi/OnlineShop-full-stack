@@ -25,6 +25,13 @@ fix(items): correct price calculation for bulk discounts
 test(e2e): add checkout flow scenarios
 ```
 
+## Guarded PR merges
+
+Resolve the reviewed head from Git or the GitHub API immediately before merging;
+never reconstruct a full SHA from memory or an abbreviated log. Require the
+reviewed head with `gh pr merge <pr> --match-head-commit <verified-sha>` after its
+CI passes. A mismatch must stop the merge, not cause the guard to be removed.
+
 ## Never Track Auto-Downloadable Binaries
 
 Build artifacts and tools that can be downloaded automatically should NOT be in git:

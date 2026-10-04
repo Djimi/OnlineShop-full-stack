@@ -15,7 +15,8 @@ import subprocess
 import tempfile
 import unittest
 from pathlib import Path
-from urllib.request import urlopen
+from urllib.error import HTTPError
+from urllib.request import Request, urlopen
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -26,6 +27,18 @@ class ActualComposeResetStory(unittest.TestCase):
     ):
         receipt = Path(os.environ["AWS_IMAGE_RECEIPT"])
         record = json.loads(receipt.read_text())
+        local_e2e = os.environ.get("E2E_LOCAL_IMAGE")
+        if local_e2e:
+            self.assertEqual(local_e2e, "onlineshop-test-e2e:credential-proof")
+            inspected = subprocess.run(
+                ["docker", "image", "inspect", "--format", "{{.Id}}", local_e2e],
+                capture_output=True,
+                text=True,
+                timeout=30,
+                check=True,
+            )
+            self.assertRegex(inspected.stdout.strip(), r"^sha256:[0-9a-f]{64}$")
+            self.local_e2e = inspected.stdout.strip()
         self.assertEqual(
             set(record["images"]), {"auth", "items", "gateway", "frontend", "e2e"}
         )
@@ -380,7 +393,7 @@ class ActualComposeResetStory(unittest.TestCase):
                 "./mvnw",
                 "--workdir",
                 "/workspace/e2e-tests",
-                record["images"]["e2e"],
+                getattr(self, "local_e2e", record["images"]["e2e"]),
                 "--batch-mode",
                 "clean",
                 "test",
@@ -388,6 +401,56 @@ class ActualComposeResetStory(unittest.TestCase):
             env,
             timeout=900,
         )
+        compose = [
+            "docker",
+            "compose",
+            "--project-name",
+            project,
+            "--file",
+            str(path / "compose.json"),
+        ]
+        username = (
+            self.run_command(
+                [
+                    *compose,
+                    "exec",
+                    "-T",
+                    "auth-postgres",
+                    "psql",
+                    "-U",
+                    "auth",
+                    "-d",
+                    "auth",
+                    "-Atc",
+                    "SELECT username FROM users WHERE username LIKE 'testuser_%' ORDER BY id DESC LIMIT 1;",
+                ],
+                env,
+            )
+            .decode()
+            .strip()
+        )
+        self.assertRegex(username, r"^testuser_[A-Za-z0-9_-]+$")
+        address = (
+            self.run_command([*compose, "port", "api-gateway", "10000"], env)
+            .decode()
+            .strip()
+        )
+        request = Request(
+            "http://" + address + "/auth/login",
+            data=json.dumps(
+                {"username": username, "password": passwords["e2e_password"]}
+            ).encode(),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        try:
+            with urlopen(request, timeout=10) as response:
+                self.assertEqual(response.status, 200)
+        except HTTPError as error:
+            error.close()
+            self.fail(
+                "E2E registration did not consume the generated test password; response omitted"
+            )
         spec = importlib.util.spec_from_file_location(
             "trusted_runtime", ROOT / "infra/aws/runtime/run-stack.py"
         )

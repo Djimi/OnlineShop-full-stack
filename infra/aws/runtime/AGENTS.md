@@ -39,8 +39,8 @@ after stopping writers so removed SQL cannot run in the next generation.
 DB secrets come only from the named secret through restricted temporary config;
 cloud/job credentials never reach candidate containers. Temporary secret/auth
 files are removed even on partial creation/test-cleanup failure. The current E2E
-image does not yet consume the provided generated `E2E_TEST_PASSWORD`; support
-remains pending before AWS acceptance.
+source now consumes the provided generated `E2E_TEST_PASSWORD`; historical
+published images predate that fix and must not be treated as current candidates.
 
 ## Evidence and recovery
 
@@ -66,3 +66,7 @@ local project, checks actual digest images/readiness/E2E, seeds both DBs/cache/
 Kafka, recreates owned volumes, verifies markers absent and reruns E2E. It always
 attempts scoped cleanup; no AWS provisioning or host firewall mutation occurs.
 Read-only Vite needs both `.vite` and `.vite-temp` writable temporary mounts.
+For verification of a freshly changed E2E module before republishing, build
+`onlineshop-test-e2e:credential-proof` and set `E2E_LOCAL_IMAGE` to that exact tag.
+The opt-in integration test resolves its immutable local image ID; this is solely
+a local-test override, never accepted by the AWS host runtime or publisher receipt.
