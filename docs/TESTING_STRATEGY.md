@@ -34,13 +34,30 @@ For AWS candidate-request foundations, run from the repository root:
 python3 -m unittest -v tests/scripts/aws_validation_test.py
 python3 -m unittest discover -s tests/scripts -p '*_test.py'
 actionlint .github/workflows/ci.yml .github/workflows/aws-check-proof.yml
+actionlint .github/workflows/aws-validation.yml
 ```
 
-The focused stories substitute only the GitHub CLI process boundary and assert
-observable records/check requests and rejection without AWS calls. They do not
+For the AWS E2E image, run `hadolint e2e-tests/Dockerfile`. When the native
+binary is unavailable, use the pinned container without installing globally:
+`docker run --rm -i hadolint/hadolint:v2.14.0 < e2e-tests/Dockerfile`.
+Pin Alpine package versions in new Dockerfiles; query the selected base's
+repositories rather than guessing a version from a different Alpine release.
+
+Focused stories substitute external GitHub/Git/Docker process boundaries and
+assert observable request/build records, owned failure finalization and rejected
+archives without AWS calls. Real containerized E2E separately verifies packaging.
+They do not
 prove GitHub merge/check selection. The manual association harness always leaves
 **AWS validation** unsuccessful; live positive/latest-attempt protection proof
 is still required before deployment workflows or merge-gate activation.
+
+Terraform definitions have plan-only mock tests in all three roots; run the
+root-specific init/validate/test commands from [infra/aws/README.md](../infra/aws/README.md).
+Mock tests and read-only IAM simulations are not actual OIDC/role/isolation proof.
+Publisher stories additionally substitute the AWS/Docker process boundaries,
+reject source-artifact/candidate/account mismatches and compare pushed digests.
+The manual validation workflow is currently packaging-only and always concludes
+its candidate check as failure; actual runtime validation remains unfinished.
 
 ## GitHub Actions Checks
 

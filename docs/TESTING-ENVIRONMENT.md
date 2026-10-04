@@ -15,7 +15,8 @@ inventory and local candidate-request foundations are implemented on
 `feat/aws-testing-environment` (foundation PR #72 is merged). The owner explicitly
 authorized continuing all operations without further approvals. Documented
 playground cleanup is verified; live proofs and packaging/infrastructure work
-continue on `feat/aws-testing-runtime`. No AWS provisioning or deployment yet.
+continue on `feat/aws-testing-runtime`. The protected state backend has since
+been provisioned/migrated; no application host has been provisioned or deployed.
 
 GitHub plan is Free; repository visibility was verified as public on 2026-10-02.
 The agreed AWS trigger is **Run workflow** with a PR number, not automatic
@@ -160,6 +161,53 @@ GitHub Actions App check `111464385702`, external ID `aws-validation:37211810814
 The candidate check completed as failure, not success. Artifact `11306916858`
 retains the record. A separate synthetic context will exercise newest pending/
 failure versus delayed old success; it never succeeds as **AWS validation**.
+
+Run [37215526810](https://github.com/Djimi/OnlineShop-full-stack/actions/runs/37215526810)
+passed separate synthetic latest-check assertions: newest pending and failure
+remained selected despite delayed older success. Actual **AWS validation** check
+`111475163185` remained failure. This proves selection API behavior, not branch
+protection or real AWS success. Artifact `11307989558` recorded only safe OIDC
+claims, with actual subject:
+`repo:Djimi@8793507/OnlineShop-full-stack@1097550215:environment:aws-testing`.
+Do not substitute the legacy name-only subject. The Environment permits only
+branch `main`, with no reviewer gate. Trust must match exact observed subject
+and audience `sts.amazonaws.com` before role creation.
+
+### Protected backend bootstrap
+
+Terraform 1.16.5/provider 6.67.0 created only the five inspected S3 backend
+resources, then native `init -migrate-state -force-copy` migrated creation state
+to `state/backend.tfstate`. Private access, SSE-S3, TLS-only policy and versioning
+were read back. Remote resources and authoritative `state pull` match the five
+created identities. Native migration assigned a new lineage/serial; verify
+resource identities and authoritative remote lineage rather than assume local
+lineage is preserved. Owned local copies were removed after remote verification.
+Protected identifiers/receipts remain outside Git in `infra/aws/.runtime/` and
+`/tmp/opencode/aws-testing-inventory/`.
+
+Bootstrap's exact inspected saved plan subsequently applied 19 resources:
+one OIDC provider, three roles/policies, one host profile, five repositories and
+five lifecycle policies, and one secret's metadata. Exact observed trust, private
+repositories/immutable candidate tags, host profile and versioned bootstrap state
+were read back. Dedicated credentials were generated in-memory and initialized
+only through Secrets Manager, never Terraform/local files/output. No host exists.
+Read-only Access Analyzer found no errors; its name-format recommendation does
+not recognize the observed immutable-ID subject. Eleven custom-policy simulations
+passed resource-specific launch and access-isolation cases; actual assumed-role
+proofs remain pending. See [root contracts/recovery](../infra/aws/README.md).
+
+### Packaging-only workflow increment
+
+`.github/workflows/aws-validation.yml` is being implemented as a manual-only
+packaging trial: request -> credential-free exact build -> isolated publisher
+OIDC -> owned **failure-only** finalization. It does not provision/reset/test an
+AWS host and must never satisfy the required AWS gate. Publication verifies the
+trusted main run/attempt/job, GitHub artifact SHA-256, source manifest and archive
+checksums before fixed ECR pushes; digest receipts are not AWS test evidence.
+Only approved nonsensitive account/role/bucket/profile/secret identifiers are
+configured as `aws-testing` Environment variables. No AWS keys are stored there.
+Hosted publication, actual role boundaries, runtime/disposal and protection are
+still pending; local publication stories do not prove those live properties.
 
 ### Capacity and pricing — before provisioning
 

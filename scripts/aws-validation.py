@@ -1,14 +1,21 @@
 #!/usr/bin/env python3
-"""Authorize a manual candidate request and create its non-success check.
+"""Authorize candidates, package/publish exact images, and finalize owned failures.
 
 Only trusted main workflows may call this command. GitHub CLI receives its job
 token through GH_TOKEN; API errors are never echoed. CI evidence is bounded inert
 data from an unchanged trusted workflow, not a PR's provenance claim. No AWS
-credentials or calls are needed. A request failure cannot publish success.
+credentials or calls are needed except for the isolated publisher command. Builds run only candidate
+Dockerfiles in Docker, with job/cloud tokens removed from client environments.
+Build/verification failure leaves no accepted manifest; no command publishes a
+successful AWS result or deploys an application. Publication verifies the trusted
+workflow artifact digest and manifest independently, uses five fixed ECR targets,
+and compares pushed digests without running image code. Partial pushes remain
+bounded by repository lifecycle policies; failed publication emits no receipt.
 """
 
 import argparse
 import base64
+import hashlib
 import io
 import json
 import os
@@ -16,6 +23,8 @@ from pathlib import Path
 import re
 import subprocess
 import sys
+import tarfile
+import tempfile
 import zipfile
 
 REPOSITORY = "Djimi/OnlineShop-full-stack"
@@ -28,6 +37,11 @@ LOGIN = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})(?:\[bot\])?")
 MAX_EVIDENCE_BYTES = 65_536
 REQUIRED_CI_JOBS = {"Java (Auth)", "Java (API Gateway)", "Java (common -> Items)",
                     "Frontend", "Images and PR E2E", "Candidate identity"}
+IMAGE_NAMES = {"auth", "items", "gateway", "frontend", "e2e"}
+BUILD_CONTEXTS = {"auth": "Auth", "items": "", "gateway": "api-gateway", "frontend": "frontend", "e2e": "e2e-tests"}
+MAX_IMAGE_BYTES = 4 * 1024**3
+MAX_FIXTURE_BYTES = 16 * 1024**2
+REGION = "eu-north-1"
 
 
 class RequestRejected(Exception):
@@ -40,10 +54,60 @@ def main():
     request = commands.add_parser("request", help="Freeze CI-verified PR identity; create a pending check")
     request.add_argument("--pr", type=positive_integer, required=True)
     request.add_argument("--output", type=Path, required=True)
+    verify = commands.add_parser("verify-build", help="Validate exact candidate build archives as inert data")
+    verify.add_argument("--request", type=Path, required=True)
+    verify.add_argument("--manifest", type=Path, required=True)
+    verify.add_argument("--artifacts", type=Path, required=True)
+    verify.add_argument("--output", type=Path, required=True)
+    failure = commands.add_parser("finalize-failure", help="Complete only this attempt's pending check as failure")
+    failure.add_argument("--request", type=Path, required=True)
+    build = commands.add_parser("build", help="Package the exact clean candidate in a credential-free build job")
+    build.add_argument("--request", type=Path, required=True)
+    build.add_argument("--candidate", type=Path, required=True)
+    build.add_argument("--artifacts", type=Path, required=True)
+    build.add_argument("--output", type=Path, required=True)
+    publish = commands.add_parser("publish", help="Publish trusted exact build archives to five fixed ECR repositories")
+    publish.add_argument("--request", type=Path, required=True)
+    publish.add_argument("--manifest", type=Path, required=True)
+    publish.add_argument("--artifacts", type=Path, required=True)
+    publish.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
     try:
         context = trusted_dispatch()
         authorize_actors(context)
+        if args.command == "publish":
+            record = read_request(args.request, context)
+            manifest = verify_archives(record, args.manifest, args.artifacts)
+            artifact = verify_build_provenance(record, manifest)
+            read_request(args.request, context)
+            published = publish_images(record, manifest, args.artifacts)
+            published.update(build_artifact_id=artifact["id"], build_artifact_digest=artifact["digest"])
+            read_request(args.request, context)
+            write_request(args.output, published)
+            print("Five fixed repository digests published without running candidate image code")
+            return 0
+        if args.command == "build":
+            record = read_request(args.request, context)
+            manifest = build_candidate(record, args.candidate, args.artifacts)
+            read_request(args.request, context)
+            write_request(args.output, manifest)
+            print("Five exact candidate archives and independent fixtures packaged; no publication or deployment")
+            return 0
+        if args.command == "finalize-failure":
+            record = read_request(args.request, context, require_current=False)
+            github(f"check-runs/{record['check_run_id']}", method="PATCH", body={
+                "status": "completed", "conclusion": "failure",
+                "output": {"title": "AWS validation unsuccessful",
+                           "summary": "This attempt did not complete all required validation stages; see its linked workflow evidence."},
+            })
+            print("Owned attempt completed as failure; no success inferred")
+            return 0
+        if args.command == "verify-build":
+            record = read_request(args.request, context)
+            manifest = verify_archives(record, args.manifest, args.artifacts)
+            write_request(args.output, manifest)
+            print("Exact candidate image/fixture archives verified; no image code executed")
+            return 0
         identities = resolve_candidate(args.pr)
         ci = verify_source_ci(identities, context)
         reject_duplicate_attempt(identities, context)
@@ -211,6 +275,309 @@ def unique_fields(pairs):
             raise RequestRejected("duplicate JSON field")
         result[key] = value
     return result
+
+
+def read_request(path, context, *, require_current=True):
+    record = bounded_json(path)
+    keys = {"repository", "pr", "head_sha", "base_sha", "candidate_sha", "controller_sha",
+            "ci_run_id", "ci_run_attempt", "ci_artifact_id", "validation_run_id",
+            "validation_run_attempt", "actor", "triggering_actor", "check_run_id"}
+    if set(record) != keys or any(record.get(key) != value for key, value in context.items()):
+        raise RequestRejected("request identity does not match this trusted attempt")
+    for key in ["pr", "ci_run_id", "ci_run_attempt", "ci_artifact_id", "check_run_id"]:
+        positive_integer(record[key])
+    for key in ["head_sha", "base_sha", "candidate_sha", "controller_sha"]:
+        require_sha(record[key])
+    if record["repository"] != REPOSITORY:
+        raise RequestRejected("request repository mismatch")
+    if require_current:
+        identities = resolve_candidate(record["pr"])
+        if any(record[key] != value for key, value in identities.items()):
+            raise RequestRejected("candidate changed since request")
+    check = github(f"check-runs/{record['check_run_id']}")
+    if (check.get("name") != CHECK_NAME or check.get("head_sha") != record["candidate_sha"]
+            or check.get("external_id") != attempt_identity(record)
+            or check.get("app", {}).get("slug") != "github-actions"
+            or check.get("status") != "in_progress"):
+        raise RequestRejected("request does not own a pending candidate check")
+    if require_current:
+        latest = [value for value in github_list(
+            f"commits/{record['candidate_sha']}/check-runs?check_name=AWS%20validation&filter=latest", "check_runs")
+            if value.get("app", {}).get("slug") == "github-actions"]
+        if len(latest) != 1 or latest[0].get("id") != record["check_run_id"]:
+            raise RequestRejected("a newer candidate attempt superseded this request")
+    return record
+
+
+def bounded_json(path):
+    if path.is_symlink() or path.stat().st_size > MAX_EVIDENCE_BYTES:
+        raise RequestRejected("unsafe or excessive JSON input")
+    return json.loads(path.read_bytes(), object_pairs_hook=unique_fields)
+
+
+def build_candidate(record, candidate, artifacts):
+    if candidate.is_symlink() or not candidate.is_dir():
+        raise RequestRejected("unsafe candidate directory")
+    candidate = candidate.resolve()
+    if artifacts.resolve().is_relative_to(candidate):
+        raise RequestRejected("build artifacts must remain outside candidate checkout")
+    verify_checkout(candidate, record["candidate_sha"])
+    artifacts.mkdir(mode=0o700, parents=True, exist_ok=False)
+    images = {}
+    for name, context in BUILD_CONTEXTS.items():
+        dockerfile = candidate / ("Items" if name == "items" else context) / "Dockerfile"
+        if dockerfile.is_symlink() or not dockerfile.is_file():
+            raise RequestRejected("missing or unsafe candidate Dockerfile")
+        tag = f"onlineshop-test-{name}:run-{record['validation_run_id']}-attempt-{record['validation_run_attempt']}"
+        run_candidate_build(["docker", "build", "--platform", "linux/amd64", "--tag", tag,
+                             "--file", str(dockerfile), str(candidate / context)])
+        path = artifacts / f"{name}.tar"
+        run_candidate_build(["docker", "save", "--output", str(path), tag])
+        images[name] = archive_metadata(path, MAX_IMAGE_BYTES)
+    fixtures = artifacts / "fixtures.tar"
+    with tarfile.open(fixtures, "x") as archive:
+        for service in ["Auth", "Items"]:
+            directory = candidate / service / "init-db"
+            if directory.is_symlink() or not directory.is_dir():
+                raise RequestRejected("missing or unsafe service fixture directory")
+            for path in sorted(directory.iterdir()):
+                if path.name == "02-seed-data.sql" and service == "Auth":
+                    continue
+                if path.is_symlink() or not path.is_file() or path.suffix != ".sql":
+                    raise RequestRejected("unexpected service fixture entry")
+                if path.stat().st_size > MAX_FIXTURE_BYTES:
+                    raise RequestRejected("excessive service fixture")
+                archive.add(path, arcname=path.relative_to(candidate).as_posix(), recursive=False)
+    verify_checkout(candidate, record["candidate_sha"])
+    manifest = {key: record[key] for key in ["repository", "candidate_sha", "controller_sha", "ci_run_id", "ci_run_attempt"]}
+    manifest.update(build_run_id=record["validation_run_id"], build_run_attempt=record["validation_run_attempt"],
+                    images=images, fixtures=archive_metadata(fixtures, MAX_FIXTURE_BYTES))
+    path = artifacts / "build.json"
+    write_request(path, manifest)
+    verify_archives(record, path, artifacts)
+    return manifest
+
+
+def verify_checkout(candidate, revision):
+    for command, expected in [(["git", "-C", str(candidate), "rev-parse", "HEAD"], revision),
+                              (["git", "-C", str(candidate), "status", "--porcelain", "--untracked-files=all"], "")]:
+        try:
+            result = subprocess.run(command, capture_output=True, text=True, timeout=30)
+        except (subprocess.TimeoutExpired, FileNotFoundError):
+            raise RequestRejected("candidate checkout cannot be verified") from None
+        if result.returncode or result.stdout.strip() != expected:
+            raise RequestRejected("candidate checkout revision or cleanliness mismatch")
+
+
+def run_candidate_build(command):
+    # Candidate code executes only in Docker's build context, never as a controller
+    # script. No cloud/job tokens are inherited even by the Docker client process.
+    env = {key: value for key, value in os.environ.items()
+           if not key.startswith(("AWS_", "GITHUB_", "ACTIONS_")) and key not in {"GH_TOKEN", "GH_ENTERPRISE_TOKEN"}}
+    try:
+        result = subprocess.run(command, env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=1200)
+    except (subprocess.TimeoutExpired, FileNotFoundError):
+        raise RequestRejected("candidate image packaging timed out or is unavailable") from None
+    if result.returncode:
+        raise RequestRejected("candidate image packaging failed")
+
+
+def archive_metadata(path, limit):
+    if path.is_symlink() or not path.is_file() or not 0 < path.stat().st_size <= limit:
+        raise RequestRejected("unsafe or excessive packaged archive")
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for block in iter(lambda: stream.read(1024**2), b""):
+            digest.update(block)
+    return {"file": path.name, "size": path.stat().st_size, "sha256": digest.hexdigest()}
+
+
+def verify_build_provenance(record, manifest):
+    run_id, attempt = record["validation_run_id"], record["validation_run_attempt"]
+    if os.environ.get("GITHUB_WORKFLOW_REF") != f"{REPOSITORY}/.github/workflows/aws-validation.yml@refs/heads/main":
+        raise RequestRejected("publication requires the trusted validation workflow")
+    run = github(f"actions/runs/{run_id}/attempts/{attempt}")
+    expected = {"id": run_id, "run_attempt": attempt, "head_sha": record["controller_sha"],
+                "event": "workflow_dispatch", "path": ".github/workflows/aws-validation.yml"}
+    if any(run.get(key) != value for key, value in expected.items()) or run.get("repository", {}).get("full_name") != REPOSITORY:
+        raise RequestRejected("build workflow provenance mismatch")
+    jobs = [job for job in github_list(f"actions/runs/{run_id}/attempts/{attempt}/jobs", "jobs")
+            if job.get("name") == "Build candidate"]
+    if len(jobs) != 1 or jobs[0].get("status") != "completed" or jobs[0].get("conclusion") != "success":
+        raise RequestRejected("trusted candidate build must complete successfully")
+    artifacts = [artifact for artifact in github_list(f"actions/runs/{run_id}/artifacts", "artifacts")
+                 if artifact.get("name") == f"aws-build-{run_id}-{attempt}"]
+    if len(artifacts) != 1:
+        raise RequestRejected("missing or ambiguous trusted build artifact")
+    artifact = artifacts[0]
+    limit = len(IMAGE_NAMES) * MAX_IMAGE_BYTES + MAX_FIXTURE_BYTES + MAX_EVIDENCE_BYTES
+    if (artifact.get("expired") is not False or not 0 < artifact["size_in_bytes"] <= limit
+            or artifact["workflow_run"]["id"] != run_id
+            or artifact["workflow_run"]["head_sha"] != record["controller_sha"]
+            or not re.fullmatch(r"sha256:[0-9a-f]{64}", artifact.get("digest", ""))):
+        raise RequestRejected("invalid trusted build artifact identity")
+    with tempfile.TemporaryDirectory(prefix="aws-build-provenance-") as directory:
+        path = Path(directory) / "artifact.zip"
+        with path.open("xb") as stream:
+            try:
+                result = subprocess.run(["gh", "api", f"{API_ROOT}/actions/artifacts/{positive_integer(artifact['id'])}/zip", "--method", "GET"],
+                                        stdout=stream, stderr=subprocess.DEVNULL, timeout=1500)
+            except (subprocess.TimeoutExpired, FileNotFoundError):
+                raise RequestRejected("trusted artifact download failed") from None
+        if result.returncode or not 0 < path.stat().st_size <= limit:
+            raise RequestRejected("trusted artifact download failed or exceeds bound")
+        if "sha256:" + archive_metadata(path, limit)["sha256"] != artifact["digest"]:
+            raise RequestRejected("trusted artifact digest mismatch")
+        try:
+            with zipfile.ZipFile(path) as archive:
+                members = archive.infolist()
+                expected_names = {"build.json", "fixtures.tar", *(f"{name}.tar" for name in IMAGE_NAMES)}
+                if (len(members) != len(expected_names) or {m.filename for m in members} != expected_names
+                        or any((m.external_attr >> 16) & 0o170000 == 0o120000 for m in members)
+                        or sum(m.file_size for m in members) > limit
+                        or archive.getinfo("build.json").file_size > MAX_EVIDENCE_BYTES):
+                    raise RequestRejected("unsafe trusted artifact archive")
+                source = json.loads(archive.read("build.json"), object_pairs_hook=unique_fields)
+                if source != manifest:
+                    raise RequestRejected("local manifest differs from trusted build artifact")
+                for metadata in [*manifest["images"].values(), manifest["fixtures"]]:
+                    member = archive.getinfo(metadata["file"])
+                    if member.file_size != metadata["size"]:
+                        raise RequestRejected("trusted packaged image size mismatch")
+                    digest = hashlib.sha256()
+                    with archive.open(member) as stream:
+                        for block in iter(lambda: stream.read(1024**2), b""):
+                            digest.update(block)
+                    if digest.hexdigest() != metadata["sha256"]:
+                        raise RequestRejected("trusted packaged image checksum mismatch")
+        except (zipfile.BadZipFile, RuntimeError):
+            raise RequestRejected("corrupt trusted build artifact") from None
+    return artifact
+
+
+def publish_images(record, manifest, artifacts):
+    account = os.environ.get("AWS_TESTING_ACCOUNT_ID", "")
+    if not re.fullmatch(r"[0-9]{12}", account):
+        raise RequestRejected("approved testing account configuration is missing")
+    identity = json.loads(publication_command(["aws", "sts", "get-caller-identity", "--region", REGION, "--output", "json", "--no-cli-pager"]))
+    if (identity.get("Account") != account
+            or not identity.get("Arn", "").startswith(f"arn:aws:sts::{account}:assumed-role/onlineshop-test-publisher/")):
+        raise RequestRejected("publisher role or target account mismatch")
+    registry = f"{account}.dkr.ecr.{REGION}.amazonaws.com"
+    published = {}
+    with tempfile.TemporaryDirectory(prefix="aws-ecr-auth-") as directory:
+        env = {key: value for key, value in os.environ.items()
+               if not key.startswith(("AWS_", "GITHUB_", "ACTIONS_")) and key not in {"GH_TOKEN", "GH_ENTERPRISE_TOKEN"}}
+        env["DOCKER_CONFIG"] = directory
+        password = publication_command(["aws", "ecr", "get-login-password", "--region", REGION, "--no-cli-pager"])
+        publication_command(["docker", "login", "--username", "AWS", "--password-stdin", registry], env=env, data=password)
+        for name in sorted(IMAGE_NAMES):
+            tag = f"run-{record['validation_run_id']}-attempt-{record['validation_run_attempt']}"
+            local, remote = f"onlineshop-test-{name}:{tag}", f"{registry}/onlineshop-test-{name}:{tag}"
+            publication_command(["docker", "load", "--input", str(artifacts / manifest["images"][name]["file"])], env=env)
+            publication_command(["docker", "tag", local, remote], env=env)
+            publication_command(["docker", "push", remote], env=env)
+            details = json.loads(publication_command(["aws", "ecr", "describe-images", "--repository-name", f"onlineshop-test-{name}",
+                                                     "--image-ids", f"imageTag={tag}", "--region", REGION, "--output", "json", "--no-cli-pager"]))["imageDetails"]
+            if len(details) != 1 or not re.fullmatch(r"sha256:[0-9a-f]{64}", details[0].get("imageDigest", "")):
+                raise RequestRejected("published registry digest is invalid")
+            digest_uri = f"{registry}/onlineshop-test-{name}@{details[0]['imageDigest']}"
+            local_digests = json.loads(publication_command(["docker", "image", "inspect", "--format", "{{json .RepoDigests}}", remote], env=env))
+            if digest_uri not in local_digests:
+                raise RequestRejected("registry digest differs from pushed image")
+            published[name] = digest_uri
+    return {**record, "images": published, "fixtures": manifest["fixtures"]}
+
+
+def publication_command(command, *, env=None, data=None):
+    try:
+        result = subprocess.run(command, env=env, input=data, capture_output=True, timeout=600)
+    except (subprocess.TimeoutExpired, FileNotFoundError):
+        raise RequestRejected("publication command timed out or is unavailable") from None
+    if result.returncode or len(result.stdout) > 4 * 1024**2:
+        raise RequestRejected("publication command failed")
+    return result.stdout
+
+
+def verify_archives(record, manifest_path, directory):
+    manifest = bounded_json(manifest_path)
+    if set(manifest) != {"repository", "candidate_sha", "controller_sha", "ci_run_id", "ci_run_attempt",
+                        "build_run_id", "build_run_attempt", "images", "fixtures"}:
+        raise RequestRejected("unexpected build manifest fields")
+    expected = {key: record[key] for key in ["repository", "candidate_sha", "controller_sha", "ci_run_id", "ci_run_attempt"]}
+    expected.update(build_run_id=record["validation_run_id"], build_run_attempt=record["validation_run_attempt"])
+    if any(manifest.get(key) != value for key, value in expected.items()) or set(manifest["images"]) != IMAGE_NAMES:
+        raise RequestRejected("build source or attempt identity mismatch")
+    for name in sorted(IMAGE_NAMES):
+        path = verify_archive_checksum(directory, manifest["images"][name], f"{name}.tar", MAX_IMAGE_BYTES)
+        verify_image_archive(path, f"onlineshop-test-{name}:run-{record['validation_run_id']}-attempt-{record['validation_run_attempt']}")
+    path = verify_archive_checksum(directory, manifest["fixtures"], "fixtures.tar", MAX_FIXTURE_BYTES)
+    verify_fixture_archive(path)
+    return manifest
+
+
+def verify_archive_checksum(directory, metadata, filename, limit):
+    if (set(metadata) != {"file", "size", "sha256"} or metadata["file"] != filename
+            or type(metadata["size"]) is not int or not 0 < metadata["size"] <= limit
+            or not isinstance(metadata["sha256"], str) or not re.fullmatch(r"[0-9a-f]{64}", metadata["sha256"])):
+        raise RequestRejected("invalid archive metadata")
+    path = directory / filename
+    if path.is_symlink() or not path.is_file() or path.stat().st_size != metadata["size"]:
+        raise RequestRejected("archive path or size mismatch")
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for block in iter(lambda: stream.read(1024**2), b""):
+            digest.update(block)
+    if digest.hexdigest() != metadata["sha256"]:
+        raise RequestRejected("archive checksum mismatch")
+    return path
+
+
+def safe_tar_members(archive, limit):
+    seen, total = set(), 0
+    for member in archive:
+        path = Path(member.name)
+        total += member.size
+        if (path.is_absolute() or ".." in path.parts or not path.parts
+                or member.name in seen or not (member.isfile() or member.isdir())
+                or total > limit or len(seen) >= 10_000):
+            raise RequestRejected("unsafe or excessive archive member")
+        seen.add(member.name)
+        yield member
+
+
+def verify_image_archive(path, tag):
+    try:
+        with tarfile.open(path, "r:*") as archive:
+            manifest = None
+            for member in safe_tar_members(archive, MAX_IMAGE_BYTES):
+                if member.name == "manifest.json":
+                    if not member.isfile() or member.size > MAX_EVIDENCE_BYTES:
+                        raise RequestRejected("unsafe Docker manifest")
+                    manifest = json.loads(archive.extractfile(member).read(), object_pairs_hook=unique_fields)
+            if not isinstance(manifest, list) or len(manifest) != 1 or manifest[0].get("RepoTags") != [tag]:
+                raise RequestRejected("Docker archive contains unexpected image or mutable tag")
+    except tarfile.TarError:
+        raise RequestRejected("corrupt image archive") from None
+
+
+def verify_fixture_archive(path):
+    required = {"Auth/init-db/01-schema.sql", "Items/init-db/01-schema.sql"}
+    files = set()
+    try:
+        with tarfile.open(path, "r:*") as archive:
+            for member in safe_tar_members(archive, MAX_FIXTURE_BYTES):
+                if member.isdir():
+                    continue
+                if (not member.name.startswith(("Auth/init-db/", "Items/init-db/"))
+                        or len(Path(member.name).parts) != 3 or not member.name.endswith(".sql")
+                        or member.name == "Auth/init-db/02-seed-data.sql"):
+                    raise RequestRejected("unexpected fixture path or committed authentication seed")
+                files.add(member.name)
+            if not required <= files:
+                raise RequestRejected("both independently owned schemas are required")
+    except tarfile.TarError:
+        raise RequestRejected("corrupt fixture archive") from None
 
 
 def reject_duplicate_attempt(identities, context):

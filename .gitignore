@@ -12,3 +12,10 @@ tests/performance/reports/
 
 __pycache__/
 *.py[cod]
+
+**/.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+*.tfvars
+infra/aws/.runtime/
