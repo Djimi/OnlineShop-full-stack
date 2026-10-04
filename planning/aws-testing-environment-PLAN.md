@@ -129,10 +129,10 @@ update operational record with trial findings. No branch protection enabled yet.
 **Consumes:** Task 2 request and existing four application Dockerfiles.
 **Produces:** Five immutable image archives plus build manifest; verified ECR digest manifest.
 
-- [ ] Write failing stories for wrong candidate/run/attempt/checksum, unexpected image names, archive traversal/symlinks, oversized archives, tag mutation, and candidate changing before publication. Assert no publication on rejection.
+- [x] Write failing archive/build stories for candidate/run/attempt/checksum/names/traversal/links/size/tag/dirty-checkout and superseded attempt. Publication-specific stories remain part of the unfinished publisher step.
 - [ ] Run focused automation tests and confirm new rejection stories initially fail.
 - [ ] Define trusted build orchestration: separate credential-free job checks out pinned controller and candidate in different directories, runs only controller orchestration, and builds candidate Auth/Gateway/frontend at service contexts and Items at repository context. PR Dockerfiles may run only inside this unprivileged build job.
-- [ ] Add E2E image with pinned Java 25/Maven-compatible base and Dockerfile lint compliance. Run its wrapper at `/workspace/e2e-tests`; resolve dependencies/compile tests at build time; runtime default runs `./mvnw --batch-mode clean test` with `E2E_BASE_URL`. Include candidate tests; never bake secrets into images.
+- [x] Add E2E image with pinned Java 25/Maven-compatible base and Dockerfile lint compliance. Runs nonroot at `/workspace/e2e-tests`; compile/cache build does not execute tests; default is module-root wrapper `clean test`. Containerized local E2E and hadolint passed.
 - [ ] Implement manifest/archive verification and fixed-repository publication, with no candidate hooks, command substitution, or unsafe extraction. Validate ECR digest after push, not just tag existence. Publisher has no environment/SSM permissions.
 - [ ] Verify with focused stories, `hadolint e2e-tests/Dockerfile`, existing Compose builds, and actual isolated E2E against the local stack. Run the E2E wrapper from `e2e-tests/`; expect current three API tests to pass and reports to exist.
 - [ ] Commit packaging and independent module documentation: `feat(e2e): package digest-pinned AWS validation images`.
@@ -146,9 +146,9 @@ update `.gitignore` and operational record.
 
 - [ ] Write `tests/boundary.tftest.hcl` in each root with mock-provider plan assertions for separate resource boundaries, encryption, empty ingress, delete-on-termination disk, IMDSv2, no Spot and no forbidden paid services. Check routine-role policy boundaries locally and prove actual denies after bootstrap.
 - [ ] Pin supported Terraform/provider versions and record compatibility with native S3 locking; run `terraform fmt -check -recursive infra/aws`, root-specific `init -backend=false`/`validate`, and `terraform test` against plan-only assertions. Confirm intentionally unsafe fixtures fail checks.
-- [ ] Implement backend root with private versioned encrypted TLS-only S3 storage. Create it only after owner authorization; protect temporary local state with restrictive permissions and migrate it using `terraform init -migrate-state` into `state/backend.tfstate`. Verify remote state and versions before securely removing temporary copies.
-- [ ] Implement bootstrap root with Environment-subject OIDC trust, separate ECR publisher/operator roles, exact host role/profile, fixed private ECR repositories, bounded image retention and secret metadata. Initialize generated secret values via protected runtime APIs, never Terraform secret-value resources/outputs. Inspect actual GitHub OIDC subject before trusting it.
-- [ ] Implement disposable environment root with dedicated VPC/public subnet/outbound route/IGW, no ingress rules, On-Demand host and encrypted disposable storage. Use a pinned supported x86_64 Linux AMI with SSM; host role only pulls approved images, reads named secrets and supports SSM. Supply explicit bootstrap IDs without remote-state reads.
+- [x] Implement protected backend root; inspected saved plan applied under owner authorization. Native state migration/version/resource verification completed before removing owned temporary local copies.
+- [x] Implement/apply 19-resource bootstrap saved plan with actual immutable-ID Environment subject, separate roles, fixed repositories/retention and secret metadata. Generated values initialized solely through protected API; trust/repositories/state read back. Actual OIDC role tests remain pending.
+- [x] Define disposable environment root with dedicated network, no ingress, pinned On-Demand host/encrypted disposable storage and explicit profile; mock boundary test passes. Host provisioning/live proof remains pending.
 - [ ] Measure representative full Compose+E2E CPU/memory/disk use locally; include current Auth connection-pool demand. Compare regional On-Demand sizes (including burstable-credit cost if considered), disk, public IPv4, ECR, S3/secrets/log retention costs. Obtain owner approval of host/AMI/disk and live-hourly/live-monthly/disposed estimates before first apply.
 - [ ] Bootstrap and provision using refreshed saved plans with restrictive file permissions. Inspect permitted changes before `terraform apply SAVED_PLAN`; record exact inputs/root/key/tool versions and resource identities. Never publish plan JSON or state as artifacts.
 - [ ] Prove actual role denies, S3 state locking contention, saved-plan staleness, drift detection, missing-state recovery refusal and protected state-version access. Preserve restore/import/verified-force-unlock instructions in `infra/aws/README.md`.
@@ -246,14 +246,16 @@ and plan checkboxes/issues with actual evidence. Configure GitHub protection onl
 - [ ] OIDC subject/Environment restrictions and IAM action/resource support require actual verification — Task 4.
 - [ ] Candidate fixture credentials, image-retention protection and container metadata blocking need implementation evidence — Tasks 3, 5, 8.
 - [ ] Cancellation launch/record gaps and state recovery require interruption trials — Tasks 5, 7.
-- [x] Owner authorized inline execution on 2026-10-04; no AWS mutation has been performed.
+- [x] Owner authorized inline execution and continuation without further approvals on 2026-10-04. Verified cleanup and protected state-backend creation/migration have occurred; no application host exists yet.
 - [x] Existing CI SHA ambiguity identified and addressed with a separate trusted merge-checkout evidence artifact.
 - [x] Hosted merge-checkout packaging proved on PR #72/run 37210137790; artifact identity and digest match live PR metadata. All six CI jobs and three API tests plus one logging regression passed. This does not complete the trusted-main check-selection proof.
 - [x] Foundation PR #72 reached trusted `main`; trial PR #73 proved pending CI rejection and accepted merge-candidate check association without AWS access. Latest-attempt/protection proofs continue.
 
 ## Plan handoff
 
-Owner selected **native/inline** execution on 2026-10-04. Tasks 1–2 are partially
-implemented; do not mark either complete from local tests alone. Continue from
-the recorded cleanup review and live GitHub proof gates. AWS account cleanup and
-first provisioning retain their explicit owner-review steps.
+Owner selected **native/inline** execution on 2026-10-04 and delegated continued
+execution without routine approvals. Task 1 is complete from actual cleanup and
+repeated inventory evidence. Task 2 live selection proof and exact OIDC subject
+were obtained in run 37215526810; controller finalization remains unfinished.
+Backend creation/migration is verified; remaining bootstrap/runtime work continues.
+Mark completion only from the full task contract, never local tests alone.

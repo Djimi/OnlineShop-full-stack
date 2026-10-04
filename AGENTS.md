@@ -291,9 +291,15 @@ documents. Account inventory and candidate-request foundations have started.
 The owner authorized continuation without further approvals; verified cleanup
 and capacity/cost selection are recorded in the runbook. Verify scope/account
 before mutations. Live check-selection/protection proofs still precede the final gate.
-The manual `AWS candidate check proof` workflow tests pending/failure association
-only; it cannot validate AWS or publish success. Its controller requires exact CI
+The manual `AWS candidate check proof` workflow tests pending/failure association,
+synthetic latest-check selection and nonsensitive OIDC subject claims; it cannot
+validate AWS or publish successful **AWS validation**. Its controller requires exact CI
 merge-checkout evidence and rejects candidate edits to the trusted CI workflow.
+Protected state/bootstrap have been provisioned from inspected saved plans;
+the disposable host/runtime and final gate remain unfinished. See
+[infrastructure boundaries/recovery](./infra/aws/README.md) and the operational
+runbook for verified status. Packaging/failure finalization commands are covered
+by black-box stories; they do not imply completed publication or deployment.
 
 ## Debug Info
 
