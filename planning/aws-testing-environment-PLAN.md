@@ -184,7 +184,7 @@ update each affected module's AGENTS and operational flows.
 - [ ] Implement workflow jobs: request (`contents/pull-requests/actions: read`, `checks: write`, no OIDC) -> build (read-only, no OIDC/write) -> publisher (Environment, publisher OIDC role) -> one validation job (Environment, operator OIDC role, check-write).
 - [ ] Give only the validation job shared `aws-testing-environment` concurrency with `queue: max` and no active cancellation. Keep publication outside lock without pruning images. Set validation timeout 65 minutes (55-minute stage sum plus orchestration); queue waiting is separate. Pin actions by reviewed commit SHA.
 - [ ] Implement locked `validate`: recheck identities -> verify account/state/ownership -> reconcile -> assign/persist generation -> saved plan/apply -> reset/deploy/readiness/E2E -> retrieve reports -> finalize only this attempt's check. Recheck candidate before AWS exchange, after lock and immediately before success.
-- [ ] Validate reports as bounded inert data: known suite names, expected current test count, no failures/errors and no all-skipped outcome; reject unsafe paths/links/XML external entities, malformed results or false zero-test success. Upload only sanitized records/reports/bounded logs with at least 14-day retention; never credentials/state/plans or raw environment dumps.
+- [ ] Validate reports as bounded inert data: known suite names, expected current test count (`ItemsE2ETest`: three API tests; `RestAssuredLoggingTest`: one logging regression), no failures/errors and no all-skipped outcome; reject unsafe paths/links/XML external entities, malformed results or false zero-test success. Upload only sanitized records/reports/bounded logs with at least 14-day retention; never credentials/state/plans or raw environment dumps.
 - [ ] Add always-run outcome/evidence handling for rejected build/publication/deployment stages; failure before locked job still completes accepted request non-success. Cancellation leaving pending must block merge and leave reconciliation evidence. New attempt's check supersedes prior success without old finalization changing it.
 - [ ] Run focused suites, `actionlint` with support for current `queue` syntax, Terraform checks and an actual manual trial. Push/update/CI completion must start no AWS workflow. Trial success/failure must attach to the candidate from Task 2, without a second reviewer click.
 - [ ] Commit workflow/controller/docs: `feat(e2e): add manual AWS validation workflow`.
@@ -247,7 +247,8 @@ and plan checkboxes/issues with actual evidence. Configure GitHub protection onl
 - [ ] Candidate fixture credentials, image-retention protection and container metadata blocking need implementation evidence — Tasks 3, 5, 8.
 - [ ] Cancellation launch/record gaps and state recovery require interruption trials — Tasks 5, 7.
 - [x] Owner authorized inline execution on 2026-10-04; no AWS mutation has been performed.
-- [x] Existing CI SHA ambiguity identified and addressed locally with a separate trusted merge-checkout evidence artifact; hosted artifact proof remains pending.
+- [x] Existing CI SHA ambiguity identified and addressed with a separate trusted merge-checkout evidence artifact.
+- [x] Hosted merge-checkout packaging proved on PR #72/run 37210137790; artifact identity and digest match live PR metadata. All six CI jobs and three API tests plus one logging regression passed. This does not complete the trusted-main check-selection proof.
 - [ ] Candidate-request foundation and proof harness must reach trusted `main` before live manual trials. The foundation PR cannot validate its own new controller; merging/review integration remains an owner boundary.
 
 ## Plan handoff

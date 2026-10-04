@@ -78,6 +78,8 @@ The E2E command is run from `e2e-tests/` with
 `E2E_BASE_URL=http://localhost:10000` and is limited to the current three API
 tests through the gateway, Auth, and Items. It does not browser-test the
 frontend or directly test every infrastructure service or administrative UI.
+The Maven suite also runs one `RestAssuredLoggingTest` regression, so current
+reports contain four total tests: three in `ItemsE2ETest` and one logging guard.
 PR runs retain narrowly scoped Surefire/Failsafe report artifacts, a bounded
 Compose status, and bounded redacted application logs on failure; cleanup is
 always attempted. No hosted run or artifact inspection should be inferred from

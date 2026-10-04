@@ -110,6 +110,8 @@ on failure, bounded application logs with credential-bearing lines redacted.
 Cleanup is always attempted for PR Compose runs. Current E2E covers the three
 API tests through the gateway, Auth, and Items. It does not browser-test the
 frontend or directly test each infrastructure service or administrative UI.
+The E2E module additionally runs one logging-redaction regression; current Maven
+reports therefore contain four total tests, not four API journeys.
 
 To reproduce the CI checks locally, keep every Maven wrapper invocation at its
 module root:

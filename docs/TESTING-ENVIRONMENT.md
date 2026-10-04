@@ -126,6 +126,24 @@ authorization, changed identities, skipped CI jobs, duplicate attempts, unsafe
 archives, mismatched/expired evidence, and token-safe failures. These stories
 are not GitHub check-selection or branch-protection proof.
 
+Hosted foundation PR [#72](https://github.com/Djimi/OnlineShop-full-stack/pull/72)
+passed [PR CI run 37210137790](https://github.com/Djimi/OnlineShop-full-stack/actions/runs/37210137790):
+all six jobs succeeded. Artifact `ci-candidate-37210137790-1` (ID `11306321487`)
+was read through the controller's inert archive reader; its repository/PR,
+merge/head/base SHAs, and run/attempt matched the live API identities. The
+downloaded archive SHA-256 matched GitHub's artifact digest. This verifies hosted
+identity packaging, not trusted-main request/check or branch-protection behavior.
+
+The report artifact (ID `11306400770`) also passed digest verification. XML showed:
+
+| Suite | Executed | Failures/errors/skipped |
+| --- | --- | --- |
+| `com.onlineshop.e2e.ItemsE2ETest` | 3 API tests | 0/0/0 |
+| `com.onlineshop.e2e.RestAssuredLoggingTest` | 1 logging-redaction regression | 0/0/0 |
+
+Future report validation must recognize both suites: four total tests, including
+three API journeys. Counting all XML tests as only three would reject valid runs.
+
 For CI retries, rerun **all jobs** so the new attempt has both candidate evidence
 and successful required jobs. A partial failed-job rerun without fresh complete
 attempt evidence is rejected; older artifacts do not satisfy a new attempt.
