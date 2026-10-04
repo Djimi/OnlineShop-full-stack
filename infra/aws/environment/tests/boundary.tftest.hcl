@@ -23,6 +23,10 @@ run "private_on_demand_host" {
     error_message = "Per-attempt generation must not change launch-template body and replace the host."
   }
   assert {
+    condition     = !contains(keys(aws_launch_template.host.tags), "Generation")
+    error_message = "Even template resource tag changes make its computed latest version unknown and replace the host."
+  }
+  assert {
     condition     = length(aws_security_group.host.ingress) == 0
     error_message = "No public inbound rule is allowed."
   }

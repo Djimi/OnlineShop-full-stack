@@ -35,7 +35,7 @@ only when they satisfy the observable contract; they cannot waive a constraint.
 ### 4.1 Resource boundary
 
 Mutable attempt-generation tags must not themselves force host replacement.
-Stable launch-time ownership and independently managed current-generation tags
+Stable launch-time/template-resource ownership and independently managed current-generation tags
 must preserve R5/F6/F9. An inspected initial migration may replace the empty host;
 subsequent tag-only generations must not. Do not suppress real configuration drift
 with a lifecycle-ignore workaround.

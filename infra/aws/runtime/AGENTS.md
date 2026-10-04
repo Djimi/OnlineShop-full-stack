@@ -85,6 +85,14 @@ An actual owner proof cancelled SSM with a detached isolated test container;
 the next runtime invocation refused mutation until owner removal/absence and
 host-lock release were verified. This does not implement automatic reconciliation.
 
+Owner proof evidence remains bound to its specific host and historical published
+candidate. Replacing the host requires fresh setup and current-host runtime
+verification; old host's successful probes cannot publish a new candidate's check.
+The migrated host now passed full-stack readiness/four E2E tests and a second
+seeded DB/Redis/Kafka clean-state reset/four-test retest. Sanitized XML and removal
+of the test container/temporary secret files were verified. These are owner
+historical-candidate proofs, not routine workflow or current-candidate success.
+
 ## Verification
 
 From repository root:

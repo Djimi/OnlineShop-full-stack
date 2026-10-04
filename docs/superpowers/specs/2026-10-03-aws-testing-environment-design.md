@@ -10,7 +10,7 @@ which agents must also read. Actual settings/commands belong in [TESTING-ENVIRON
 ## 1. Technical overview
 
 Attempt replacement normally resets owned application data on the existing host.
-Keep launch-template contents independent of mutable attempt identity; Terraform
+Keep launch-template contents and resource tags independent of mutable attempt identity; Terraform
 updates generation tags on existing infrastructure, including its primary
 interface. Host replacement is reserved for inspected real configuration/lifecycle
 changes, not an incidental new launch-template version on each validation.

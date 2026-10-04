@@ -392,6 +392,31 @@ The initial migration requires one reviewed replacement of the empty host;
 subsequent generation-tag changes must not replace it. No lifecycle drift-ignore
 or account-plan upgrade is introduced. Live migration/future-plan proof is pending.
 
+PR #81 merged at `9679efc` after hosted CI. The inspected migration replaced only
+the empty host, preserved network identities and verified removal of old disk/
+interface. Ten environment resources and the new host/disk/metadata/interface
+generation were read back; Free plan unchanged. Trusted setup was reinstalled.
+The subsequent hypothetical generation plan still proposed replacement because
+even template **resource** tag changes make computed `latest_version` unknown.
+That plan was not applied. A second RED-to-GREEN assertion now requires stable
+resource tags too; desired-state tag alignment/live no-churn proof remains pending.
+
+Publication `37238396197` succeeded before that integration; artifact
+`11316557973` (build) and `11316623025` (receipt) checksums, five ECR digests and
+fixture identity were independently verified. Inert bounded SSM fixture transport
+passed. Five incoming images have verified protected active-prefix tags. The
+actual host role denied protected state, EC2 discovery and unrelated-secret reads.
+An owner full-runtime proof using that historical published candidate is now
+running on the migrated Free-plan host. It cannot publish or substitute for a
+current-candidate AWS result: main has since advanced. No successful gate claimed.
+
+That owner runtime proof passed reset/readiness and all four report-backed tests.
+A second actual AWS reset seeded both databases, Redis and Kafka; the reset
+removed the old markers/topic and all four tests passed again. Sanitized XML was
+retrieved independently; test container and temporary secret/auth files were
+verified absent. The app is retained. These historical-candidate owner proofs do
+not satisfy current-candidate identity, full workflow recovery or the final gate.
+
 ### Open merge-gate provenance issue
 
 GitHub's expected status-check source binds an **App**, not a workflow. The shared

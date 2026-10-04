@@ -30,6 +30,13 @@ application data yet); thereafter tag-only attempts must not replace the host.
 Live migration/replanning proof is pending. The environment root now includes
 the interface tag resource as well as its nine original infrastructure resources.
 
+The initial migration is applied: ten resources, same dedicated network, old
+host/disk/interface removal verified and new eligible host bootstrapped. Live
+follow-up exposed a second cause: changing the template **resource** tags makes
+computed `latest_version` unknown, also forcing replacement. Its tags must be
+stable too. Do not apply the destructive hypothetical follow-up plan. The tag-only
+owner alignment/fresh-plan proof is pending; no lifecycle ignore is introduced.
+
 | Root | Remote key | Caller |
 | --- | --- | --- |
 | `backend/` | `state/backend.tfstate` | Owner only |
