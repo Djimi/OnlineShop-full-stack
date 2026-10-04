@@ -1,0 +1,76 @@
+name: AWS candidate check proof
+
+on:
+  workflow_dispatch:
+    inputs:
+      pr:
+        description: Reviewed same-repository PR number (association proof only)
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  request-proof:
+    name: Candidate association proof
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      pull-requests: read
+      actions: read
+      checks: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+          ref: ${{ github.sha }}
+
+      - name: Authorize and record exact CI candidate
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REQUESTED_PR: ${{ inputs.pr }}
+        run: python3 scripts/aws-validation.py request --pr "$REQUESTED_PR" --output "$RUNNER_TEMP/request.json"
+
+      - name: Complete accepted proof as non-success
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          import subprocess
+
+          path = Path(os.environ['RUNNER_TEMP']) / 'request.json'
+          if path.exists():
+              record = json.loads(path.read_text())
+              check = record['check_run_id']
+              if type(check) is not int or check <= 0:
+                  raise SystemExit('Invalid proof check identity')
+              body = {
+                  'status': 'completed', 'conclusion': 'failure',
+                  'output': {'title': 'Association proof only; AWS not validated',
+                             'summary': 'This harness proves candidate association. It does not provision or run E2E, so AWS validation remains unsuccessful.'},
+              }
+              result = subprocess.run(
+                  ['gh', 'api', f'repos/Djimi/OnlineShop-full-stack/check-runs/{check}',
+                   '--method', 'PATCH', '--input', '-'],
+                  input=json.dumps(body).encode(), capture_output=True, timeout=30)
+              if result.returncode:
+                  raise SystemExit('Proof finalization failed; check remains non-success')
+              with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as summary:
+                  summary.write(f"Candidate `{record['candidate_sha']}`; check `{check}`; no AWS execution.\n")
+          PY
+
+      - name: Retain accepted request evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: aws-candidate-proof-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/request.json
+          if-no-files-found: ignore
+          retention-days: 14
