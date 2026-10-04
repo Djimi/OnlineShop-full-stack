@@ -285,6 +285,22 @@ bounded `docker exec tar`: Docker documents that `cp` cannot read tmpfs. Explici
 provider `dependency:get`, not `go-offline` alone, made offline read-only Maven
 succeed. Fresh module-root `clean test` also passed; no EC2 host exists.
 
+### Initial environment apply: account-plan blocker
+
+PR #78 merged at `26ec8de` after hosted CI passed. The owner-authorized initial
+environment apply then created eight network/template resources but failed at
+EC2 `RunInstances`: `InvalidParameterCombination`, selected instance type not
+eligible for Free Tier. Read-only `GetAccountPlanState` confirms `FREE`/`ACTIVE`.
+The `c7i.xlarge` selection is unchanged; no account-plan upgrade was performed.
+
+Reconciliation verified eight persisted resources, matching remote resource/
+output/lineage/serial identity, versioned environment state, empty ingress and a
+released Terraform lock. No host, disk or ENI exists for the recorded generation.
+The operation intent conservatively remains `unknown`; protected reconciliation
+evidence records `blocked-account-plan`. No application or AWS success exists.
+Resolve the account-plan prerequisite before a refreshed, inspected apply; never
+retry the original creation plan blindly. See [recovery](../infra/aws/README.md).
+
 ### Open merge-gate provenance issue
 
 GitHub's expected status-check source binds an **App**, not a workflow. The shared
