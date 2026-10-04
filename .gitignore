@@ -9,3 +9,6 @@ tests/performance/reports/
 
 .env
 .playwright-mcp/
+
+__pycache__/
+*.py[cod]

@@ -62,7 +62,7 @@ When using Maven commands you MUST use the Maven wrapper (`./mvnw`) inside the s
 
 ## GitHub Actions CI
 
-The unfiltered `push` and `pull_request` events run three independent jobs with
+The unfiltered `push` and `pull_request` events run independent verification jobs with
 read-only repository access. No job waits for another, so an image build still
 runs when Java or frontend verification fails.
 
@@ -72,6 +72,7 @@ push or pull_request
   -> Frontend: Node 24 -> npm ci -> lint -> production build
   -> Images and PR E2E: build four application images
        -> pull_request only: Compose -> readiness -> API E2E -> evidence -> cleanup
+  -> pull_request only: credential-free candidate identity -> retained merge-checkout evidence
 ```
 
 Java uses three explicit Temurin 25 jobs. Auth and API Gateway each run `./mvnw --batch-mode clean
@@ -270,6 +271,26 @@ See [docs/TESTING_STRATEGY.md](./docs/TESTING_STRATEGY.md) for:
 - Security testing
 - Test documentation
 
+## AWS Testing Environment
+
+See [docs/TESTING-ENVIRONMENT.md](./docs/TESTING-ENVIRONMENT.md) for agreed future
+AWS account cleanup, manually started PR deployment, required E2E validation,
+shared-environment locking, clean test state, and optional manual disposal.
+Deployment/disposal and merge protection are not yet implemented; candidate-request
+foundations are in progress. Keep that document updated as
+resources and automation are configured; distinguish dated inventory coverage
+from verified live deployment settings.
+The [AWS testing environment design spec](./docs/superpowers/specs/2026-10-03-aws-testing-environment-design.md)
+is the owner-facing reading path, with topic links to the
+[detailed implementation contract](./docs/superpowers/specs/2026-10-03-aws-testing-environment-requirements.md).
+The [implementation plan](./planning/aws-testing-environment-PLAN.md) is authorized
+for inline execution; implementation agents must read the plan and both spec
+documents. Account inventory and candidate-request foundations have started.
+Cleanup-list/cost approval and live GitHub check-selection proof remain explicit gates.
+The manual `AWS candidate check proof` workflow tests pending/failure association
+only; it cannot validate AWS or publish success. Its controller requires exact CI
+merge-checkout evidence and rejects candidate edits to the trusted CI workflow.
+
 ## Debug Info
 
 See [docs/DEBUG_INFO.md](./docs/DEBUG_INFO.md) for:
@@ -284,6 +305,8 @@ See [docs/CONCEPTS_TO_TRY.md](./docs/CONCEPTS_TO_TRY.md) for:
 
 ## Planning
 
+- Write reviewable, implementation-ready specifications using progressive
+  disclosure; follow [docs/agent/SPECIFICATIONS.md](./docs/agent/SPECIFICATIONS.md).
 - Add all plans in [planning](./planning/) folder
 - Use the following name pattern `<feature-name>-PLAN.md`, for example `Migrating-auth-service-to-ddd-PLAN.md`
 - In each plan create tasks to be done and when done put ticks on them, so I know what is implemented, what has left, etc.

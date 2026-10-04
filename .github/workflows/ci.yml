@@ -12,6 +12,56 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  record-candidate:
+    name: Candidate identity
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+          ref: ${{ github.sha }}
+          fetch-depth: 2
+
+      - name: Record checked-out merge candidate without executing candidate code
+        env:
+          CANDIDATE_SHA: ${{ github.sha }}
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          import subprocess
+
+          event = json.loads(Path(os.environ['GITHUB_EVENT_PATH']).read_text())
+          pr = event['pull_request']
+          def revision(ref):
+              return subprocess.check_output(['git', 'rev-parse', ref], text=True).strip()
+          candidate = revision('HEAD')
+          head, base = revision('HEAD^2'), revision('HEAD^1')
+          if (candidate != os.environ['CANDIDATE_SHA']
+                  or head != pr['head']['sha'] or base != pr['base']['sha']):
+              raise SystemExit('Checkout does not match triggering PR merge candidate')
+          record = {
+              'repository': os.environ['GITHUB_REPOSITORY'], 'pr': event['number'],
+              'head_sha': head, 'base_sha': base, 'candidate_sha': candidate,
+              'ci_run_id': int(os.environ['GITHUB_RUN_ID']),
+              'ci_run_attempt': int(os.environ['GITHUB_RUN_ATTEMPT']),
+              'event': os.environ['GITHUB_EVENT_NAME'],
+          }
+          directory = Path(os.environ['RUNNER_TEMP']) / 'ci-candidate'
+          directory.mkdir(mode=0o700)
+          (directory / 'candidate.json').write_text(json.dumps(record))
+          PY
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ci-candidate-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/ci-candidate/candidate.json
+          if-no-files-found: error
+          retention-days: 14
+
   verify-auth:
     name: Java (Auth)
     runs-on: ubuntu-latest

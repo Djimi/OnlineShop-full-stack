@@ -28,6 +28,20 @@ Tests for repository automation must also follow the story-oriented guidance in
 behavior, keep scenario setup explicit, and avoid mirroring implementation
 helpers or retaining coverage for removed modes.
 
+For AWS candidate-request foundations, run from the repository root:
+
+```bash
+python3 -m unittest -v tests/scripts/aws_validation_test.py
+python3 -m unittest discover -s tests/scripts -p '*_test.py'
+actionlint .github/workflows/ci.yml .github/workflows/aws-check-proof.yml
+```
+
+The focused stories substitute only the GitHub CLI process boundary and assert
+observable records/check requests and rejection without AWS calls. They do not
+prove GitHub merge/check selection. The manual association harness always leaves
+**AWS validation** unsuccessful; live positive/latest-attempt protection proof
+is still required before deployment workflows or merge-gate activation.
+
 ## GitHub Actions Checks
 
 Every push and pull request runs independent Java, frontend, and image/PR-E2E
@@ -36,6 +50,13 @@ jobs. Three explicit Java jobs use Temurin 25: Auth and API Gateway each run
 `common` `clean install` before Items `clean verify`. Frontend uses Node 24 and
 runs `npm ci`, `npm run lint`, and `npm run build` from `frontend/`. There is no
 current frontend unit-test script.
+
+PR CI additionally runs a credential-free `Candidate identity` job without
+executing candidate application code. It records the exact checked-out merge SHA,
+head/base parents, PR and run/attempt identity as a 14-day artifact. GitHub's run
+and job `head_sha` fields report PR head and are not proof of this merge checkout.
+AWS request verification rejects skipped required CI jobs and candidate changes
+to the trusted CI workflow.
 
 The image job runs `docker compose build auth-service items-service api-gateway
 frontend` on both events. This packages the four deployable applications only;
