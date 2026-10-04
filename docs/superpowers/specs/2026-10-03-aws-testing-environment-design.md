@@ -1,8 +1,9 @@
 # Manually Started AWS PR Validation
 
 **Status:** Owner authorized inline execution of the [implementation plan](../../../planning/aws-testing-environment-PLAN.md)
-on 2026-10-04. Inventory and candidate-request foundations are in progress;
-explicit cleanup-list and first-provisioning cost reviews still apply.
+on 2026-10-04 and explicitly delegated continuation without further approvals.
+Verified cleanup and measured cost/capacity choices are recorded in the runbook;
+resource/security constraints and live acceptance proofs remain binding.
 Read §1–§3 for the solution. Topic links lead to the [implementation contract](./2026-10-03-aws-testing-environment-requirements.md),
 which agents must also read. Actual settings/commands belong in [TESTING-ENVIRONMENT.md](../../TESTING-ENVIRONMENT.md).
 
