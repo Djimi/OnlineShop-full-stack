@@ -296,7 +296,13 @@ synthetic latest-check selection and nonsensitive OIDC subject claims; it cannot
 validate AWS or publish successful **AWS validation**. Its controller requires exact CI
 merge-checkout evidence and rejects candidate edits to the trusted CI workflow.
 Protected state/bootstrap have been provisioned from inspected saved plans;
-the disposable host/runtime and final gate remain unfinished. See
+initial environment apply created eight network/template resources but the
+active Free account plan rejected the selected host. Partial state is reconciled;
+no host exists. The account MUST remain on the Free plan; never upgrade it.
+The replacement selection is `m7i-flex.large`, verified Free-Tier-eligible and
+offered in the configured AZ. Configuration/IAM updates and live capacity proof
+must precede a refreshed apply; never retry the failed saved plan.
+The disposable host/runtime and final gate remain unfinished. See
 [infrastructure boundaries/recovery](./infra/aws/README.md) and the operational
 runbook for verified status. Packaging/failure finalization commands are covered
 by black-box stories; they do not imply completed publication or deployment.

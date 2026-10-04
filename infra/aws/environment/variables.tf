@@ -22,10 +22,10 @@ variable "ami_id" {
 }
 variable "instance_type" {
   type    = string
-  default = "c7i.xlarge"
+  default = "m7i-flex.large"
   validation {
-    condition     = var.instance_type == "c7i.xlarge"
-    error_message = "Use a measured supported On-Demand x86_64 size."
+    condition     = var.instance_type == "m7i-flex.large"
+    error_message = "Use the selected Free-plan-compatible On-Demand x86_64 size."
   }
 }
 variable "generation" {

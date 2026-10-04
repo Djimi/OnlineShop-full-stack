@@ -27,6 +27,13 @@ variables {
 run "retained_bootstrap" {
   command = plan
   assert {
+    condition = anytrue([for statement in jsondecode(aws_iam_role_policy.operator.policy).Statement :
+      statement.Sid == "LaunchTaggedHost" &&
+      try(statement.Condition.StringEquals["ec2:InstanceType"], "") == "m7i-flex.large"
+    ])
+    error_message = "Operator launch permission must match the selected Free-plan host."
+  }
+  assert {
     condition     = length(aws_ecr_repository.application) == 5
     error_message = "Only five fixed private application/test repositories are allowed."
   }

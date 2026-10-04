@@ -8,7 +8,9 @@ Disposal: environment only -> backend/bootstrap and evidence remain
 
 **Implementation in progress:** backend is created/migrated and bootstrap's 19
 inspected resources are applied. Dedicated generated credentials were initialized
-via protected Secrets Manager API, never Terraform. No application host exists.
+via protected Secrets Manager API, never Terraform. Initial environment apply
+created eight network/template resources but EC2 rejected the selected host
+because the account is on an active Free plan. No application host exists.
 Do not treat mock tests as proof of real IAM permissions, locking or isolation.
 See [operational evidence](../../docs/TESTING-ENVIRONMENT.md) and the
 [implementation plan](../../planning/aws-testing-environment-PLAN.md).
@@ -33,13 +35,42 @@ Protected local identifiers live in ignored `.runtime/bootstrap-identifiers.json
 Do not infer ownership from a matching bucket/resource name. Do not print raw
 state, plans, secrets, environment dumps or credentials.
 
-The disposable host is On-Demand `c7i.xlarge`, pinned x86_64 AL2023 AMI
+The disposable host is On-Demand Free-plan-eligible `m7i-flex.large`, pinned x86_64 AL2023 AMI
 `ami-04478a3e21a0d79a7`, 50 GiB encrypted gp3 deleted on termination. No security
 group ingress, SSH key, NAT, load balancer or managed DB exists in its definition.
 Outbound-only public IPv4 is intentional; inspection will use SSM. IMDSv2/hop
 limit alone is not container isolation; runtime firewall/probes are still pending.
 
 ## Verify definitions without AWS mutation
+
+### Account-plan preflight and partial apply
+
+Before provisioning paid-only capacity, read the verified account's Free Tier
+`GetAccountPlanState` (in `us-east-1`). An active Free plan can reject the chosen
+instance even when the AMI, IAM and regional offerings are valid. This account
+MUST remain on the Free plan. Never upgrade it. Check `DescribeInstanceTypes`
+with `free-tier-eligible=true` and offerings for the configured AZ before selecting
+capacity; regional availability alone does not prove account-plan eligibility.
+The replacement selection is `m7i-flex.large` (two x86_64 vCPUs, 8 GiB), verified
+eligible/offered in `eu-north-1a`. Environment validation and operator launch
+policy now pin this selection; both plan assertions were observed RED then GREEN.
+Live policy application, launch/capacity proofs remain pending. Eligibility is
+not unlimited free usage.
+
+The first environment apply failed at EC2 `RunInstances` with
+`InvalidParameterCombination: The specified instance type is not eligible for Free Tier`.
+Eight resources remain in versioned `state/environment.tfstate`; the host, root
+disk and ENI are absent, ingress is empty and the state lock is released.
+Protected reconciliation receipt: `.runtime/partial-environment-reconciliation.json`.
+Do not rerun the initial-absence checks or reuse the failed saved plan. After the
+account prerequisite is resolved, reconcile recorded ownership/live resources,
+refresh and inspect a new saved plan against this existing state, then apply only
+that plan. Do not remove state or recreate the network to hide partial progress.
+
+When comparing authoritative S3 state with `terraform state pull`, compare
+resource/output identities, lineage, serial and tool version explicitly: pull may
+normalize `check_results` without changing resource state. A whole-JSON mismatch
+alone is not evidence of resource drift. Keep both raw records protected.
 
 Run from the repository root, separately for each root:
 

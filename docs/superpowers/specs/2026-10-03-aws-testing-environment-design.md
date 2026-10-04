@@ -9,6 +9,13 @@ which agents must also read. Actual settings/commands belong in [TESTING-ENVIRON
 
 ## 1. Technical overview
 
+**Owner constraint correction:** the AWS account MUST remain on the Free plan;
+paid-plan upgrades are prohibited. The original `c7i.xlarge` capacity selection
+is superseded by catalog-verified eligible `m7i-flex.large` in `eu-north-1a`
+(two x86_64 vCPUs, 8 GiB). Preserve existing topology and image architecture;
+update provisioning/IAM boundaries before retry and prove full-stack timing on
+the actual host. No automatic downgrade to inadequate capacity or skipped tests.
+
 **Open verification issue:** the shared GitHub Actions App does not identify a
 specific check-writing workflow. Same-repository workflow permission overrides
 can grant check writes; controller-side authorization alone cannot protect the

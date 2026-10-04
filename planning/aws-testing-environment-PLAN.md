@@ -237,6 +237,15 @@ and plan checkboxes/issues with actual evidence. Configure GitHub protection onl
 
 ## Issues and resolutions
 
+- [ ] **Active Free account plan blocks the chosen host:** initial apply created
+  eight network/template resources, then EC2 rejected `c7i.xlarge` as ineligible
+  for Free Tier. `GetAccountPlanState` confirms `FREE`/`ACTIVE`. Partial versioned
+  state reconciled; no host/disk/ENI, ingress empty, lock released. The owner
+  rejected a paid-plan upgrade: account MUST remain Free. Select verified
+  eligible/offered `m7i-flex.large` (2 vCPU/8 GiB/x86_64). Update Terraform/IAM
+  constraints/tests and reprove real capacity; no host launched. Resume with a new
+  inspected plan against existing state, not the failed initial saved plan.
+
 - [ ] **Check-writer provenance:** expected-source GitHub Actions App does not
   identify a trusted workflow; same-repository workflow permission overrides can
   grant check writes. Resolve/prove the final gate before enabling protection.
