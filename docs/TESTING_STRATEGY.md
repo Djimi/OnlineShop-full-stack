@@ -79,6 +79,26 @@ during packaging; never bypass Maven `clean` failures by silently skipping it.
 
 ## GitHub Actions Checks
 
+Guarded operator-plan proof stories:
+`python3 -m unittest -v tests/scripts/aws_operator_plan_test.py`.
+Run actionlint on `.github/workflows/aws-operator-plan-proof.yml`; resolve a
+provisioned binary when it is not on `PATH`. Current reviewed upstream lacks
+GitHub's documented `concurrency.queue` schema: only its exact diagnostic may be
+excluded with `-ignore '^unexpected key "queue" for "concurrency" section\.'`,
+provided parsed YAML independently verifies the shared group, `queue: max` and
+`cancel-in-progress: false`. Do not ignore other diagnostics or claim full schema
+support; hosted manual syntax proof remains required.
+These stories prove authorization before AWS,
+wrong-role refusal, missing/empty/mismatched-state refusal before Terraform,
+locked no-change planning, nonempty expected plan coverage and no apply/raw
+publication. Real operator OIDC/native-lock/plan permissions require a separate
+trusted-main manual run. A no-change plan does not prove EC2 mutation permissions.
+Modified trusted controller/config inputs refuse before AWS; only six fixed
+Terraform inputs, never arbitrary extra files, enter the private planning root.
+Process doubles must preserve actual empty-output semantics: a no-change
+`git diff` emits zero bytes, not a blank line. Otherwise an honest clean-checkout
+guard is tested against a fictitious difference and positive stories fail.
+
 Owner host-setup command stories:
 `python3 -m unittest -v tests/scripts/aws_host_setup_test.py`.
 These substitute only the AWS process boundary and verify no mutation for foreign

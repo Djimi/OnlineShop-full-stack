@@ -152,6 +152,10 @@ update `.gitignore` and operational record.
 - [ ] Measure representative full Compose+E2E CPU/memory/disk use locally; include current Auth connection-pool demand. Compare regional On-Demand sizes (including burstable-credit cost if considered), disk, public IPv4, ECR, S3/secrets/log retention costs. Obtain owner approval of host/AMI/disk and live-hourly/live-monthly/disposed estimates before first apply.
 - [ ] Bootstrap and provision using refreshed saved plans with restrictive file permissions. Inspect permitted changes before `terraform apply SAVED_PLAN`; record exact inputs/root/key/tool versions and resource identities. Never publish plan JSON or state as artifacts.
 - [ ] Complete live boundaries/recovery: selected actual role read denies, native S3 locking, saved-plan staleness and tag-drift detection are proved. Routine-role mutations, missing-state recovery refusal and protected version boundaries remain pending. Preserve restore/import/verified-force-unlock instructions in `infra/aws/README.md`.
+- Guarded manual operator no-change plan proof is implemented with missing/empty/
+  unexpected-state refusal and pre-OIDC actor authorization; actual operator OIDC
+  plan/native-lock proof remains pending. It cannot apply or establish EC2 mutation
+  permissions; do not delete live state merely to satisfy its regression stories.
 - [ ] Commit configuration, provider locks and sanitized evidence after checks: `feat(e2e): provision isolated AWS testing infrastructure`.
 
 ### Task 5: Implement reset, bounded remote runtime and recovery ledger

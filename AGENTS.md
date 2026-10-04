@@ -323,6 +323,10 @@ Owner setup now also has bounded read-only `--reconcile` discovery with a
 controlled live lost-command-ID proof; it cannot authorize retry, clear unknown
 runtime state or synthesize validation success. Routine whole-session recovery
 remains unfinished.
+The separate manual `AWS operator plan proof` foundation guards current-state
+planning with pre-OIDC actor authorization and the shared session group. It
+refuses absent/empty/unexpected state before init and never applies or publishes
+AWS success. Its actual operator OIDC/native-lock proof remains pending.
 The separate manual `AWS role boundary proof` checks selected allowed/denied
 reads with publisher/operator OIDC; it never mutates AWS or publishes AWS success.
 Final merge protection is additionally blocked on check-writer provenance:

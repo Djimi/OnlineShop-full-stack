@@ -1,0 +1,56 @@
+name: AWS operator plan proof
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  plan-current:
+    name: Guarded current-environment plan
+    if: github.ref == 'refs/heads/main'
+    environment: aws-testing
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    concurrency:
+      group: aws-testing-environment
+      queue: max
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      AWS_TESTING_ACCOUNT_ID: ${{ vars.AWS_TESTING_ACCOUNT_ID }}
+      AWS_TESTING_STATE_BUCKET: ${{ vars.AWS_TESTING_STATE_BUCKET }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Authorize dispatch and actual rerun actors before AWS exchange
+        run: python3 scripts/aws-operator-plan-proof.py authorize --output "$RUNNER_TEMP/operator-authorized.json"
+      - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3
+        with:
+          terraform_version: 1.16.5
+          terraform_wrapper: false
+      - uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4
+        with:
+          role-to-assume: ${{ vars.AWS_TESTING_OPERATOR_ROLE }}
+          aws-region: eu-north-1
+          allowed-account-ids: ${{ vars.AWS_TESTING_ACCOUNT_ID }}
+          role-session-name: operator-plan-${{ github.run_id }}-${{ github.run_attempt }}
+          role-duration-seconds: 900
+          mask-aws-account-id: true
+      - name: Verify authoritative state then make a locked no-change plan
+        run: |
+          python3 scripts/aws-operator-plan-proof.py plan --output "$RUNNER_TEMP/operator-plan-proof.json"
+          cat "$RUNNER_TEMP/operator-plan-proof.json" >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: aws-operator-plan-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/operator-plan-proof.json
+          if-no-files-found: warn
+          retention-days: 14

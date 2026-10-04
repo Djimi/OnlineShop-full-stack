@@ -75,6 +75,18 @@ IPv6 has no source address; that is not a routed firewall-denial proof.
 
 ## Verify definitions without AWS mutation
 
+The manual **AWS operator plan proof** workflow is a separate guarded current-
+environment trial, not validation/deployment. It authorizes both dispatch/rerun
+actors before OIDC, takes the shared session concurrency group, verifies the
+operator account/role, reads bounded current state/pointer under version/ETag
+checks and refuses missing/empty/unexpected or mismatched state before init.
+It copies only trusted Terraform inputs to a private runner directory and plans
+with native S3 locking. Expected resource coverage and zero actions are mandatory;
+it never applies, resets data or publishes AWS success. Only sanitized proof JSON
+is an artifact; snapshots/plans/logs are private and must never be uploaded.
+Timeout/failure requires lock reconciliation before retry. Missing-state stories
+do not prove live recovery refusal, and live operator proof remains pending.
+
 ### Account-plan preflight and partial apply
 
 Before provisioning paid-only capacity, read the verified account's Free Tier
