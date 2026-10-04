@@ -13,9 +13,12 @@ Trusted generation/bootstrap/digests/fixtures -> host lock
  -> terminal operation; app retained for inspection
 ```
 
-**Unfinished:** cloud-side SSM transport/reconciliation, actual EC2 metadata,
-restart/reboot/cancellation proofs, diagnostics and final AWS gate. The eligible
-Free-plan host now exists; owner setup is running, not application deployment.
+**Unfinished:** routine cloud-side SSM transport/reconciliation, cancellation
+proofs, diagnostics and final AWS gate. The eligible Free-plan host now exists;
+host prerequisites are installed, not application deployment.
+Owner setup and selected Auth/E2E isolation probes now pass, including Docker
+restart and actual reboot/firewall retention with host ECR/secret access. Full
+application/E2E, all-image probes and cancellation recovery remain unfinished.
 
 `scripts/aws-host-setup.py` owns the initial owner-only SSM setup proof. It transfers
 only trusted-main host files with chunk bounds/checksums and persists command
@@ -27,7 +30,8 @@ automatic retry. This is not the routine validation/disposal orchestrator.
 The pinned AL2023 image supplies `curl-minimal`; request that package during
 setup, not full `curl` which conflicts with it. Do not mask dependency failures
 with broad package removal or `--skip-broken`. The first real SSM setup proved
-this failure; corrected setup still needs its live GREEN verification.
+this failure; corrected trusted setup completed successfully after owner
+reconciliation, with original failure/recovery records retained separately.
 
 Install trusted root-owned files at `/opt/onlineshop-test`: `host-setup.sh`,
 `run-stack.py`, `compose.yml` and restricted `bootstrap.json` containing only
@@ -38,8 +42,8 @@ record. Candidate processes must not edit these or access the Docker socket.
 `bash host-setup.sh --setup` requires AL2023 x86_64/root; it installs host
 dependencies, checksum-pinned Compose v5.5.1 and Docker pre/post-start firewall
 hooks. `--firewall` rejects forwarded IPv4/IPv6 IMDS access without flushing rules
-or blocking host OUTPUT needed by SSM/ECR/Secrets Manager. Actual restart/reboot
-proof remains mandatory. Runtime verifies both rules and forwarding attachment
+or blocking host OUTPUT needed by SSM/ECR/Secrets Manager. Selected Auth/E2E
+restart/reboot probes passed. Runtime verifies both rules and forwarding attachment
 before credentials or reset.
 
 `python3 run-stack.py --generation run-<id>-attempt-<n> --images <receipt>`

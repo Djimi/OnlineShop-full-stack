@@ -300,8 +300,9 @@ initial environment apply created eight network/template resources but the
 active Free account plan rejected the original host. After reconciliation and
 tested configuration/IAM updates, a refreshed host-only plan launched the eligible
 `m7i-flex.large`; actual host/storage settings and unchanged Free plan were verified.
-The account MUST remain on the Free plan; never upgrade it. Host setup is in
-progress; application deployment/capacity/isolation proofs remain unfinished.
+The account MUST remain on the Free plan; never upgrade it. Host setup and selected
+Auth/E2E isolation probes pass across Docker restart/real reboot. Full application
+deployment/capacity, all-image isolation and recovery proofs remain unfinished.
 The disposable host/runtime and final gate remain unfinished. See
 [infrastructure boundaries/recovery](./infra/aws/README.md) and the operational
 runbook for verified status. Packaging/failure finalization commands are covered
