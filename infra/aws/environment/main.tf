@@ -46,7 +46,7 @@ resource "aws_security_group" "host" {
 }
 resource "aws_launch_template" "host" {
   name = "onlineshop-test-host"
-  tags = local.tags
+  tags = { ManagedBy = local.tags.ManagedBy, Repository = local.tags.Repository }
   dynamic "tag_specifications" {
     for_each = toset(["instance", "volume", "network-interface"])
     content {
