@@ -127,6 +127,13 @@ state and dedicated secrets. Operator's fixed-profile/environment-prefix discove
 and publisher's ECR discovery passed. This does not prove mutation permissions,
 Terraform locks, pass-role denies or container/SSM isolation.
 
+Native S3 lock contention is now verified with two concurrent owner plans on the
+fixed environment root/key: one acquired the lock and inspected nine expected
+creations; the other was blocked. The completed plans released the lock and did
+not create state or resources. This does not prove operator mutation permissions,
+stale-plan rejection or real host deployment. Keep saved plans protected locally;
+do not reuse proof-run plans as candidate deployment plans.
+
 ## Saved plans and recovery
 
 Every mutation uses the same trusted root, recorded backend/inputs and provider

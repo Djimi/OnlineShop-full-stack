@@ -15,6 +15,12 @@ operational commands and evidence are recorded incrementally in the runbook.
 
 ## 4. Implementation contract: resources and identities
 
+**Open gate-provenance issue:** expected-source App selection is not workflow
+identity. The no-custom-App approach must not be treated as sufficient until
+same-repository check-writer spoofing is addressed/proved. The binding outcome
+remains authentic validation of the exact candidate, not merely a check with the
+right name. See [operational evidence/issues](../../TESTING-ENVIRONMENT.md).
+
 The following rules are the implementation contract after written-spec approval.
 **Must** is mandatory. Agents may choose mechanisms labeled **IMPLEMENTATION DETAIL**
 only when they satisfy the observable contract; they cannot waive a constraint.

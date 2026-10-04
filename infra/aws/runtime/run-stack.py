@@ -16,10 +16,12 @@ import io
 import json
 import os
 import re
+import resource
 import shutil
 import subprocess
 import sys
 import tarfile
+import tempfile
 import time
 import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
@@ -102,44 +104,7 @@ def main():
                 record_stage(operation, "readiness")
                 test_error = None
                 try:
-                    command(
-                        [
-                            "docker",
-                            "run",
-                            "--name",
-                            PROJECT + "-e2e",
-                            "--label",
-                            "ManagedBy=" + PROJECT,
-                            "--label",
-                            "Generation=" + args.generation,
-                            "--label",
-                            "com.docker.compose.project=" + PROJECT,
-                            "--network",
-                            PROJECT + "_network",
-                            "--user",
-                            "10001:10001",
-                            "--workdir",
-                            "/workspace/e2e-tests",
-                            "--cap-drop=ALL",
-                            "--security-opt=no-new-privileges:true",
-                            "--pids-limit",
-                            "512",
-                            "--memory",
-                            "1g",
-                            "--cpus",
-                            "2",
-                            "--env-file",
-                            str(STATE / "e2e.env"),
-                            "--entrypoint",
-                            "./mvnw",
-                            images["e2e"],
-                            "--batch-mode",
-                            "clean",
-                            "test",
-                        ],
-                        env=env,
-                        timeout=900,
-                    )
+                    execute_e2e(images["e2e"], env, args.generation)
                 except RuntimeFailed as error:
                     test_error = error
                     operation["stages"].append(
@@ -415,7 +380,7 @@ def write_secret_files(values):
 
 
 def verify_project_ownership(env):
-    for resource, listing in [
+    for kind, listing in [
         ("container", ["docker", "ps", "-aq"]),
         ("volume", ["docker", "volume", "ls", "-q"]),
     ]:
@@ -430,12 +395,10 @@ def verify_project_ownership(env):
         for name in names:
             if not re.fullmatch(r"[A-Za-z0-9_-]+", name):
                 raise RuntimeFailed("unexpected owned resource identity")
-            records = json.loads(
-                command(["docker", resource, "inspect", name], env=env)
-            )
+            records = json.loads(command(["docker", kind, "inspect", name], env=env))
             labels = (
                 records[0].get("Config", {}).get("Labels", {})
-                if resource == "container"
+                if kind == "container"
                 else records[0].get("Labels", {})
             )
             if (
@@ -481,13 +444,88 @@ def compose(arguments, env, timeout):
     )
 
 
+def execute_e2e(image, env, generation):
+    deadline = time.monotonic() + 900
+    command(
+        [
+            "docker",
+            "run",
+            "-d",
+            "--name",
+            PROJECT + "-e2e",
+            "--label",
+            "ManagedBy=" + PROJECT,
+            "--label",
+            "Generation=" + generation,
+            "--label",
+            "com.docker.compose.project=" + PROJECT,
+            "--network",
+            PROJECT + "_network",
+            "--user",
+            "10001:10001",
+            "--workdir",
+            "/workspace/e2e-tests",
+            "--cap-drop=ALL",
+            "--security-opt=no-new-privileges:true",
+            "--read-only",
+            "--pids-limit",
+            "512",
+            "--memory",
+            "1g",
+            "--cpus",
+            "2",
+            "--env-file",
+            str(STATE / "e2e.env"),
+            "--tmpfs",
+            "/tmp:rw,size=128m,uid=10001,gid=10001,mode=1777",
+            "--tmpfs",
+            "/workspace/e2e-tests/.build:rw,size=512m,uid=10001,gid=10001,mode=0755",
+            "--tmpfs",
+            "/home/tests/.m2/wrapper:rw,size=64m,uid=10001,gid=10001,mode=0755",
+            "--entrypoint",
+            "/bin/sleep",
+            image,
+            "infinity",
+        ],
+        env=env,
+        timeout=min(60, remaining(deadline)),
+    )
+    # Keep the isolated container alive until reports are copied: tmpfs would
+    # vanish when a blocking `docker run ./mvnw` exits, including on test failure.
+    command(
+        [
+            "docker",
+            "exec",
+            "--user",
+            "10001:10001",
+            "--workdir",
+            "/workspace/e2e-tests",
+            PROJECT + "-e2e",
+            "./mvnw",
+            "--batch-mode",
+            "--offline",
+            "-De2e.build.directory=/workspace/e2e-tests/.build/target",
+            "clean",
+            "test",
+        ],
+        env=env,
+        timeout=remaining(deadline),
+    )
+
+
 def collect_reports(env, credentials, generation):
     data = command(
         [
             "docker",
-            "cp",
-            PROJECT + "-e2e:/workspace/e2e-tests/target/surefire-reports",
-            "-",
+            "exec",
+            "--user",
+            "10001:10001",
+            PROJECT + "-e2e",
+            "tar",
+            "-c",
+            "-C",
+            "/workspace/e2e-tests/.build/target",
+            "surefire-reports",
         ],
         env=env,
         timeout=120,
@@ -628,21 +666,35 @@ def remove_test_container(env, generation):
 
 def command(arguments, *, env=None, data=None, timeout=30):
     try:
-        result = subprocess.run(
-            arguments,
-            env=env,
-            input=data,
-            capture_output=True,
-            timeout=timeout,
-            check=False,
-        )
+        with (
+            tempfile.TemporaryFile(dir=STATE) as output,
+            tempfile.TemporaryFile(dir=STATE) as errors,
+        ):
+            result = subprocess.run(
+                arguments,
+                env=env,
+                input=data,
+                stdout=output,
+                stderr=errors,
+                timeout=timeout,
+                check=False,
+                preexec_fn=limit_command_output,
+            )
+            output.seek(0)
+            data = output.read(MAX_DATA + 1)
     except (subprocess.TimeoutExpired, FileNotFoundError):
         raise RuntimeFailed(
             "bounded external command timed out or is unavailable"
         ) from None
-    if result.returncode or len(result.stdout) > MAX_DATA:
+    if result.returncode or len(data) > MAX_DATA:
         raise RuntimeFailed("required bounded external command failed")
-    return result.stdout
+    return data
+
+
+def limit_command_output():
+    # Trusted host execution is single-threaded. Bound each anonymous private
+    # output file in the child before it can emit unlimited candidate logs.
+    resource.setrlimit(resource.RLIMIT_FSIZE, (MAX_DATA, MAX_DATA))
 
 
 def remaining(deadline):
