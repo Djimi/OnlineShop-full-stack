@@ -37,6 +37,13 @@ computed `latest_version` unknown, also forcing replacement. Its tags must be
 stable too. Do not apply the destructive hypothetical follow-up plan. The tag-only
 owner alignment/fresh-plan proof is pending; no lifecycle ignore is introduced.
 
+PR #82 merged at `7c22ba0` after CI. Owner recovery removed only the obsolete
+template-resource `Generation` tag; launch-template version was read back
+unchanged. The current saved plan/apply had zero resource changes; a fresh
+hypothetical next-generation plan contained updates only, including the primary
+interface tag, with no host/disk/interface replacement. That hypothetical plan
+was not applied. The populated host/app and unchanged Free plan were preserved.
+
 | Root | Remote key | Caller |
 | --- | --- | --- |
 | `backend/` | `state/backend.tfstate` | Owner only |

@@ -417,6 +417,31 @@ retrieved independently; test container and temporary secret/auth files were
 verified absent. The app is retained. These historical-candidate owner proofs do
 not satisfy current-candidate identity, full workflow recovery or the final gate.
 
+PR #82 merged at `7c22ba0` after all applicable hosted checks passed. Guarded owner
+recovery removed only the template-resource `Generation` tag; template version
+remained unchanged. Current-generation saved plan/apply had no resource changes.
+A fresh hypothetical next-attempt plan had updates only, no host/disk/interface
+replacement; it was not applied. The running app and Free plan were preserved.
+
+Current-host all-five-candidate metadata transport probes and eight-service
+user/capability/mount/cloud-credential/loopback checks passed. Initial probe
+assertions failed because frontend IPv6 has no source address (`EADDRNOTAVAIL`)
+and Kafka's backing-service root is writable. Those observations are explicit:
+candidate roots remain read-only; IPv6 transport unavailability is not proof of
+a routed firewall rejection. The corrected probe requires known transport errors,
+not arbitrary tooling failure. Protected failure/diagnostic/retry records remain.
+
+An additional actual reset/readiness/E2E capacity run passed in **74.859 seconds**.
+Fourteen periodic samples saw up to **2780.55 MiB** host RAM used, at least
+**5003.09 MiB** available and **45.28 GiB** disk available, with nine simultaneous
+containers during E2E. All eight retained service containers remained running
+without Docker OOM flags; E2E was removed afterward. These are sampled observations,
+not absolute peaks or sustained-load guarantees. Summed Docker CPU samples reached
+284.57%; container sampling intervals are not aligned, so this is not a reliable
+whole-host CPU peak or percentage-of-two-vCPU claim. Protected capacity summary
+and host sample record are retained; sustained CPU/capacity acceptance remains
+distinct from this successful learning-workload runtime proof.
+
 ### Open merge-gate provenance issue
 
 GitHub's expected status-check source binds an **App**, not a workflow. The shared
