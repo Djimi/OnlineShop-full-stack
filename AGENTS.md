@@ -228,6 +228,10 @@ language, not as reasons to add layers.
 See [docs/GIT_WORKFLOW.md](./docs/GIT_WORKFLOW.md) for branch naming and
 commit message conventions.
 
+During authorized continuous execution, an asynchronous CI/build wait is not task
+completion. Continue independent plan work while it runs; resume dependent work
+on completion. Stop only for a genuine blocker or an authorization boundary.
+
 ## Dockerfile Conventions
 
 1. **Self-contained application builds** — Java service Dockerfiles use multi-stage builds and run Maven inside Docker, eliminating a host-side `./mvnw package` prerequisite. Use the repository root as the context when a service depends on another project (e.g., Items → common).
@@ -323,17 +327,21 @@ Owner setup now also has bounded read-only `--reconcile` discovery with a
 controlled live lost-command-ID proof; it cannot authorize retry, clear unknown
 runtime state or synthesize validation success. Routine whole-session recovery
 remains unfinished.
-The separate manual `AWS operator plan proof` foundation guards current-state
+The separate manual `AWS operator plan proof` guards current-state
 planning with pre-OIDC actor authorization and the shared session group. It
 refuses absent/empty/unexpected state before init and never applies or publishes
-AWS success. Its actual operator OIDC/native-lock proof remains pending.
+AWS success. Actual operator OIDC/native-lock/no-change proof passed in run
+`37245192463`; owner post-check verified the state lock absent.
 The first trial authorized actors/OIDC but failed protected planning; safe
-fixed-stage/allowlisted failure evidence is being added before a reviewed retry.
+fixed-stage/allowlisted failure evidence was added before the successful retry.
 No speculative IAM widening or raw-log publication is authorized by that failure.
 Quick reproduction found a global log-size cap also limited provider artifacts;
 independent streamed capture now covers large provider files and bounded logs.
-Actual credential-free init passed; hosted operator retry evidence still precedes
-closing the plan-proof issue.
+Actual credential-free init and hosted operator retry passed without IAM widening.
+The hosted run exposed ignored `allowed-account-ids` on the prior credential action;
+reviewed v6.3.0 supports configured inputs, but updated-pin hosted proof is pending.
+Runtime now refuses detached tests before credentials/reset even with terminal
+local records; routine cloud recovery/termination remains unfinished.
 The separate manual `AWS role boundary proof` checks selected allowed/denied
 reads with publisher/operator OIDC; it never mutates AWS or publishes AWS success.
 Final merge protection is additionally blocked on check-writer provenance:

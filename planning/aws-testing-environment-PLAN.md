@@ -154,7 +154,7 @@ update `.gitignore` and operational record.
 - [ ] Complete live boundaries/recovery: selected actual role read denies, native S3 locking, saved-plan staleness and tag-drift detection are proved. Routine-role mutations, missing-state recovery refusal and protected version boundaries remain pending. Preserve restore/import/verified-force-unlock instructions in `infra/aws/README.md`.
 - Guarded manual operator no-change plan proof is implemented with missing/empty/
   unexpected-state refusal and pre-OIDC actor authorization; actual operator OIDC
-  plan/native-lock proof remains pending. It cannot apply or establish EC2 mutation
+  plan/native-lock proof passed in run `37245192463`. It cannot apply or establish EC2 mutation
   permissions; do not delete live state merely to satisfy its regression stories.
 - [ ] Commit configuration, provider locks and sanitized evidence after checks: `feat(e2e): provision isolated AWS testing infrastructure`.
 
@@ -249,15 +249,22 @@ and plan checkboxes/issues with actual evidence. Configure GitHub protection onl
 
 ## Issues and resolutions
 
-- [ ] **Operator plan proof failed safely:** trial `37243793027` authorized actors/
+- [x] **Operator plan proof recovered:** trial `37243793027` authorized actors/
   OIDC but failed its protected plan phase, without apply or app mutation. Initial
   diagnostics could not identify the stage. Sanitized fixed-stage/allowlisted
-  failure evidence is now implemented/tested; reviewed retry and actual operator
-  native-lock/no-change planning remain pending. Do not guess broader IAM grants.
+  failure evidence is now implemented/tested. PR #86 merged after hosted CI;
+  retry `37245192463` passed actual operator native-lock/no-change planning, and
+  an owner post-check found no lock. No IAM grants were widened.
   Quick state-schema reproduction passed; a targeted large-provider reproduction
   found the global log file-size limit also capped downloads. Independent bounded
   capture fixes that bug; excessive-log refusal and actual credential-free native
-  init pass. Hosted retry still precedes closing this issue.
+  init and hosted retry pass. Routine mutation/recovery boundaries remain separate.
+
+- [ ] **Credential action ignored security input:** successful operator run warned
+  pinned v4.3.1 did not support `allowed-account-ids`. Exact metadata validation
+  reproduced this locally. All three AWS workflows now pin reviewed Node-24
+  v6.3.0 supporting configured inputs; controller identity checks remain intact.
+  Updated-pin hosted proof is pending, without IAM/trust changes.
 
 - [x] **Original host was incompatible with the Free account plan:** initial apply created
   eight network/template resources, then EC2 rejected `c7i.xlarge` as ineligible

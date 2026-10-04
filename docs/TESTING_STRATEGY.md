@@ -106,6 +106,11 @@ Capture regressions exercise both a legitimate 20 MiB provider file (must
 succeed) and excessive private logs (must stop, stay bounded and emit no raw
 content). Global child file-size limits are not selective log limits. Start with
 these focused stories before the full automation/hosted verification.
+Detached-test runtime stories additionally require absence before credentials or
+reset even when the local record is terminal; failed lookup must not mean absence.
+Workflow action inputs must match metadata at their exact pinned SHA. Live run
+`37245192463` proved operator locked no-change planning with the previous pin;
+the updated v6.3.0 credential action still requires a separate hosted proof.
 
 Owner host-setup command stories:
 `python3 -m unittest -v tests/scripts/aws_host_setup_test.py`.

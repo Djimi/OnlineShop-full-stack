@@ -84,9 +84,13 @@ elif command=='aws':
  elif args[:2]==['ecr','get-login-password']: print('ecr-secret-canary')
  else: sys.exit(1)
 elif 'inspect' in args: sys.exit(1)
-elif 'ps' in args and any('name=' in value for value in args): sys.exit(int(os.environ.get('CLEANUP_UNKNOWN','0')))
+elif 'ps' in args and any('name=' in value for value in args):
+ if os.environ.get('DETACHED_TEST'):print('detached-test-container')
+ sys.exit(1 if os.environ.get('ABSENCE_UNKNOWN') or (os.environ.get('CLEANUP_UNKNOWN') and (root/'test-started').exists()) else 0)
 elif 'up' in args and '--wait' in args: sys.exit(int(os.environ.get('READINESS_FAILURE','0')))
-elif 'run' in args: sys.exit(0 if '-d' in args else int(os.environ.get('E2E_FAIL','0')))
+elif 'run' in args:
+ (root/'test-started').touch()
+ sys.exit(0 if '-d' in args else int(os.environ.get('E2E_FAIL','0')))
 elif 'exec' in args and './mvnw' in args: sys.exit(int(os.environ.get('E2E_FAIL','0')))
 elif 'exec' in args and 'tar' in args and os.environ.get('REPORTS_VALID')=='1':
  with tarfile.open(fileobj=sys.stdout.buffer,mode='w|') as archive:
@@ -157,6 +161,30 @@ else: sys.exit(0)
             result, calls = self.invoke()
         self.assertNotEqual(result.returncode, 0)
         self.assertEqual(calls, [])
+
+    def test_detached_test_blocks_credentials_and_reset_even_with_terminal_local_record(
+        self,
+    ):
+        self.env.update(DETACHED_TEST="1", REPORTS_VALID="1")
+        (self.state / "operation.json").write_text(
+            json.dumps({"generation": GENERATION, "status": "failed"})
+        )
+        original = (self.state / "operation.json").read_bytes()
+        result, calls = self.invoke()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertFalse(any(call["command"] == "aws" for call in calls))
+        self.assertFalse(
+            any("down" in call["args"] or "rm" in call["args"] for call in calls)
+        )
+        self.assertEqual((self.state / "operation.json").read_bytes(), original)
+        self.assertFalse((self.state / "run.env").exists())
+
+    def test_failed_detached_test_lookup_cannot_be_treated_as_absence(self):
+        self.env["ABSENCE_UNKNOWN"] = "1"
+        result, calls = self.invoke()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertFalse(any(call["command"] == "aws" for call in calls))
+        self.assertFalse((self.state / "operation.json").exists())
 
     def test_mutable_or_other_account_image_cannot_reach_docker(self):
         path = self.directory / "images.json"

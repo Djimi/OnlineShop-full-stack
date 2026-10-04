@@ -461,7 +461,7 @@ versions. No host/app/Terraform state/generation changed. The bounded-read varia
 also passed an actual read-only reconciliation. This is owner setup recovery,
 not implemented routine validation/disposal or a current-candidate AWS result.
 
-### Guarded operator-role plan: live proof pending
+### Guarded operator-role plan: live no-change proof passed
 
 The separate manually dispatched `AWS operator plan proof` workflow authorizes
 dispatch/rerun administrators before exchanging OIDC, then holds the shared
@@ -476,17 +476,17 @@ Ten command stories pass, including observed RED-to-GREEN missing command,
 false empty-plan acceptance and modified trusted-input rejection. The controller
 checks the exact checkout and a fixed tracked input allowlist before OIDC;
 untracked extra Terraform files are never copied to its protected planning root.
-Full automation suite: 106 passed. Actual OIDC/
-native-lock/no-change planning awaits trusted-main integration/manual proof; this
-does not establish EC2 mutation boundaries or missing-state recovery under live
-resource loss. An old local actionlint rejected documented `concurrency.queue`;
+The initial full automation suite had 106 passing tests; the capture/failure-evidence
+increment has 109. Actual operator OIDC/native-lock/no-change planning passed in
+run `37245192463`; this does not establish EC2 mutation boundaries or missing-state
+recovery under live resource loss. An old local actionlint rejected documented `concurrency.queue`;
 official GitHub documentation confirms `max`/no-cancellation semantics, and a
 new pinned tool revision `011a6d15e749bb3f2d771eed9c7aa0e7e3e10ee7` still lacks
 that schema. All other actionlint diagnostics passed with only its exact
 `unexpected key "queue" for "concurrency" section` diagnostic excluded; parsed
 YAML separately verified the exact shared group/max/no-cancellation and dispatch-
 only/read+OIDC contract. This is a documented narrow tooling limitation, not a
-claim of full schema support. Hosted manual syntax/permission proof is still required.
+claim of full schema support. The hosted manual workflow accepted the syntax.
 
 PR #85 merged at `a55d0f0` after hosted CI. Manual trial `37243793027` accepted the
 workflow, authorized both actors and exchanged operator OIDC, but the protected
@@ -495,8 +495,8 @@ diagnostic was intentionally private but too coarse to identify the failed stage
 raw runner logs/state were not uploaded. The command now retains create-only
 failed proof JSON containing only a fixed stage/reason and allowlisted error/action
 labels, never raw exception text, resource IDs, state or credentials. Its failure
-story was observed RED-to-GREEN; the first live plan proof is still unresolved
-until a reviewed trusted-main retry exposes the safe cause and passes.
+story was observed RED-to-GREEN; the failed original attempt remains historical
+evidence, not a success.
 
 Following the owner-requested quick-feedback approach, a read-only owner check
 confirmed the exact state/pointer validation accepts current production data;
@@ -509,7 +509,21 @@ stdout/stderr capture. A separate excessive-log story still stops the command at
 Credential-free actual `terraform init -backend=false` passed with the pinned AWS
 provider larger than 16 MiB and bounded private logs. Trusted GitHub account/
 bucket/operator-role metadata matches the independently recorded identifiers.
-The full hosted operator retry is still required before claiming the live proof.
+PR #86 merged at `a45d8f7` after all six PR CI jobs passed. Trusted-main retry
+[37245192463](https://github.com/Djimi/OnlineShop-full-stack/actions/runs/37245192463)
+passed with sanitized proof: existing state verified, native-lock plan completed,
+zero resource changes, no apply, no AWS validation success and no mutation-permission
+claim. A read-only owner post-check verified the native lock absent afterward.
+The run warned that `allowed-account-ids` was unsupported by the pinned v4.3.1
+credential action. Independent controller STS/account checks remained effective;
+the workflows now pin reviewed v6.3.0 (`e1253824e5c10ff9df46874f81ed3ec929e19cfd`),
+whose exact metadata supports every configured input and uses Node 24. Hosted
+verification of that new pin remains pending; no IAM/trust widening was introduced.
+
+Runtime recovery now also refuses a detached test container before credentials,
+operation-record replacement or reset—even when the previous local record is
+terminal. Docker lookup failure is not absence. The focused detached-test story
+was observed RED-to-GREEN; cloud-side reconciliation/termination remains unfinished.
 
 ### Open merge-gate provenance issue
 

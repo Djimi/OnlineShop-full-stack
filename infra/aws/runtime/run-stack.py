@@ -74,6 +74,7 @@ def main():
                 raise RuntimeFailed("another host operation is active") from None
             bootstrap, images = verify_generation(args.generation, args.images)
             verify_metadata_blocks()
+            verify_no_detached_test()
             operation = {
                 "generation": args.generation,
                 "status": "running",
@@ -621,6 +622,20 @@ def collect_reports(env, credentials, generation):
         raise RuntimeFailed(
             "required tests failed or were not executed; sanitized reports retained"
         )
+
+
+def verify_no_detached_test():
+    # A terminal controller record is not proof that a detached container ended.
+    # Fail before credentials/reset; only reconciled recovery may remove it.
+    try:
+        names = command(
+            ["docker", "ps", "-aq", "--filter", "name=^" + PROJECT + "-e2e$"],
+            timeout=10,
+        )
+    except RuntimeFailed:
+        raise TerminationUnknown("detached test absence cannot be verified") from None
+    if names.strip():
+        raise TerminationUnknown("detached test requires reconciliation")
 
 
 def remove_test_container(env, generation):

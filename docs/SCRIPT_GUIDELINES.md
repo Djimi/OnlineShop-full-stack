@@ -29,6 +29,11 @@ exclude only its exact diagnostic and record the limitation; never suppress
 unrelated errors or claim full schema support. Discover a tool repository's default
 branch before resolving a revision; do not guess `main`/`master`.
 
+Validate action inputs against `action.yml` at the exact pinned commit, not the
+latest README. Unsupported security inputs can be ignored with only a runner
+warning. Keep independent controller identity checks; hosted action warnings are
+verification findings even when the job passes.
+
 Every non-trivial script must make these layers easy to find, in this order:
 
 1. A brief contract: what the command changes, what it deliberately does not
