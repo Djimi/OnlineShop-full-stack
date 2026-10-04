@@ -301,9 +301,13 @@ active Free account plan rejected the original host. After reconciliation and
 tested configuration/IAM updates, a refreshed host-only plan launched the eligible
 `m7i-flex.large`; actual host/storage settings and unchanged Free plan were verified.
 The account MUST remain on the Free plan; never upgrade it. Host setup and selected
-Auth/E2E isolation probes pass across Docker restart/real reboot. Full application
-deployment/capacity, all-image isolation and recovery proofs remain unfinished.
-The disposable host/runtime and final gate remain unfinished. See
+Auth/E2E isolation probes passed across Docker restart/real reboot on the initial
+host; current-host evidence must be checked independently after replacement.
+The migrated host now passed owner full-stack/four-test E2E and seeded
+DB/Redis/Kafka reset/retest proofs. Current-host candidate metadata/security
+probes and tag-only next-generation planning passed; routine workflow recovery,
+current-candidate validation, disposal/recreation and final gate remain unfinished.
+Routine host/runtime orchestration and the final gate remain unfinished. See
 [infrastructure boundaries/recovery](./infra/aws/README.md) and the operational
 runbook for verified status. Packaging/failure finalization commands are covered
 by black-box stories; they do not imply completed publication or deployment.
@@ -312,7 +316,9 @@ credential-free build, isolated publisher OIDC, then failure-only finalization.
 Until runtime/evidence stages are wired and proved, it cannot satisfy the gate.
 The [trusted runtime](./infra/aws/runtime/AGENTS.md) has local reset/report stories
 and an actual isolated Compose clean-state/E2E proof. Host setup/hooks are defined
-only; no AWS host, SSM orchestration or real-host isolation proof exists yet.
+and owner SSM proofs have run on an actual AWS host. Routine cloud orchestration
+and current-candidate success wiring remain unfinished; do not equate owner
+historical-candidate evidence with the final AWS check.
 The separate manual `AWS role boundary proof` checks selected allowed/denied
 reads with publisher/operator OIDC; it never mutates AWS or publishes AWS success.
 Final merge protection is additionally blocked on check-writer provenance:

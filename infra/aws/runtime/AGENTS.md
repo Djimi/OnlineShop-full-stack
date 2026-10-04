@@ -13,12 +13,12 @@ Trusted generation/bootstrap/digests/fixtures -> host lock
  -> terminal operation; app retained for inspection
 ```
 
-**Unfinished:** routine cloud-side SSM transport/reconciliation, cancellation
-proofs, diagnostics and final AWS gate. The eligible Free-plan host now exists;
-host prerequisites are installed, not application deployment.
+**Unfinished:** routine cloud-side SSM transport/reconciliation, automated
+cancellation recovery, diagnostics and final AWS gate. The eligible Free-plan host
+now runs the app after owner full-stack/E2E and clean-state reset proofs.
 Owner setup and selected Auth/E2E isolation probes now pass, including Docker
 restart and actual reboot/firewall retention with host ECR/secret access. Full
-application/E2E, all-image probes and cancellation recovery remain unfinished.
+routine workflow/current-candidate validation and recovery remain unfinished.
 
 `scripts/aws-host-setup.py` owns the initial owner-only SSM setup proof. It transfers
 only trusted-main host files with chunk bounds/checksums and persists command
@@ -59,8 +59,10 @@ after stopping writers so removed SQL cannot run in the next generation.
 DB secrets come only from the named secret through restricted temporary config;
 cloud/job credentials never reach candidate containers. Temporary secret/auth
 files are removed even on partial creation/test-cleanup failure. The current E2E
-source now consumes the provided generated `E2E_TEST_PASSWORD`; historical
-published images predate that fix and must not be treated as current candidates.
+source consumes the provided generated `E2E_TEST_PASSWORD`; the verified owner
+receipt from publication `37238396197` includes that fix and hardened read-only
+E2E. Earlier receipts predate those changes. No historical receipt can substitute
+for a freshly authorized current-candidate validation.
 
 ## Evidence and recovery
 
@@ -92,6 +94,13 @@ The migrated host now passed full-stack readiness/four E2E tests and a second
 seeded DB/Redis/Kafka clean-state reset/four-test retest. Sanitized XML and removal
 of the test container/temporary secret files were verified. These are owner
 historical-candidate proofs, not routine workflow or current-candidate success.
+
+Current-host probes also reject IPv4/IPv6 metadata transport from all five
+candidate images and verify running services are nonroot, nonprivileged, without
+cloud/job credentials or the Docker socket. Candidate roots are read-only; Kafka's
+backing-service root remains writable. Frontend IPv6 reports `EADDRNOTAVAIL` (no
+source address), not a routed firewall-denial proof. Probe tooling failures must
+not be interpreted as metadata rejection; distinguish transport errors explicitly.
 
 ## Verification
 
