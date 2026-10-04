@@ -71,9 +71,9 @@ class RuntimeStories(unittest.TestCase):
         for command in ["aws", "docker", "iptables", "ip6tables"]:
             path = self.bin / command
             path.write_text("""#!/usr/bin/env python3
-import io,json,os,pathlib,sys,tarfile
+import io,json,os,pathlib,resource,sys,tarfile
 root=pathlib.Path(os.environ['FAKE_RUNTIME']);command=pathlib.Path(sys.argv[0]).name;args=sys.argv[1:]
-with (root/'calls.jsonl').open('a') as f: f.write(json.dumps({'command':command,'args':args})+'\\n')
+with (root/'calls.jsonl').open('a') as f: f.write(json.dumps({'command':command,'args':args,'file_limit':resource.getrlimit(resource.RLIMIT_FSIZE)[0]})+'\\n')
 if command in ['iptables','ip6tables']:
  if 'FORWARD' in args and os.environ.get('FIREWALL_FORWARD_MISSING')=='1':sys.exit(1)
  sys.exit(int(os.environ.get('FIREWALL_FAILURE','0')))
@@ -86,8 +86,9 @@ elif command=='aws':
 elif 'inspect' in args: sys.exit(1)
 elif 'ps' in args and any('name=' in value for value in args): sys.exit(int(os.environ.get('CLEANUP_UNKNOWN','0')))
 elif 'up' in args and '--wait' in args: sys.exit(int(os.environ.get('READINESS_FAILURE','0')))
-elif 'run' in args: sys.exit(int(os.environ.get('E2E_FAIL','0')))
-elif 'cp' in args and os.environ.get('REPORTS_VALID')=='1':
+elif 'run' in args: sys.exit(0 if '-d' in args else int(os.environ.get('E2E_FAIL','0')))
+elif 'exec' in args and './mvnw' in args: sys.exit(int(os.environ.get('E2E_FAIL','0')))
+elif 'exec' in args and 'tar' in args and os.environ.get('REPORTS_VALID')=='1':
  with tarfile.open(fileobj=sys.stdout.buffer,mode='w|') as archive:
   for name,count in [('ItemsE2ETest',3),('RestAssuredLoggingTest',1)]:
    cases=''.join('<testcase name="test'+str(i)+'" classname="com.onlineshop.e2e.'+name+'" />' for i in range(count))
@@ -296,6 +297,42 @@ else: sys.exit(0)
         self.assertTrue(
             all(call["command"] in ["iptables", "ip6tables"] for call in calls)
         )
+
+    def test_external_output_has_a_kernel_enforced_bound_not_just_a_post_read_check(
+        self,
+    ):
+        self.env["REPORTS_VALID"] = "1"
+        result, calls = self.invoke()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue(calls)
+        self.assertTrue(all(call["file_limit"] == 8 * 1024**2 for call in calls))
+
+    def test_test_image_has_readonly_root_and_bounded_tmpfs_until_reports_are_copied(
+        self,
+    ):
+        self.env["REPORTS_VALID"] = "1"
+        result, calls = self.invoke()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        commands = [call["args"] for call in calls if call["command"] == "docker"]
+        runner = next(args for args in commands if "run" in args)
+        self.assertIn("--read-only", runner)
+        self.assertIn("-d", runner)
+        self.assertIn(
+            "/workspace/e2e-tests/.build:rw,size=512m,uid=10001,gid=10001,mode=0755",
+            runner,
+        )
+        self.assertIn(
+            "/home/tests/.m2/wrapper:rw,size=64m,uid=10001,gid=10001,mode=0755", runner
+        )
+        execution = next(index for index, args in enumerate(commands) if "exec" in args)
+        reports = next(index for index, args in enumerate(commands) if "tar" in args)
+        self.assertIn("./mvnw", commands[execution])
+        self.assertIn("--offline", commands[execution])
+        self.assertIn(
+            "-De2e.build.directory=/workspace/e2e-tests/.build/target",
+            commands[execution],
+        )
+        self.assertLess(execution, reports)
 
 
 class ComposeBoundaryStories(unittest.TestCase):

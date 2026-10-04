@@ -10,6 +10,7 @@ COPY mvnw pom.xml ./
 COPY src/ src/
 RUN --mount=type=cache,target=/root/.m2,id=maven-repo \
     ./mvnw --batch-mode dependency:go-offline test-compile -DskipTests \
+    && ./mvnw --batch-mode dependency:get -Dartifact=org.apache.maven.surefire:surefire-junit-platform:3.5.4 \
     && mkdir -p /home/tests/.m2 \
     && cp -a /root/.m2/repository /home/tests/.m2/repository \
     && chown -R tests:tests /workspace /home/tests

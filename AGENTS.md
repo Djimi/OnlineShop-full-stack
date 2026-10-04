@@ -308,6 +308,9 @@ and an actual isolated Compose clean-state/E2E proof. Host setup/hooks are defin
 only; no AWS host, SSM orchestration or real-host isolation proof exists yet.
 The separate manual `AWS role boundary proof` checks selected allowed/denied
 reads with publisher/operator OIDC; it never mutates AWS or publishes AWS success.
+Final merge protection is additionally blocked on check-writer provenance:
+the shared GitHub Actions App is not a unique trusted-workflow identity. No
+replacement signing design/App/secret has been introduced; see the runbook issue.
 
 ## Debug Info
 

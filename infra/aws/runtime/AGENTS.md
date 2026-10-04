@@ -44,6 +44,18 @@ published images predate that fix and must not be treated as current candidates.
 
 ## Evidence and recovery
 
+External command output is captured in anonymous private files with an 8 MiB
+kernel file-size limit per stream, not unbounded memory pipes checked afterward.
+E2E has a read-only root and bounded tmpfs for `/tmp` (128 MiB), `.build` (512 MiB)
+and the wrapper cache (64 MiB). Maven runs offline with its build directory set
+to `.build/target`, a child of the mount so `clean` can delete it normally.
+An isolated keepalive container remains running while Maven executes and reports
+are streamed through bounded `docker exec tar`; only then is termination verified.
+Docker `cp` cannot read tmpfs, and stopping the container discards its contents.
+The image resolves the provider with `dependency:get` and declares the JUnit
+launcher during packaging; `go-offline` alone missed the provider. No runtime
+repository writes are allowed.
+
 Two recognized suites/four tests are required. XML retention omits arbitrary
 properties, environment dumps, system output and candidate-produced failure text.
 Failed tests retain sanitized XML where available; zero exit alone cannot pass.
