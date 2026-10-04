@@ -12,10 +12,12 @@ import argparse
 import json
 import os
 import re
-import resource
+import selectors
 import shutil
+import signal
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -45,7 +47,10 @@ ADDRESSES = {
 
 
 class ProofFailed(Exception):
-    pass
+    def __init__(self, message, *, stage="controller", error_labels=()):
+        super().__init__(message)
+        self.stage = stage
+        self.error_labels = list(error_labels)
 
 
 def main():
@@ -53,23 +58,30 @@ def main():
     parser.add_argument("phase", choices=["authorize", "plan"])
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
+    stage = "controller"
     try:
         context = trusted_context()
         directory = Path(os.environ["RUNNER_TEMP"]) / (
             "operator-" + args.phase + "-" + context["run"]
         )
         directory.mkdir(mode=0o700)
+        stage = "actor-authorization"
         authorize_actors(directory)
         report = {"status": "authorized", "aws_validation_success": False}
         if args.phase == "plan":
+            stage = "operator-identity"
             verify_operator(context, directory)
+            stage = "state-snapshot"
             state = read_protected_object(
                 context, "state/environment.tfstate", directory, "state.json"
             )
+            stage = "generation-snapshot"
             pointer = read_protected_object(
                 context, "operations/current-generation.json", directory, "pointer.json"
             )
+            stage = "state-validation"
             generation = verify_existing_state(state, pointer)
+            stage = "terraform-planning"
             make_current_plan(context, generation, directory)
             report = {
                 "status": "passed",
@@ -80,11 +92,7 @@ def main():
                 "aws_validation_success": False,
                 "mutation_permissions_proved": False,
             }
-        descriptor = os.open(
-            args.output, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600
-        )
-        with os.fdopen(descriptor, "w") as output:
-            json.dump(report, output, indent=2)
+        write_report(args.output, report)
         print(
             "Operator proof phase completed; no apply, app mutation or AWS validation success."
         )
@@ -97,12 +105,43 @@ def main():
         TypeError,
         IndexError,
         subprocess.TimeoutExpired,
-    ):
+    ) as error:
+        failure = {
+            "status": "failed",
+            "aws_validation_success": False,
+            "stage": error.stage
+            if isinstance(error, ProofFailed) and error.stage != "controller"
+            else stage,
+            "error_labels": error.error_labels
+            if isinstance(error, ProofFailed)
+            else [],
+            "reason": str(error)
+            if isinstance(error, ProofFailed)
+            else "invalid input or process outcome",
+        }
+        try:
+            write_report(args.output, failure)
+        except OSError:
+            pass
         print(
-            "Operator plan proof blocked: authorization, identity, state or plan mismatch; protected details omitted. Reconcile locks before retry.",
+            "Operator plan proof blocked at "
+            + failure["stage"]
+            + ": "
+            + failure["reason"]
+            + "; protected details omitted. Reconcile locks before retry.",
             file=sys.stderr,
         )
         return 1
+
+
+def write_report(path, report):
+    descriptor = os.open(
+        path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600
+    )
+    with os.fdopen(descriptor, "w") as output:
+        json.dump(report, output, indent=2)
+        output.flush()
+        os.fsync(output.fileno())
 
 
 def trusted_context():
@@ -155,23 +194,103 @@ def trusted_context():
 
 
 def run_private(command, directory, name, *, env=None, timeout=300):
-    def bound_streams():
-        resource.setrlimit(resource.RLIMIT_FSIZE, (16 * 1024**2, 16 * 1024**2))
-
     path = directory / name
     with path.open("xb") as output, (directory / (name + ".err")).open("xb") as error:
-        result = subprocess.run(
+        process = subprocess.Popen(
             command,
             cwd=directory,
             env=env,
-            stdout=output,
-            stderr=error,
-            check=False,
-            timeout=timeout,
-            preexec_fn=bound_streams,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            start_new_session=True,
         )
-    if result.returncode:
-        raise ProofFailed("Required process did not succeed")
+        deadline = time.monotonic() + timeout
+        streams = selectors.DefaultSelector()
+        streams.register(process.stdout, selectors.EVENT_READ, (output, 0))
+        streams.register(process.stderr, selectors.EVENT_READ, (error, 0))
+        try:
+            while streams.get_map():
+                if time.monotonic() >= deadline:
+                    raise ProofFailed("Protected process deadline exceeded")
+                for key, _ in streams.select(
+                    timeout=max(0, min(0.25, deadline - time.monotonic()))
+                ):
+                    chunk = os.read(key.fileobj.fileno(), 65536)
+                    if not chunk:
+                        streams.unregister(key.fileobj)
+                        key.fileobj.close()
+                        continue
+                    destination, written = key.data
+                    remaining = 16 * 1024**2 - written
+                    destination.write(chunk[:remaining])
+                    if len(chunk) > remaining:
+                        raise ProofFailed("Protected process output limit exceeded")
+                    streams.modify(
+                        key.fileobj,
+                        selectors.EVENT_READ,
+                        (destination, written + len(chunk)),
+                    )
+            process.wait(timeout=max(0.01, deadline - time.monotonic()))
+        finally:
+            streams.close()
+            try:
+                os.killpg(process.pid, signal.SIGTERM)
+            except ProcessLookupError:
+                pass
+            try:
+                process.wait(timeout=5)
+            finally:
+                try:
+                    os.killpg(process.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+                process.wait(timeout=5)
+            for stream in [process.stdout, process.stderr]:
+                if not stream.closed:
+                    stream.close()
+    if process.returncode:
+        stages = {
+            "actor-0.json": "dispatch-authorization",
+            "actor-1.json": "rerun-authorization",
+            "identity.json": "operator-identity",
+            "head-state.json": "state-metadata",
+            "get-state.json": "state-download",
+            "head-pointer.json": "generation-metadata",
+            "get-pointer.json": "generation-download",
+            "init.log": "terraform-init",
+            "plan.log": "terraform-plan",
+            "plan.json": "terraform-plan-inspection",
+        }
+        allowed = (
+            "AccessDenied",
+            "UnauthorizedOperation",
+            "InvalidClientTokenId",
+            "ExpiredToken",
+            "NoSuchKey",
+            "NoSuchBucket",
+            "PreconditionFailed",
+            "s3:ListBucket",
+            "s3:GetObject",
+            "s3:GetObjectVersion",
+            "s3:PutObject",
+            "s3:DeleteObject",
+            "iam:GetInstanceProfile",
+            "Error acquiring the state lock",
+        )
+        raw = path.read_bytes() + (directory / (name + ".err")).read_bytes()
+        labels = [
+            label
+            for label in allowed
+            if re.search(
+                rb"(?<![A-Za-z0-9])" + re.escape(label.encode()) + rb"(?![A-Za-z0-9])",
+                raw,
+            )
+        ]
+        raise ProofFailed(
+            "Required protected process did not succeed",
+            stage=stages.get(name, "protected-process"),
+            error_labels=labels,
+        )
     return path
 
 

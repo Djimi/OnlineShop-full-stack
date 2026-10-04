@@ -92,7 +92,15 @@ else:sys.exit(1)
 if args[:2]==['show','-json']:
  resources=[{'address':r['type']+'.'+r['name']} for r in json.loads((root/'state.json').read_text())['resources']]
  print(json.dumps({'planned_values':{'root_module':{'resources':[] if os.environ.get('EMPTY_PLAN') else resources}},'resource_changes':[{'address':'aws_instance.host','change':{'actions':['delete','create']}}] if os.environ.get('CHANGES') else []}))
-elif args[0] in ['init','plan']:print('raw-plan-secret-canary')
+elif args[0] in ['init','plan']:
+ print('raw-plan-secret-canary')
+ if args[0]=='init' and os.environ.get('PROVIDER_FILE'):
+  with open('provider-package','wb') as package:
+   for _ in range(20):package.write(b'x'*1048576)
+ if args[0]=='init' and os.environ.get('LOG_FLOOD'):
+  for _ in range(17):sys.stdout.write('x'*1048576)
+ if args[0]=='init' and os.environ.get('FAIL_INIT'):
+  print('AccessDenied: not authorized to perform s3:ListBucket on raw-secret-resource-canary',file=sys.stderr);sys.exit(1)
 else:sys.exit(1)
 """,
         }
@@ -193,16 +201,60 @@ else:sys.exit(1)
         result, calls = self.invoke()
         self.assertNotEqual(result.returncode, 0)
         self.assertFalse(any(c[:2] == ["terraform", "apply"] for c in calls))
-        self.assertFalse((self.path / "proof.json").exists())
+        self.assertEqual(
+            json.loads((self.path / "proof.json").read_text())["status"], "failed"
+        )
 
     def test_empty_plan_cannot_claim_a_verified_existing_environment(self):
         self.env["EMPTY_PLAN"] = "1"
         result, _ = self.invoke()
         self.assertNotEqual(result.returncode, 0)
-        self.assertFalse((self.path / "proof.json").exists())
+        self.assertEqual(
+            json.loads((self.path / "proof.json").read_text())["status"], "failed"
+        )
 
     def test_modified_trusted_inputs_are_rejected_before_aws_exchange(self):
         self.env["DIRTY_CONTROLLER"] = "1"
         result, calls = self.invoke()
         self.assertNotEqual(result.returncode, 0)
         self.assertFalse(any(c[0] == "aws" for c in calls))
+
+    def test_failure_retains_only_safe_stage_and_error_labels(self):
+        self.env["FAIL_INIT"] = "1"
+        result, _ = self.invoke()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertTrue((self.path / "proof.json").exists())
+        report = json.loads((self.path / "proof.json").read_text())
+        self.assertEqual(report["status"], "failed")
+        self.assertEqual(report["stage"], "terraform-init")
+        self.assertIn("AccessDenied", report["error_labels"])
+        self.assertIn("s3:ListBucket", report["error_labels"])
+        self.assertFalse(report["aws_validation_success"])
+        self.assertNotIn(
+            "raw-secret-resource-canary",
+            result.stdout + result.stderr + json.dumps(report),
+        )
+        self.assertNotIn("raw-plan-secret-canary", json.dumps(report))
+
+    def test_provider_download_is_not_subject_to_the_private_log_file_limit(self):
+        self.env["PROVIDER_FILE"] = "1"
+        result, _ = self.invoke()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(
+            (self.path / "operator-plan-200-1/provider-package").stat().st_size,
+            20 * 1024**2,
+        )
+
+    def test_private_log_overflow_still_stops_the_command_and_retains_only_safe_failure(
+        self,
+    ):
+        self.env["LOG_FLOOD"] = "1"
+        result, calls = self.invoke()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertLessEqual(
+            (self.path / "operator-plan-200-1/init.log").stat().st_size, 16 * 1024**2
+        )
+        self.assertFalse(any(c[:2] == ["terraform", "plan"] for c in calls))
+        report = json.loads((self.path / "proof.json").read_text())
+        self.assertEqual(report["reason"], "Protected process output limit exceeded")
+        self.assertFalse(report["aws_validation_success"])

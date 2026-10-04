@@ -249,15 +249,26 @@ and plan checkboxes/issues with actual evidence. Configure GitHub protection onl
 
 ## Issues and resolutions
 
-- [ ] **Active Free account plan blocks the chosen host:** initial apply created
+- [ ] **Operator plan proof failed safely:** trial `37243793027` authorized actors/
+  OIDC but failed its protected plan phase, without apply or app mutation. Initial
+  diagnostics could not identify the stage. Sanitized fixed-stage/allowlisted
+  failure evidence is now implemented/tested; reviewed retry and actual operator
+  native-lock/no-change planning remain pending. Do not guess broader IAM grants.
+  Quick state-schema reproduction passed; a targeted large-provider reproduction
+  found the global log file-size limit also capped downloads. Independent bounded
+  capture fixes that bug; excessive-log refusal and actual credential-free native
+  init pass. Hosted retry still precedes closing this issue.
+
+- [x] **Original host was incompatible with the Free account plan:** initial apply created
   eight network/template resources, then EC2 rejected `c7i.xlarge` as ineligible
   for Free Tier. `GetAccountPlanState` confirms `FREE`/`ACTIVE`. Partial versioned
-  state reconciled; no host/disk/ENI, ingress empty, lock released. The owner
+  state was reconciled before a refreshed eligible launch. The owner
   rejected a paid-plan upgrade: account MUST remain Free. Select verified
   eligible/offered `m7i-flex.large` (2 vCPU/8 GiB/x86_64). Update Terraform/IAM
   constraints/tests are updated RED-to-GREEN; inspected policy-only and host-only
-  plans applied, host/storage settings verified, Free plan unchanged. Real capacity
-  proof remains pending; never reuse the failed initial saved plan.
+  plans applied, host/storage settings verified, Free plan unchanged. Actual full-
+  stack/E2E and sampled capacity proofs pass; sustained-load guarantees remain
+  separate. Never reuse the failed initial saved plan or upgrade the account.
 
 - [ ] **Check-writer provenance:** expected-source GitHub Actions App does not
   identify a trusted workflow; same-repository workflow permission overrides can
@@ -270,11 +281,11 @@ and plan checkboxes/issues with actual evidence. Configure GitHub protection onl
 - [x] Fresh schema ownership identified: `Auth/init-db/` and `Items/init-db/` independently initialize databases; no cross-service schema dependency needed.
 - [x] Scoped inventory and dependencies rechecked; documented unused SSH/RDS-role/firewall cleanup authorized by the continuation instruction and verified — Task 1.
 - [ ] Exact candidate-check selection/newest-attempt behavior on GitHub needs live proof before deployment/gate enablement — Task 2.
-- [x] Capacity/AMI/disk selection and regional estimates recorded before provisioning; owner delegated execution without further approvals — Task 4. Live capacity proof remains pending.
+- [x] Free-compatible capacity/AMI/disk and current estimates recorded; owner delegated execution without further approvals. Actual full-stack/E2E and sampled memory/disk/timing pass; sustained CPU/capacity acceptance remains separate.
 - [ ] OIDC subject/Environment restrictions and IAM action/resource support require actual verification — Task 4.
 - [ ] Candidate fixture credentials, image-retention protection and container metadata blocking need implementation evidence — Tasks 3, 5, 8.
 - [ ] Cancellation launch/record gaps and state recovery require interruption trials — Tasks 5, 7.
-- [x] Owner authorized inline execution and continuation without further approvals on 2026-10-04. Verified cleanup and protected state-backend creation/migration have occurred; no application host exists yet.
+- [x] Owner authorized inline execution and continuation without further approvals on 2026-10-04. Cleanup/backend/bootstrap and eligible host are verified; app runs after owner full-stack/clean-state proofs. Routine workflow/current-candidate result/disposal/final gate remain unfinished.
 - [x] Existing CI SHA ambiguity identified and addressed with a separate trusted merge-checkout evidence artifact.
 - [x] Hosted merge-checkout packaging proved on PR #72/run 37210137790; artifact identity and digest match live PR metadata. All six CI jobs and three API tests plus one logging regression passed. This does not complete the trusted-main check-selection proof.
 - [x] Foundation PR #72 reached trusted `main`; trial PR #73 proved pending CI rejection and accepted merge-candidate check association without AWS access. Latest-attempt/protection proofs continue.

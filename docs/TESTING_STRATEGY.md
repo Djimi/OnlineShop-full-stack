@@ -98,6 +98,14 @@ Terraform inputs, never arbitrary extra files, enter the private planning root.
 Process doubles must preserve actual empty-output semantics: a no-change
 `git diff` emits zero bytes, not a blank line. Otherwise an honest clean-checkout
 guard is tested against a fictitious difference and positive stories fail.
+Failed proof attempts must retain sanitized, actionable evidence: fixed stage/
+reason and allowlisted API error/action labels only. Raw process output, resource
+identifiers and credentials remain private. A red proof must not be described as
+passing merely because authorization/OIDC succeeded.
+Capture regressions exercise both a legitimate 20 MiB provider file (must
+succeed) and excessive private logs (must stop, stay bounded and emit no raw
+content). Global child file-size limits are not selective log limits. Start with
+these focused stories before the full automation/hosted verification.
 
 Owner host-setup command stories:
 `python3 -m unittest -v tests/scripts/aws_host_setup_test.py`.

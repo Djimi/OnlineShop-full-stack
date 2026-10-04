@@ -327,6 +327,13 @@ The separate manual `AWS operator plan proof` foundation guards current-state
 planning with pre-OIDC actor authorization and the shared session group. It
 refuses absent/empty/unexpected state before init and never applies or publishes
 AWS success. Its actual operator OIDC/native-lock proof remains pending.
+The first trial authorized actors/OIDC but failed protected planning; safe
+fixed-stage/allowlisted failure evidence is being added before a reviewed retry.
+No speculative IAM widening or raw-log publication is authorized by that failure.
+Quick reproduction found a global log-size cap also limited provider artifacts;
+independent streamed capture now covers large provider files and bounded logs.
+Actual credential-free init passed; hosted operator retry evidence still precedes
+closing the plan-proof issue.
 The separate manual `AWS role boundary proof` checks selected allowed/denied
 reads with publisher/operator OIDC; it never mutates AWS or publishes AWS success.
 Final merge protection is additionally blocked on check-writer provenance:
