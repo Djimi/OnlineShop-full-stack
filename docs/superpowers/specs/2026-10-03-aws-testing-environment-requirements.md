@@ -1,8 +1,9 @@
 # AWS Testing Environment — Detailed Implementation Contract
 
 **Status:** Owner authorized inline execution of the [implementation plan](../../../planning/aws-testing-environment-PLAN.md)
-on 2026-10-04. Cleanup-list review, first-provisioning cost approval, and live
-GitHub check-selection proof remain mandatory execution gates.
+on 2026-10-04, then delegated continuation without further approvals. Cleanup
+and capacity/cost decisions are recorded in the runbook; ownership/security
+constraints and live GitHub/AWS proofs remain mandatory.
 
 Start with the [owner-facing design and walkthroughs](./2026-10-03-aws-testing-environment-design.md).
 This companion preserves the exact requirements without putting them in the main

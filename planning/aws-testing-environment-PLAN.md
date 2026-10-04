@@ -102,10 +102,10 @@ inventory coverage and gaps; prerequisites for Task 4.
 
 - [x] Verify identity using `aws sts get-caller-identity --profile dpm-profile --region eu-north-1`; record a sanitized account identifier without credentials.
 - [x] Inventory enabled/relevant regions and global services, starting from account/service usage. Enumerate EC2/disks/snapshots/addresses/network dependencies, storage, container/DB services, owning stacks, IAM/access and other discovered resources. Record API failures and services not covered; tags alone do not prove absence. Scoped 17-region/global inventory and usage follow-up recorded in the runbook; MSK/unlisted-service gaps remain explicit.
-- [ ] Present the explicit deletion/preservation list to the owner, separating suspicious ownership/access/security resources for clarification. Preserve account, billing, organization and account-level access/security settings.
-- [ ] Execute the approved cleanup in dependency order, preferring owning-stack deletion; wait for completion and enumerate orphaned leftovers.
-- [ ] Repeat the covered inventory and record preserved baseline, remaining resources and gaps. Task passes only when approved deletions are verified; unresolved suspicious resources block relevant deletions, not unrelated documentation work.
-- [ ] Review and commit sanitized documentation after link/format checks: `docs(docs): record AWS cleanup baseline`.
+- [x] Present the explicit deletion/preservation list; owner authorized continuation without further approvals after that list was documented. Account/access/security baseline preserved.
+- [x] Execute the approved cleanup in dependency order; four exact unused playground resources deleted and individually verified absent.
+- [x] Repeat the covered inventory and record preserved baseline/gaps. All 739 listed queries repeated; only the same 17 MSK subscription gaps remain.
+- [x] Review and commit sanitized documentation after link/format checks: `docs(docs): record AWS cleanup baseline`.
 
 ### Task 2: Prove candidate resolution and GitHub result association
 
@@ -240,16 +240,16 @@ and plan checkboxes/issues with actual evidence. Configure GitHub protection onl
 - [x] Manual opt-in vs mandatory merging resolved: manual dispatch produces a separately required candidate result; existing CI stays automatic.
 - [x] Pending-request replacement resolved in the design: current GitHub documentation supports `queue: max`; both mutation jobs share one fixed group.
 - [x] Fresh schema ownership identified: `Auth/init-db/` and `Items/init-db/` independently initialize databases; no cross-service schema dependency needed.
-- [ ] Scoped account inventory is recorded; deletion-list approval and ambiguous SSH/RDS-role ownership remain unresolved — Task 1.
+- [x] Scoped inventory and dependencies rechecked; documented unused SSH/RDS-role/firewall cleanup authorized by the continuation instruction and verified — Task 1.
 - [ ] Exact candidate-check selection/newest-attempt behavior on GitHub needs live proof before deployment/gate enablement — Task 2.
-- [ ] Host size/AMI/disk and regional running/retained costs require measurements and owner approval — Task 4.
+- [x] Capacity/AMI/disk selection and regional estimates recorded before provisioning; owner delegated execution without further approvals — Task 4. Live capacity proof remains pending.
 - [ ] OIDC subject/Environment restrictions and IAM action/resource support require actual verification — Task 4.
 - [ ] Candidate fixture credentials, image-retention protection and container metadata blocking need implementation evidence — Tasks 3, 5, 8.
 - [ ] Cancellation launch/record gaps and state recovery require interruption trials — Tasks 5, 7.
 - [x] Owner authorized inline execution on 2026-10-04; no AWS mutation has been performed.
 - [x] Existing CI SHA ambiguity identified and addressed with a separate trusted merge-checkout evidence artifact.
 - [x] Hosted merge-checkout packaging proved on PR #72/run 37210137790; artifact identity and digest match live PR metadata. All six CI jobs and three API tests plus one logging regression passed. This does not complete the trusted-main check-selection proof.
-- [ ] Candidate-request foundation and proof harness must reach trusted `main` before live manual trials. The foundation PR cannot validate its own new controller; merging/review integration remains an owner boundary.
+- [x] Foundation PR #72 reached trusted `main`; trial PR #73 proved pending CI rejection and accepted merge-candidate check association without AWS access. Latest-attempt/protection proofs continue.
 
 ## Plan handoff
 
