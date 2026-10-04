@@ -319,6 +319,10 @@ and an actual isolated Compose clean-state/E2E proof. Host setup/hooks are defin
 and owner SSM proofs have run on an actual AWS host. Routine cloud orchestration
 and current-candidate success wiring remain unfinished; do not equate owner
 historical-candidate evidence with the final AWS check.
+Owner setup now also has bounded read-only `--reconcile` discovery with a
+controlled live lost-command-ID proof; it cannot authorize retry, clear unknown
+runtime state or synthesize validation success. Routine whole-session recovery
+remains unfinished.
 The separate manual `AWS role boundary proof` checks selected allowed/denied
 reads with publisher/operator OIDC; it never mutates AWS or publishes AWS success.
 Final merge protection is additionally blocked on check-writer provenance:

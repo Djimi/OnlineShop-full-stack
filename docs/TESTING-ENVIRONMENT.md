@@ -442,6 +442,25 @@ whole-host CPU peak or percentage-of-two-vCPU claim. Protected capacity summary
 and host sample record are retained; sustained CPU/capacity acceptance remains
 distinct from this successful learning-workload runtime proof.
 
+### Owner setup launch-gap reconciliation
+
+`scripts/aws-host-setup.py --reconcile` adds read-only discovery of exact recorded
+setup commands without sending/cancelling operations or rewriting protected cloud
+records. It size-checks the fixed versioned setup key before conditional download,
+rejects duplicate JSON fields, validates generation/host, then discovers a unique
+stage comment and verifies document/target/body hash/timeout/terminal invocation.
+Absent/ambiguous/active/cancelling or mismatched evidence refuses. The create-only
+report explicitly forbids automatic retry and AWS success; reconciliation is not
+proof that every setup stage ran or that detached runtime processes stopped.
+
+Live current-host reconciliation verified all 16 recorded commands. A controlled
+crash-gap trial versioned only the already-terminal setup record with its final
+ID removed; real SSM discovery recovered the exact ID and terminal invocation.
+Original bytes were restored under ETag CAS, preserving original/gap/restore
+versions. No host/app/Terraform state/generation changed. The bounded-read variant
+also passed an actual read-only reconciliation. This is owner setup recovery,
+not implemented routine validation/disposal or a current-candidate AWS result.
+
 ### Open merge-gate provenance issue
 
 GitHub's expected status-check source binds an **App**, not a workflow. The shared

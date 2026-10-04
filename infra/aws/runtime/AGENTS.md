@@ -25,6 +25,15 @@ only trusted-main host files with chunk bounds/checksums and persists command
 intent/IDs to protected storage before polling. Existing/unknown records block
 automatic retry. This is not the routine validation/disposal orchestrator.
 
+Its owner-only `--reconcile` mode is read-only: bounded authoritative versioned
+record -> unique generation/stage SSM discovery -> document/target/hash/timeout
+identity -> actual terminal invocation -> protected create-only report. Missing,
+ambiguous, active, cancelling or mismatched operations refuse. It never authorizes
+retry, clears runtime unknown state or synthesizes setup/AWS success. Controlled
+live lost-command-ID discovery passed with exact original cloud bytes restored
+under CAS and version history retained. Routine all-operation reconciliation is
+still separate and unfinished.
+
 ## Host interface
 
 Host replacement for an inspected infrastructure change requires installing these

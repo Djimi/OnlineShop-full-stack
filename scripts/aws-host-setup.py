@@ -15,6 +15,7 @@ import os
 import re
 import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
 
@@ -32,6 +33,11 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--identifiers", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument(
+        "--reconcile",
+        action="store_true",
+        help="Read-only discovery of recorded setup commands; never authorize retry",
+    )
     args = parser.parse_args()
     operation = None
     try:
@@ -40,7 +46,13 @@ def main():
                 "Existing setup record requires reconciliation, not automatic retry"
             )
         ids = json.loads(args.identifiers.read_text())
-        verify_host(ids)
+        prior = verify_host(ids)
+        if args.reconcile:
+            reconcile_setup(ids, prior, args.output)
+            print(
+                "Recorded setup commands reconciled; no retry, host mutation or AWS success authorized."
+            )
+            return 0
         verify_trusted_files()
         operation = {
             "generation": ids["generation"],
@@ -69,6 +81,8 @@ def main():
         OSError,
         ValueError,
         KeyError,
+        TypeError,
+        IndexError,
         subprocess.TimeoutExpired,
     ) as error:
         if operation is not None:
@@ -164,6 +178,137 @@ def verify_host(ids):
         c["Status"] not in {"Success", "Failed", "Cancelled", "TimedOut"} for c in prior
     ):
         raise SetupFailed("Remote operation is not terminal")
+    return prior
+
+
+def reconcile_setup(ids, remote_commands, output):
+    # Read the authoritative cloud record, not a caller's possibly stale local
+    # copy/ETag. Do not modify that record, the host, or any remote command.
+    location = [
+        "--bucket",
+        ids["state_bucket"],
+        "--key",
+        "operations/" + ids["generation"] + "/host-setup.json",
+        "--expected-bucket-owner",
+        ids["account_id"],
+    ]
+    head = aws(["s3api", "head-object", *location])
+    if not head.get("VersionId") or not 0 < head["ContentLength"] <= 1024**2:
+        raise SetupFailed("Missing versioned or bounded setup record")
+    with tempfile.TemporaryDirectory(
+        prefix="setup-reconcile-", dir=output.parent
+    ) as directory:
+        path = Path(directory) / "record.json"
+        metadata = aws(
+            [
+                "s3api",
+                "get-object",
+                *location,
+                "--if-match",
+                head["ETag"],
+                str(path),
+            ]
+        )
+        if (
+            metadata.get("VersionId") != head["VersionId"]
+            or path.stat().st_size != head["ContentLength"]
+        ):
+            raise SetupFailed("Setup record changed during bounded read")
+        record = json.loads(path.read_bytes(), object_pairs_hook=unique_fields)
+    if (
+        not isinstance(record, dict)
+        or record.get("generation") != ids["generation"]
+        or record.get("host_id") != ids["instance_id"]
+        or record.get("purpose") != "owner-host-setup-proof"
+        or record.get("aws_validation_success") is not False
+    ):
+        raise SetupFailed("Cloud setup record ownership mismatch")
+    entries = record.get("commands")
+    if not isinstance(entries, list) or not 1 <= len(entries) <= 64:
+        raise SetupFailed("No bounded setup command identities to reconcile")
+    reconciled = []
+    for index, entry in enumerate(entries):
+        if (
+            not isinstance(entry, dict)
+            or type(entry.get("stage")) is not int
+            or entry["stage"] != index
+            or not re.fullmatch(r"[a-f0-9]{64}", entry["sha256"])
+        ):
+            raise SetupFailed("Invalid setup command identity")
+        comment = ids["generation"] + "-setup-" + str(index)
+        matches = [
+            command for command in remote_commands if command.get("Comment") == comment
+        ]
+        if len(matches) != 1:
+            raise SetupFailed(
+                "Missing or ambiguous launched setup command; outcome remains unknown"
+            )
+        command = matches[0]
+        command_id = command["CommandId"]
+        if not re.fullmatch(
+            r"[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}", command_id
+        ) or ("command_id" in entry and entry["command_id"] != command_id):
+            raise SetupFailed("Recorded and discovered command identities differ")
+        parameters = command.get("Parameters", {})
+        if not isinstance(parameters, dict):
+            raise SetupFailed("Invalid discovered command parameters")
+        body = parameters.get("commands")
+        if (
+            command.get("DocumentName") != "AWS-RunShellScript"
+            or command.get("InstanceIds") != [ids["instance_id"]]
+            or not isinstance(body, list)
+            or len(body) != 1
+            or not isinstance(body[0], str)
+            or parameters.get("executionTimeout") != ["930"]
+            or hashlib.sha256(body[0].encode()).hexdigest() != entry["sha256"]
+        ):
+            raise SetupFailed("Discovered command target, document or body mismatch")
+        invocation = aws(
+            [
+                "ssm",
+                "get-command-invocation",
+                "--command-id",
+                command_id,
+                "--instance-id",
+                ids["instance_id"],
+            ]
+        )
+        if invocation["Status"] not in {"Success", "Failed", "Cancelled", "TimedOut"}:
+            raise SetupFailed("Discovered command invocation is not terminal")
+        reconciled.append(
+            {
+                "stage": index,
+                "command_id": command_id,
+                "status": invocation["Status"],
+                "response_code": invocation["ResponseCode"],
+            }
+        )
+    report = {
+        "generation": ids["generation"],
+        "host_id": ids["instance_id"],
+        "purpose": "owner-setup-command-reconciliation",
+        "status": "reconciled",
+        "source_version": metadata["VersionId"],
+        "commands": reconciled,
+        "automatic_retry_authorized": False,
+        "aws_validation_success": False,
+    }
+    descriptor = os.open(
+        output, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600
+    )
+    with os.fdopen(descriptor, "w") as stream:
+        json.dump(report, stream)
+        stream.flush()
+        os.fsync(stream.fileno())
+
+
+def unique_fields(pairs):
+    record = {}
+    for key, value in pairs:
+        if key in record:
+            raise SetupFailed("Duplicate fields in protected setup record")
+        record[key] = value
+    return record
 
 
 def verify_trusted_files():
