@@ -20,6 +20,16 @@ See [operational evidence](../../docs/TESTING-ENVIRONMENT.md) and the
 
 ## Fixed inputs and storage
 
+Attempt generation must not alter the launch-template body: a numeric version
+change forces EC2 replacement. Launch-time ownership tags are stable
+`ManagedBy`/`Repository`; Terraform separately manages the primary interface's
+mutable `Generation` tag, alongside instance/disk/network generation tags.
+No lifecycle ignore suppresses template/configuration drift. Migrating the initial
+template to this model requires one inspected host replacement (there is no
+application data yet); thereafter tag-only attempts must not replace the host.
+Live migration/replanning proof is pending. The environment root now includes
+the interface tag resource as well as its nine original infrastructure resources.
+
 | Root | Remote key | Caller |
 | --- | --- | --- |
 | `backend/` | `state/backend.tfstate` | Owner only |
@@ -42,7 +52,9 @@ The disposable host is On-Demand Free-plan-eligible `m7i-flex.large`, pinned x86
 `ami-04478a3e21a0d79a7`, 50 GiB encrypted gp3 deleted on termination. No security
 group ingress, SSH key, NAT, load balancer or managed DB exists in its definition.
 Outbound-only public IPv4 is intentional; inspection will use SSM. IMDSv2/hop
-limit alone is not container isolation; runtime firewall/probes are still pending.
+limit alone is not container isolation. Explicit firewall/FORWARD rules and Auth/
+E2E digest-image metadata probes passed after Docker restart and real reboot,
+with host-role ECR/secret access retained. Full-stack/all-image proofs remain pending.
 
 ## Verify definitions without AWS mutation
 
@@ -85,6 +97,11 @@ When comparing authoritative S3 state with `terraform state pull`, compare
 resource/output identities, lineage, serial and tool version explicitly: pull may
 normalize `check_results` without changing resource state. A whole-JSON mismatch
 alone is not evidence of resource drift. Keep both raw records protected.
+
+Terraform plan JSON may omit `resource_changes` for a no-op/refresh-only plan;
+inspect it as an empty list when absent, and inspect `resource_drift` separately.
+If a proof introduces drift before failing, reconcile/remove only its recorded
+probe through a fresh inspected plan before attempting another proof.
 
 Run from the repository root, separately for each root:
 

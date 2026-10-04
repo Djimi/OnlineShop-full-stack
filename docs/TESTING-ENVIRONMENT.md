@@ -338,6 +338,60 @@ preserving that package rather than using broad `--allowerasing`/`--skip-broken`
 The failed command is terminal; its operation remains `unknown` pending owner
 reconciliation. No candidate application has started.
 
+Owner reconciliation subsequently verified all preceding transfers successful
+and all recorded SSM commands terminal. Corrected trusted setup from merged
+PR #80 (`60d37d6`) completed successfully under bounded SSM/flock. The original
+failure record remains retained; a separate protected recovery record is
+`Success`. Host prerequisites are installed, not application deployment.
+
+Live owner proofs now detect a temporary managed-VPC tag drift and reject an old
+saved plan after a refresh-only state update (`Saved plan is stale`). Fresh
+inspected tag-only restoration removed the probe; no host was replaced. An
+initial proof parser assumed no-op JSON always contained `resource_changes`;
+its partial drift was reconciled before the corrected proof. Raw logs/plans
+remain protected. These proofs do not prove routine-role mutation or full-session
+workflow locking.
+
+Packaging trial `37237605326` built successfully but publication rejected its
+now-unsupported candidate while trusted main advanced. Failure-only finalization
+ran; no AWS success was published. Trial #73 was refreshed with trusted main
+again; a new exact-CI/manual publication is required, not reuse of that attempt.
+
+Actual Auth and E2E digest-image probes passed on the Free-plan EC2 host: neither
+obtained IPv4/IPv6 IMDS tokens, saw job/cloud credential variables or had the Docker
+socket mounted. Required IPv4/IPv6 firewall/FORWARD rules survived Docker restart.
+Host-role ECR login/pull and named-secret access still succeeded. A real EC2 reboot
+was then verified by changed boot identity; Docker/SSM and firewall hooks returned,
+host ECR/secret access worked and both images still failed metadata-token probes.
+Private auth/probe containers/network were scoped and removed. These are selected
+image-isolation proofs, not full application runtime/E2E, all-image probes, remote
+cancellation recovery or trustworthy merge-gate success.
+
+Actual cancellation proof also passed: a bounded SSM command launched an isolated
+detached test container, then was cancelled. A new trusted runtime invocation was
+blocked by its process lock/unknown-operation record rather than resetting data.
+Owner reconciliation removed the exact test container, verified absence and lock
+release, then wrote a terminal cancellation record. This proves the runtime guard
+and documented owner recovery, not an implemented automatic workflow reconciler.
+
+Current Stockholm Price List compute equivalent for `m7i-flex.large` is
+**USD 0.10175/hour**. Reusing the recorded 730-hour/month, 50 GiB gp3, public IPv4,
+50 GiB ECR/1 GiB S3/secret assumptions gives **USD 87.53/month live equivalent**
+and **USD 5.42/month retained/disposed equivalent**, excluding traffic/requests/
+taxes. On this unchanged Free plan these are pricing/credit-consumption estimates,
+not a paid-account bill or a guarantee of unlimited zero-cost use.
+
+### Generation lifecycle correction: not applied yet
+
+A refreshed generation plan unexpectedly replaces the EC2 host because changing
+launch-time generation tags produces a new launch-template version. That plan was
+not applied. The environment definition now separates stable launch ownership
+from mutable attempt tags; an explicit primary-interface tag tracks generation.
+Assertions observed RED on dynamic launch tags, then GREEN after correction.
+The initial migration requires one reviewed replacement of the empty host;
+subsequent generation-tag changes must not replace it. No lifecycle drift-ignore
+or account-plan upgrade is introduced. Live migration/future-plan proof is pending.
+
 ### Open merge-gate provenance issue
 
 GitHub's expected status-check source binds an **App**, not a workflow. The shared
@@ -399,9 +453,9 @@ AWS candidate check proof -> Run workflow** on `main`, entering a reviewed PR
 whose exact candidate has passed the new CI. The harness creates a pending
 **AWS validation** check against that candidate and completes it as **failure**
 because it has not deployed or run AWS E2E. It has no OIDC/AWS permissions.
-This first harness proves only pending/failure association; newest-attempt,
-delayed-old-completion, positive-result selection, and real merge enforcement
-remain unproved. Do not enable the required AWS gate yet.
+The first harness proved pending/failure association; later synthetic latest-
+attempt/delayed-old-completion tests also passed. Actual successful AWS-result
+selection and real merge enforcement remain unproved. Do not enable the gate yet.
 
 ## Incremental delivery checklist
 
@@ -411,8 +465,8 @@ remain unproved. Do not enable the required AWS gate yet.
 - [x] Owner requests implementation planning from the revised spec.
 - [x] Write the implementation plan with requirement coverage and issues.
 - [x] Owner authorizes implementation and selects inline execution (2026-10-04).
-- [ ] Inventory AWS and review suspicious resources before cleanup.
-- [ ] Clean previous playground resources and record the remaining baseline.
+- [x] Scope inventory and review cleanup targets; explicit MSK subscription gaps remain.
+- [x] Clean authorized playground resources and record the preserved baseline.
 - [ ] Document managed resources, bootstrap prerequisites, settings, and costs here.
 - [ ] Provision environment and verify reset, isolation, and recreation.
 - [ ] Automate authorized manual request, publication, deployment, locking, E2E, and evidence.

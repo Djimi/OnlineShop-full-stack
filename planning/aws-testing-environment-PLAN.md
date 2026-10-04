@@ -151,7 +151,7 @@ update `.gitignore` and operational record.
 - [x] Define disposable environment root with dedicated network, no ingress, pinned On-Demand host/encrypted disposable storage and explicit profile; mock boundary test passes. Host provisioning/live proof remains pending.
 - [ ] Measure representative full Compose+E2E CPU/memory/disk use locally; include current Auth connection-pool demand. Compare regional On-Demand sizes (including burstable-credit cost if considered), disk, public IPv4, ECR, S3/secrets/log retention costs. Obtain owner approval of host/AMI/disk and live-hourly/live-monthly/disposed estimates before first apply.
 - [ ] Bootstrap and provision using refreshed saved plans with restrictive file permissions. Inspect permitted changes before `terraform apply SAVED_PLAN`; record exact inputs/root/key/tool versions and resource identities. Never publish plan JSON or state as artifacts.
-- [ ] Prove actual role denies, S3 state locking contention, saved-plan staleness, drift detection, missing-state recovery refusal and protected state-version access. Preserve restore/import/verified-force-unlock instructions in `infra/aws/README.md`.
+- [ ] Complete live boundaries/recovery: selected actual role read denies, native S3 locking, saved-plan staleness and tag-drift detection are proved. Routine-role mutations, missing-state recovery refusal and protected version boundaries remain pending. Preserve restore/import/verified-force-unlock instructions in `infra/aws/README.md`.
 - [ ] Commit configuration, provider locks and sanitized evidence after checks: `feat(e2e): provision isolated AWS testing infrastructure`.
 
 ### Task 5: Implement reset, bounded remote runtime and recovery ledger
