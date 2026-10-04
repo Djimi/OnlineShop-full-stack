@@ -13,7 +13,9 @@ created eight network/template resources but EC2 rejected the original host.
 After reconciliation, an inspected policy-only bootstrap update and host-only
 environment plan launched Free-plan-eligible `m7i-flex.large`. Actual host/disk/
 metadata/profile/no-ingress settings and unchanged Free plan were verified.
-No application is deployed yet; host setup and live proofs remain in progress.
+The migrated host now runs the app after owner full-stack/four-test E2E and seeded
+clean-state reset/retest proofs. Routine orchestration, disposal/recreation and
+current-candidate merge validation remain unfinished.
 Do not treat mock tests as proof of real IAM permissions, locking or isolation.
 See [operational evidence](../../docs/TESTING-ENVIRONMENT.md) and the
 [implementation plan](../../planning/aws-testing-environment-PLAN.md).
@@ -24,18 +26,17 @@ Attempt generation must not alter the launch-template body: a numeric version
 change forces EC2 replacement. Launch-time ownership tags are stable
 `ManagedBy`/`Repository`; Terraform separately manages the primary interface's
 mutable `Generation` tag, alongside instance/disk/network generation tags.
-No lifecycle ignore suppresses template/configuration drift. Migrating the initial
-template to this model requires one inspected host replacement (there is no
-application data yet); thereafter tag-only attempts must not replace the host.
-Live migration/replanning proof is pending. The environment root now includes
+No lifecycle ignore suppresses template/configuration drift. The initial empty-
+host migration is applied; subsequent tag-only attempts must not replace it.
+Live update-only replanning is verified. The environment root includes
 the interface tag resource as well as its nine original infrastructure resources.
 
 The initial migration is applied: ten resources, same dedicated network, old
 host/disk/interface removal verified and new eligible host bootstrapped. Live
 follow-up exposed a second cause: changing the template **resource** tags makes
 computed `latest_version` unknown, also forcing replacement. Its tags must be
-stable too. Do not apply the destructive hypothetical follow-up plan. The tag-only
-owner alignment/fresh-plan proof is pending; no lifecycle ignore is introduced.
+stable too. The obsolete destructive hypothetical plan must never be applied;
+tag-only owner alignment/fresh-plan proof is complete. No lifecycle ignore is introduced.
 
 PR #82 merged at `7c22ba0` after CI. Owner recovery removed only the obsolete
 template-resource `Generation` tag; launch-template version was read back
@@ -68,7 +69,9 @@ group ingress, SSH key, NAT, load balancer or managed DB exists in its definitio
 Outbound-only public IPv4 is intentional; inspection will use SSM. IMDSv2/hop
 limit alone is not container isolation. Explicit firewall/FORWARD rules and Auth/
 E2E digest-image metadata probes passed after Docker restart and real reboot,
-with host-role ECR/secret access retained. Full-stack/all-image proofs remain pending.
+with host-role ECR/secret access retained on the initial host. Current-host full-
+stack/E2E, clean-state and all-candidate metadata probes also passed. Frontend
+IPv6 has no source address; that is not a routed firewall-denial proof.
 
 ## Verify definitions without AWS mutation
 
@@ -83,9 +86,8 @@ capacity; regional availability alone does not prove account-plan eligibility.
 The replacement selection is `m7i-flex.large` (two x86_64 vCPUs, 8 GiB), verified
 eligible/offered in `eu-north-1a`. Environment validation and operator launch
 policy now pin this selection; both plan assertions were observed RED then GREEN.
-Live policy application and host launch are verified; capacity proofs remain
-pending. Eligibility is
-not unlimited free usage.
+Live policy application/host launch and a sampled full-stack capacity run are
+verified; sustained-load guarantees are not. Eligibility is not unlimited free usage.
 
 Owner-only host setup proof command:
 `python3 scripts/aws-host-setup.py --identifiers infra/aws/.runtime/bootstrap-identifiers.json --output infra/aws/.runtime/host-setup-operation.json`.
@@ -97,10 +99,23 @@ replacing another cloud record. Unknown outcomes require reconciliation, not a
 new output path. This owner proof is not shared-lock routine validation/disposal
 or a successful AWS check; automated launch-gap/cancellation recovery is pending.
 
+Read-only setup recovery:
+`python3 scripts/aws-host-setup.py --reconcile --identifiers infra/aws/.runtime/bootstrap-identifiers.json --output infra/aws/.runtime/setup-command-reconciliation.json`.
+Use a new protected output path: reports are create-only. It reads the exact
+versioned setup record after a size preflight/conditional download. Missing IDs
+are discovered by unique generation/stage comment, then verified against target,
+document, command hash/timeout and actual terminal invocation. Missing/ambiguous/
+active/cancelling commands refuse reconciliation. It never sends/cancels commands,
+rewrites cloud records, clears runtime unknown state, authorizes retry or publishes
+AWS success. A controlled live lost-ID version/discovery/restoration proof passed;
+routine validation/disposal reconciliation must additionally handle Terraform,
+EC2 transitions and detached tests before any mutation.
+
 The first environment apply failed at EC2 `RunInstances` with
 `InvalidParameterCombination: The specified instance type is not eligible for Free Tier`.
-Eight resources remain in versioned `state/environment.tfstate`; the host, root
-disk and ENI are absent, ingress is empty and the state lock is released.
+At that failed attempt, eight resources remained in versioned environment state
+and host/disk/ENI were absent. The later eligible launch/migration has reconciled
+that partial state; the current root has ten resources and a populated host.
 Protected reconciliation receipt: `.runtime/partial-environment-reconciliation.json`.
 Do not rerun the initial-absence checks or reuse the failed saved plan. After the
 account prerequisite is resolved, reconcile recorded ownership/live resources,

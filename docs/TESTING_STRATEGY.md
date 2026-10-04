@@ -83,7 +83,12 @@ Owner host-setup command stories:
 `python3 -m unittest -v tests/scripts/aws_host_setup_test.py`.
 These substitute only the AWS process boundary and verify no mutation for foreign
 generation/active remote operation, finite checksummed transfer, no raw output,
-visibility-delay polling and conditional persistent intent. They do not prove
+visibility-delay polling, conditional persistent intent, and read-only lost-ID
+discovery against document/target/body/timeout/terminal invocation. Missing,
+ambiguous, active/cancelling, duplicate-field, excessive or foreign records refuse
+reconciliation; failed terminal commands remain failed, not setup success.
+Positive discovery and pre-download size bounds were observed RED-to-GREEN;
+the remaining boundaries are explicit regression stories. They do not prove
 host installation/isolation or routine OIDC orchestration; record those separately.
 
 Every push and pull request runs independent Java, frontend, and image/PR-E2E

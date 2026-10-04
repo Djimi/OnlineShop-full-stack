@@ -173,6 +173,10 @@ update each affected module's AGENTS and operational flows.
   Routine orchestration and current-candidate gate remain incomplete.
 - [ ] Block container IMDS access with host firewall rules for IPv4/IPv6 and forwarded/container paths; require IMDSv2. Restrict capabilities/mounts and network modes. Verify Docker restart/reboot retains isolation; host SSM/ECR/secret access must still work.
 - [ ] Persist operation intent before launch, IDs immediately afterward, and terminal outcomes. Name/tag remote operations by generation; discover operations in launch/record crash gaps. Use bounded SSM execution plus a host process lock and termination verification; reconciliation checks Terraform locks/state, EC2 transitions, SSM and detached tests before mutation.
+- Owner setup read-only lost-ID reconciliation is implemented/tested, including
+  controlled live authoritative-record gap/discovery/CAS restoration. It never
+  authorizes retry or clears unknown runtime state. Routine all-operation
+  reconciliation, Terraform/EC2 transitions and detached-test recovery remain pending.
 - [ ] Run local runtime tests and real-host metadata/network/credential probes from app and E2E containers. Prove cancellation recovery by interrupting SSM/controller, then verify a subsequent run cannot overlap. Bounds: provision 20/reset-deploy 10/readiness 5/E2E 15/diagnostics 5 minutes.
 - [ ] Run module-root Maven verification for any changed Java/config/fixtures (install `common` before Items), frontend lint/build if affected, E2E and changed-Dockerfile hadolint; commit: `feat(e2e): reset and validate AWS runtime safely`.
 
