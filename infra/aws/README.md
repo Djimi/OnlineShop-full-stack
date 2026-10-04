@@ -9,8 +9,11 @@ Disposal: environment only -> backend/bootstrap and evidence remain
 **Implementation in progress:** backend is created/migrated and bootstrap's 19
 inspected resources are applied. Dedicated generated credentials were initialized
 via protected Secrets Manager API, never Terraform. Initial environment apply
-created eight network/template resources but EC2 rejected the selected host
-because the account is on an active Free plan. No application host exists.
+created eight network/template resources but EC2 rejected the original host.
+After reconciliation, an inspected policy-only bootstrap update and host-only
+environment plan launched Free-plan-eligible `m7i-flex.large`. Actual host/disk/
+metadata/profile/no-ingress settings and unchanged Free plan were verified.
+No application is deployed yet; host setup and live proofs remain in progress.
 Do not treat mock tests as proof of real IAM permissions, locking or isolation.
 See [operational evidence](../../docs/TESTING-ENVIRONMENT.md) and the
 [implementation plan](../../planning/aws-testing-environment-PLAN.md).
@@ -54,8 +57,19 @@ capacity; regional availability alone does not prove account-plan eligibility.
 The replacement selection is `m7i-flex.large` (two x86_64 vCPUs, 8 GiB), verified
 eligible/offered in `eu-north-1a`. Environment validation and operator launch
 policy now pin this selection; both plan assertions were observed RED then GREEN.
-Live policy application, launch/capacity proofs remain pending. Eligibility is
+Live policy application and host launch are verified; capacity proofs remain
+pending. Eligibility is
 not unlimited free usage.
+
+Owner-only host setup proof command:
+`python3 scripts/aws-host-setup.py --identifiers infra/aws/.runtime/bootstrap-identifiers.json --output infra/aws/.runtime/host-setup-operation.json`.
+It verifies STS/host tags/profile/pinned size/AMI, SSM online/idle and unchanged
+trusted-main runtime files; transfers only checksummed controller files in finite
+chunks, not candidate scripts; runs bounded host setup under a host lock. Intent
+and command IDs persist locally and in protected S3. Conditional writes refuse
+replacing another cloud record. Unknown outcomes require reconciliation, not a
+new output path. This owner proof is not shared-lock routine validation/disposal
+or a successful AWS check; automated launch-gap/cancellation recovery is pending.
 
 The first environment apply failed at EC2 `RunInstances` with
 `InvalidParameterCombination: The specified instance type is not eligible for Free Tier`.
