@@ -1,0 +1,181 @@
+name: AWS validation
+
+on:
+  workflow_dispatch:
+    inputs:
+      pr:
+        description: Reviewed same-repository PR number (packaging trial; runtime not yet enabled)
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  request:
+    name: Candidate request
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      pull-requests: read
+      actions: read
+      checks: write
+    outputs:
+      candidate: ${{ steps.request.outputs.candidate }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Authorize exact CI candidate
+        id: request
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REQUESTED_PR: ${{ inputs.pr }}
+        run: |
+          python3 scripts/aws-validation.py request --pr "$REQUESTED_PR" --output "$RUNNER_TEMP/request.json"
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          record = json.loads((Path(os.environ['RUNNER_TEMP']) / 'request.json').read_text())
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
+              output.write('candidate=' + record['candidate_sha'] + '\n')
+          with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as output:
+              output.write(f"PR #{record['pr']}; head `{record['head_sha']}`; base `{record['base_sha']}`; candidate `{record['candidate_sha']}`; actor `{record['actor']}`; triggering actor `{record['triggering_actor']}`; run/attempt `{record['validation_run_id']}/{record['validation_run_attempt']}`. Packaging trial only; no runtime success can be published.\n")
+          PY
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: aws-request-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/request.json
+          if-no-files-found: error
+          retention-days: 14
+
+  build:
+    name: Build candidate
+    needs: request
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      pull-requests: read
+      checks: read
+      actions: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.sha }}
+          path: controller
+          persist-credentials: false
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ needs.request.outputs.candidate }}
+          path: candidate
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: aws-request-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/request
+      - name: Package candidate without cloud or write credentials
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          python3 controller/scripts/aws-validation.py build
+          --request "$RUNNER_TEMP/request/request.json"
+          --candidate "$GITHUB_WORKSPACE/candidate"
+          --artifacts "$RUNNER_TEMP/build-artifacts"
+          --output "$RUNNER_TEMP/build.json"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: aws-build-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/build-artifacts/
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 0
+
+  publish:
+    name: Publish candidate
+    needs: [request, build]
+    environment: aws-testing
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    permissions:
+      contents: read
+      pull-requests: read
+      checks: read
+      actions: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: aws-request-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/request
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: aws-build-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/build-artifacts
+      - name: Recheck current candidate before AWS exchange
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          python3 scripts/aws-validation.py verify-build
+          --request "$RUNNER_TEMP/request/request.json"
+          --manifest "$RUNNER_TEMP/build-artifacts/build.json"
+          --artifacts "$RUNNER_TEMP/build-artifacts"
+          --output "$RUNNER_TEMP/verified-build.json"
+      - uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4
+        with:
+          role-to-assume: ${{ vars.AWS_TESTING_PUBLISHER_ROLE }}
+          aws-region: eu-north-1
+          allowed-account-ids: ${{ vars.AWS_TESTING_ACCOUNT_ID }}
+          role-session-name: publish-${{ github.run_id }}-${{ github.run_attempt }}
+          role-duration-seconds: 3600
+          mask-aws-account-id: true
+      - name: Verify trusted build provenance and publish fixed digests
+        env:
+          GH_TOKEN: ${{ github.token }}
+          AWS_TESTING_ACCOUNT_ID: ${{ vars.AWS_TESTING_ACCOUNT_ID }}
+        run: >-
+          python3 scripts/aws-validation.py publish
+          --request "$RUNNER_TEMP/request/request.json"
+          --manifest "$RUNNER_TEMP/build-artifacts/build.json"
+          --artifacts "$RUNNER_TEMP/build-artifacts"
+          --output "$RUNNER_TEMP/images.json"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: aws-images-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/images.json
+          if-no-files-found: error
+          retention-days: 14
+
+  outcome:
+    name: Packaging-only non-success outcome
+    needs: [request, build, publish]
+    if: always() && github.ref == 'refs/heads/main' && needs.request.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      actions: read
+      checks: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: aws-request-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/request
+      - name: Never infer AWS success from packaging
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 scripts/aws-validation.py finalize-failure --request "$RUNNER_TEMP/request/request.json"
+          echo 'Packaging-only trial: runtime validation remains unfinished; AWS validation is unsuccessful.' >> "$GITHUB_STEP_SUMMARY"
