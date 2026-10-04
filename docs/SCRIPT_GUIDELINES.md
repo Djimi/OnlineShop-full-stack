@@ -7,6 +7,15 @@ minimizing line count or demonstrating abstraction.
 
 ## Required reading order
 
+Before verification, resolve the actual linter binary and its supported schema;
+absence from `PATH` is not proof that no installation exists. When GitHub adds a
+documented workflow property before a linter supports it, verify the official
+contract and check a reviewed pinned tool revision rather than removing the safety
+property. If upstream still lacks support, validate that exact field separately,
+exclude only its exact diagnostic and record the limitation; never suppress
+unrelated errors or claim full schema support. Discover a tool repository's default
+branch before resolving a revision; do not guess `main`/`master`.
+
 Every non-trivial script must make these layers easy to find, in this order:
 
 1. A brief contract: what the command changes, what it deliberately does not

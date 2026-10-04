@@ -461,6 +461,33 @@ versions. No host/app/Terraform state/generation changed. The bounded-read varia
 also passed an actual read-only reconciliation. This is owner setup recovery,
 not implemented routine validation/disposal or a current-candidate AWS result.
 
+### Guarded operator-role plan: live proof pending
+
+The separate manually dispatched `AWS operator plan proof` workflow authorizes
+dispatch/rerun administrators before exchanging OIDC, then holds the shared
+`aws-testing-environment` session group (`queue: max`, no active cancellation).
+It verifies actual account/operator role, reads fixed bounded versioned state and
+generation pointer, rejects absent/empty/unexpected/mismatched snapshots before
+Terraform initialization, and requires a locked no-change plan covering all ten
+expected resources. It never applies, resets the app or publishes AWS success.
+Protected raw state/plans/logs never enter artifacts or the step summary.
+
+Ten command stories pass, including observed RED-to-GREEN missing command,
+false empty-plan acceptance and modified trusted-input rejection. The controller
+checks the exact checkout and a fixed tracked input allowlist before OIDC;
+untracked extra Terraform files are never copied to its protected planning root.
+Full automation suite: 106 passed. Actual OIDC/
+native-lock/no-change planning awaits trusted-main integration/manual proof; this
+does not establish EC2 mutation boundaries or missing-state recovery under live
+resource loss. An old local actionlint rejected documented `concurrency.queue`;
+official GitHub documentation confirms `max`/no-cancellation semantics, and a
+new pinned tool revision `011a6d15e749bb3f2d771eed9c7aa0e7e3e10ee7` still lacks
+that schema. All other actionlint diagnostics passed with only its exact
+`unexpected key "queue" for "concurrency" section` diagnostic excluded; parsed
+YAML separately verified the exact shared group/max/no-cancellation and dispatch-
+only/read+OIDC contract. This is a documented narrow tooling limitation, not a
+claim of full schema support. Hosted manual syntax/permission proof is still required.
+
 ### Open merge-gate provenance issue
 
 GitHub's expected status-check source binds an **App**, not a workflow. The shared
