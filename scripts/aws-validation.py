@@ -1,13 +1,16 @@
 #!/usr/bin/env python3
-"""Authorize candidates, package inert archives, and finalize owned failures.
+"""Authorize candidates, package/publish exact images, and finalize owned failures.
 
 Only trusted main workflows may call this command. GitHub CLI receives its job
 token through GH_TOKEN; API errors are never echoed. CI evidence is bounded inert
 data from an unchanged trusted workflow, not a PR's provenance claim. No AWS
-credentials or calls are needed for these commands. Builds run only candidate
+credentials or calls are needed except for the isolated publisher command. Builds run only candidate
 Dockerfiles in Docker, with job/cloud tokens removed from client environments.
 Build/verification failure leaves no accepted manifest; no command publishes a
-successful AWS result or deploys an application.
+successful AWS result or deploys an application. Publication verifies the trusted
+workflow artifact digest and manifest independently, uses five fixed ECR targets,
+and compares pushed digests without running image code. Partial pushes remain
+bounded by repository lifecycle policies; failed publication emits no receipt.
 """
 
 import argparse
@@ -21,6 +24,7 @@ import re
 import subprocess
 import sys
 import tarfile
+import tempfile
 import zipfile
 
 REPOSITORY = "Djimi/OnlineShop-full-stack"
@@ -37,6 +41,7 @@ IMAGE_NAMES = {"auth", "items", "gateway", "frontend", "e2e"}
 BUILD_CONTEXTS = {"auth": "Auth", "items": "", "gateway": "api-gateway", "frontend": "frontend", "e2e": "e2e-tests"}
 MAX_IMAGE_BYTES = 4 * 1024**3
 MAX_FIXTURE_BYTES = 16 * 1024**2
+REGION = "eu-north-1"
 
 
 class RequestRejected(Exception):
@@ -61,10 +66,26 @@ def main():
     build.add_argument("--candidate", type=Path, required=True)
     build.add_argument("--artifacts", type=Path, required=True)
     build.add_argument("--output", type=Path, required=True)
+    publish = commands.add_parser("publish", help="Publish trusted exact build archives to five fixed ECR repositories")
+    publish.add_argument("--request", type=Path, required=True)
+    publish.add_argument("--manifest", type=Path, required=True)
+    publish.add_argument("--artifacts", type=Path, required=True)
+    publish.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
     try:
         context = trusted_dispatch()
         authorize_actors(context)
+        if args.command == "publish":
+            record = read_request(args.request, context)
+            manifest = verify_archives(record, args.manifest, args.artifacts)
+            artifact = verify_build_provenance(record, manifest)
+            read_request(args.request, context)
+            published = publish_images(record, manifest, args.artifacts)
+            published.update(build_artifact_id=artifact["id"], build_artifact_digest=artifact["digest"])
+            read_request(args.request, context)
+            write_request(args.output, published)
+            print("Five fixed repository digests published without running candidate image code")
+            return 0
         if args.command == "build":
             record = read_request(args.request, context)
             manifest = build_candidate(record, args.candidate, args.artifacts)
@@ -369,6 +390,113 @@ def archive_metadata(path, limit):
         for block in iter(lambda: stream.read(1024**2), b""):
             digest.update(block)
     return {"file": path.name, "size": path.stat().st_size, "sha256": digest.hexdigest()}
+
+
+def verify_build_provenance(record, manifest):
+    run_id, attempt = record["validation_run_id"], record["validation_run_attempt"]
+    if os.environ.get("GITHUB_WORKFLOW_REF") != f"{REPOSITORY}/.github/workflows/aws-validation.yml@refs/heads/main":
+        raise RequestRejected("publication requires the trusted validation workflow")
+    run = github(f"actions/runs/{run_id}/attempts/{attempt}")
+    expected = {"id": run_id, "run_attempt": attempt, "head_sha": record["controller_sha"],
+                "event": "workflow_dispatch", "path": ".github/workflows/aws-validation.yml"}
+    if any(run.get(key) != value for key, value in expected.items()) or run.get("repository", {}).get("full_name") != REPOSITORY:
+        raise RequestRejected("build workflow provenance mismatch")
+    jobs = [job for job in github_list(f"actions/runs/{run_id}/attempts/{attempt}/jobs", "jobs")
+            if job.get("name") == "Build candidate"]
+    if len(jobs) != 1 or jobs[0].get("status") != "completed" or jobs[0].get("conclusion") != "success":
+        raise RequestRejected("trusted candidate build must complete successfully")
+    artifacts = [artifact for artifact in github_list(f"actions/runs/{run_id}/artifacts", "artifacts")
+                 if artifact.get("name") == f"aws-build-{run_id}-{attempt}"]
+    if len(artifacts) != 1:
+        raise RequestRejected("missing or ambiguous trusted build artifact")
+    artifact = artifacts[0]
+    limit = len(IMAGE_NAMES) * MAX_IMAGE_BYTES + MAX_FIXTURE_BYTES + MAX_EVIDENCE_BYTES
+    if (artifact.get("expired") is not False or not 0 < artifact["size_in_bytes"] <= limit
+            or artifact["workflow_run"]["id"] != run_id
+            or artifact["workflow_run"]["head_sha"] != record["controller_sha"]
+            or not re.fullmatch(r"sha256:[0-9a-f]{64}", artifact.get("digest", ""))):
+        raise RequestRejected("invalid trusted build artifact identity")
+    with tempfile.TemporaryDirectory(prefix="aws-build-provenance-") as directory:
+        path = Path(directory) / "artifact.zip"
+        with path.open("xb") as stream:
+            try:
+                result = subprocess.run(["gh", "api", f"{API_ROOT}/actions/artifacts/{positive_integer(artifact['id'])}/zip", "--method", "GET"],
+                                        stdout=stream, stderr=subprocess.DEVNULL, timeout=1500)
+            except (subprocess.TimeoutExpired, FileNotFoundError):
+                raise RequestRejected("trusted artifact download failed") from None
+        if result.returncode or not 0 < path.stat().st_size <= limit:
+            raise RequestRejected("trusted artifact download failed or exceeds bound")
+        if "sha256:" + archive_metadata(path, limit)["sha256"] != artifact["digest"]:
+            raise RequestRejected("trusted artifact digest mismatch")
+        try:
+            with zipfile.ZipFile(path) as archive:
+                members = archive.infolist()
+                expected_names = {"build.json", "fixtures.tar", *(f"{name}.tar" for name in IMAGE_NAMES)}
+                if (len(members) != len(expected_names) or {m.filename for m in members} != expected_names
+                        or any((m.external_attr >> 16) & 0o170000 == 0o120000 for m in members)
+                        or sum(m.file_size for m in members) > limit
+                        or archive.getinfo("build.json").file_size > MAX_EVIDENCE_BYTES):
+                    raise RequestRejected("unsafe trusted artifact archive")
+                source = json.loads(archive.read("build.json"), object_pairs_hook=unique_fields)
+                if source != manifest:
+                    raise RequestRejected("local manifest differs from trusted build artifact")
+                for metadata in [*manifest["images"].values(), manifest["fixtures"]]:
+                    member = archive.getinfo(metadata["file"])
+                    if member.file_size != metadata["size"]:
+                        raise RequestRejected("trusted packaged image size mismatch")
+                    digest = hashlib.sha256()
+                    with archive.open(member) as stream:
+                        for block in iter(lambda: stream.read(1024**2), b""):
+                            digest.update(block)
+                    if digest.hexdigest() != metadata["sha256"]:
+                        raise RequestRejected("trusted packaged image checksum mismatch")
+        except (zipfile.BadZipFile, RuntimeError):
+            raise RequestRejected("corrupt trusted build artifact") from None
+    return artifact
+
+
+def publish_images(record, manifest, artifacts):
+    account = os.environ.get("AWS_TESTING_ACCOUNT_ID", "")
+    if not re.fullmatch(r"[0-9]{12}", account):
+        raise RequestRejected("approved testing account configuration is missing")
+    identity = json.loads(publication_command(["aws", "sts", "get-caller-identity", "--region", REGION, "--output", "json", "--no-cli-pager"]))
+    if (identity.get("Account") != account
+            or not identity.get("Arn", "").startswith(f"arn:aws:sts::{account}:assumed-role/onlineshop-test-publisher/")):
+        raise RequestRejected("publisher role or target account mismatch")
+    registry = f"{account}.dkr.ecr.{REGION}.amazonaws.com"
+    published = {}
+    with tempfile.TemporaryDirectory(prefix="aws-ecr-auth-") as directory:
+        env = {key: value for key, value in os.environ.items()
+               if not key.startswith(("AWS_", "GITHUB_", "ACTIONS_")) and key not in {"GH_TOKEN", "GH_ENTERPRISE_TOKEN"}}
+        env["DOCKER_CONFIG"] = directory
+        password = publication_command(["aws", "ecr", "get-login-password", "--region", REGION, "--no-cli-pager"])
+        publication_command(["docker", "login", "--username", "AWS", "--password-stdin", registry], env=env, data=password)
+        for name in sorted(IMAGE_NAMES):
+            tag = f"run-{record['validation_run_id']}-attempt-{record['validation_run_attempt']}"
+            local, remote = f"onlineshop-test-{name}:{tag}", f"{registry}/onlineshop-test-{name}:{tag}"
+            publication_command(["docker", "load", "--input", str(artifacts / manifest["images"][name]["file"])], env=env)
+            publication_command(["docker", "tag", local, remote], env=env)
+            publication_command(["docker", "push", remote], env=env)
+            details = json.loads(publication_command(["aws", "ecr", "describe-images", "--repository-name", f"onlineshop-test-{name}",
+                                                     "--image-ids", f"imageTag={tag}", "--region", REGION, "--output", "json", "--no-cli-pager"]))["imageDetails"]
+            if len(details) != 1 or not re.fullmatch(r"sha256:[0-9a-f]{64}", details[0].get("imageDigest", "")):
+                raise RequestRejected("published registry digest is invalid")
+            digest_uri = f"{registry}/onlineshop-test-{name}@{details[0]['imageDigest']}"
+            local_digests = json.loads(publication_command(["docker", "image", "inspect", "--format", "{{json .RepoDigests}}", remote], env=env))
+            if digest_uri not in local_digests:
+                raise RequestRejected("registry digest differs from pushed image")
+            published[name] = digest_uri
+    return {**record, "images": published, "fixtures": manifest["fixtures"]}
+
+
+def publication_command(command, *, env=None, data=None):
+    try:
+        result = subprocess.run(command, env=env, input=data, capture_output=True, timeout=600)
+    except (subprocess.TimeoutExpired, FileNotFoundError):
+        raise RequestRejected("publication command timed out or is unavailable") from None
+    if result.returncode or len(result.stdout) > 4 * 1024**2:
+        raise RequestRejected("publication command failed")
+    return result.stdout
 
 
 def verify_archives(record, manifest_path, directory):

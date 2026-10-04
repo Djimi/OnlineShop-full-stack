@@ -34,6 +34,7 @@ For AWS candidate-request foundations, run from the repository root:
 python3 -m unittest -v tests/scripts/aws_validation_test.py
 python3 -m unittest discover -s tests/scripts -p '*_test.py'
 actionlint .github/workflows/ci.yml .github/workflows/aws-check-proof.yml
+actionlint .github/workflows/aws-validation.yml
 ```
 
 For the AWS E2E image, run `hadolint e2e-tests/Dockerfile`. When the native
@@ -53,6 +54,10 @@ is still required before deployment workflows or merge-gate activation.
 Terraform definitions have plan-only mock tests in all three roots; run the
 root-specific init/validate/test commands from [infra/aws/README.md](../infra/aws/README.md).
 Mock tests and read-only IAM simulations are not actual OIDC/role/isolation proof.
+Publisher stories additionally substitute the AWS/Docker process boundaries,
+reject source-artifact/candidate/account mismatches and compare pushed digests.
+The manual validation workflow is currently packaging-only and always concludes
+its candidate check as failure; actual runtime validation remains unfinished.
 
 ## GitHub Actions Checks
 

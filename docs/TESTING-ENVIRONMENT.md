@@ -196,6 +196,19 @@ not recognize the observed immutable-ID subject. Eleven custom-policy simulation
 passed resource-specific launch and access-isolation cases; actual assumed-role
 proofs remain pending. See [root contracts/recovery](../infra/aws/README.md).
 
+### Packaging-only workflow increment
+
+`.github/workflows/aws-validation.yml` is being implemented as a manual-only
+packaging trial: request -> credential-free exact build -> isolated publisher
+OIDC -> owned **failure-only** finalization. It does not provision/reset/test an
+AWS host and must never satisfy the required AWS gate. Publication verifies the
+trusted main run/attempt/job, GitHub artifact SHA-256, source manifest and archive
+checksums before fixed ECR pushes; digest receipts are not AWS test evidence.
+Only approved nonsensitive account/role/bucket/profile/secret identifiers are
+configured as `aws-testing` Environment variables. No AWS keys are stored there.
+Hosted publication, actual role boundaries, runtime/disposal and protection are
+still pending; local publication stories do not prove those live properties.
+
 ### Capacity and pricing — before provisioning
 
 Local Compose plus containerized E2E passed with Auth's existing 100-connection

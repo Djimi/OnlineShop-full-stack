@@ -131,7 +131,7 @@ update operational record with trial findings. No branch protection enabled yet.
 
 - [x] Write failing archive/build stories for candidate/run/attempt/checksum/names/traversal/links/size/tag/dirty-checkout and superseded attempt. Publication-specific stories remain part of the unfinished publisher step.
 - [ ] Run focused automation tests and confirm new rejection stories initially fail.
-- [ ] Define trusted build orchestration: separate credential-free job checks out pinned controller and candidate in different directories, runs only controller orchestration, and builds candidate Auth/Gateway/frontend at service contexts and Items at repository context. PR Dockerfiles may run only inside this unprivileged build job.
+- [x] Define trusted build orchestration with separate read-only job/controller/candidate checkouts, fixed service contexts and no OIDC/write credentials. Hosted packaging-only trial still required.
 - [x] Add E2E image with pinned Java 25/Maven-compatible base and Dockerfile lint compliance. Runs nonroot at `/workspace/e2e-tests`; compile/cache build does not execute tests; default is module-root wrapper `clean test`. Containerized local E2E and hadolint passed.
 - [ ] Implement manifest/archive verification and fixed-repository publication, with no candidate hooks, command substitution, or unsafe extraction. Validate ECR digest after push, not just tag existence. Publisher has no environment/SSM permissions.
 - [ ] Verify with focused stories, `hadolint e2e-tests/Dockerfile`, existing Compose builds, and actual isolated E2E against the local stack. Run the E2E wrapper from `e2e-tests/`; expect current three API tests to pass and reports to exist.

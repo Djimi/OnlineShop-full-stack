@@ -498,6 +498,119 @@ else: sys.exit(1)
         self.assertNotEqual(result.returncode, 0)
         self.assertFalse((self.directory / 'build.json').exists())
 
+    def publication_fixture(self):
+        import hashlib
+        artifacts, manifest = self.packaging_fixture()
+        self.env['AWS_TESTING_ACCOUNT_ID'] = '111111111111'
+        source = io.BytesIO()
+        with zipfile.ZipFile(source, 'w', compression=zipfile.ZIP_DEFLATED) as archive:
+            archive.writestr('build.json', json.dumps(manifest))
+            for path in artifacts.iterdir():
+                archive.write(path, path.name)
+        self.routes[f'GET {PREFIX}/actions/runs/200/attempts/1'] = {
+            'id':200,'run_attempt':1,'head_sha':CONTROLLER,'event':'workflow_dispatch',
+            'path':'.github/workflows/aws-validation.yml','repository':{'full_name':REPO}}
+        self.routes[f'GET {PREFIX}/actions/runs/200/attempts/1/jobs?per_page=100&page=1'] = {
+            'jobs':[{'name':'Build candidate','status':'completed','conclusion':'success'}]}
+        self.routes[f'GET {PREFIX}/actions/runs/200/artifacts?per_page=100&page=1'] = {
+            'artifacts':[{'id':500,'name':'aws-build-200-1','expired':False,'size_in_bytes':len(source.getvalue()),
+                          'digest':'sha256:'+hashlib.sha256(source.getvalue()).hexdigest(),
+                          'workflow_run':{'id':200,'head_sha':CONTROLLER}}]}
+        self.routes[f'GET {PREFIX}/actions/artifacts/500/zip'] = {
+            '__bytes__':base64.b64encode(source.getvalue()).decode()}
+        aws = self.bin / 'aws'
+        aws.write_text('''#!/usr/bin/env python3
+import json,os,pathlib,sys
+root=pathlib.Path(os.environ['FAKE_API']);args=sys.argv[1:]
+with (root/'aws-calls.jsonl').open('a') as f: f.write(json.dumps(args)+'\\n')
+if args[:2]==['sts','get-caller-identity']:
+ print(json.dumps({'Account':os.environ.get('PUBLISH_ACCOUNT','111111111111'),'Arn':'arn:aws:sts::111111111111:assumed-role/onlineshop-test-publisher/job'}))
+elif args[:2]==['ecr','get-login-password']: print('ecr-secret-canary')
+elif args[:2]==['ecr','describe-images']: print(json.dumps({'imageDetails':[{'imageDigest':'sha256:'+'1'*64}]}))
+else: sys.exit(1)
+''')
+        aws.chmod(0o755)
+        docker = self.bin / 'docker'
+        docker.write_text('''#!/usr/bin/env python3
+import json,os,pathlib,sys
+root=pathlib.Path(os.environ['FAKE_API']);args=sys.argv[1:]
+with (root/'docker-calls.jsonl').open('a') as f: f.write(json.dumps(args)+'\\n')
+if args[0]=='login':
+ if sys.stdin.read().strip()!='ecr-secret-canary':sys.exit(1)
+elif args[:2]==['image','inspect']:
+ image=args[-1].split(':')[0];print(json.dumps([image+'@sha256:'+os.environ.get('PUSH_DIGEST','1'*64)]))
+elif args[0] not in ['load','tag','push']: sys.exit(1)
+''')
+        docker.chmod(0o755)
+        return artifacts, manifest
+
+    def invoke_publish(self, artifacts, manifest):
+        (self.directory / 'build.json').write_text(json.dumps(manifest))
+        (self.directory / 'routes.json').write_text(json.dumps(self.routes))
+        result = subprocess.run([sys.executable,str(SCRIPT),'publish','--request',str(self.directory/'request.json'),
+                                 '--manifest',str(self.directory/'build.json'),'--artifacts',str(artifacts),
+                                 '--output',str(self.directory/'images.json')],env=self.env,capture_output=True,text=True,timeout=20)
+        self.assertNotIn('ecr-secret-canary',result.stdout+result.stderr)
+        self.assertNotIn('secret-token-canary',result.stdout+result.stderr)
+        if result.returncode:self.assertIn('Request rejected:',result.stderr)
+        calls=self.directory/'docker-calls.jsonl'
+        return result, [json.loads(line) for line in calls.read_text().splitlines()] if calls.exists() else []
+
+    def test_publication_uses_trusted_source_artifact_and_fixed_digest_repositories_without_running_images(self):
+        artifacts,manifest=self.publication_fixture()
+        result,calls=self.invoke_publish(artifacts,manifest)
+        self.assertEqual(result.returncode,0,result.stderr)
+        published=json.loads((self.directory/'images.json').read_text())
+        self.assertEqual(published['build_artifact_id'],500)
+        self.assertEqual(published['images']['auth'],'111111111111.dkr.ecr.eu-north-1.amazonaws.com/onlineshop-test-auth@sha256:'+'1'*64)
+        self.assertEqual(len([call for call in calls if call[0]=='push']),5)
+        self.assertFalse(any(call[0] in ['run','build','exec'] for call in calls))
+
+    def test_untrusted_build_job_cannot_publish(self):
+        artifacts,manifest=self.publication_fixture()
+        self.routes[f'GET {PREFIX}/actions/runs/200/attempts/1/jobs?per_page=100&page=1']['jobs'][0]['conclusion']='skipped'
+        result,calls=self.invoke_publish(artifacts,manifest)
+        self.assertNotEqual(result.returncode,0)
+        self.assertEqual(calls,[])
+        self.assertFalse((self.directory/'aws-calls.jsonl').exists())
+
+    def test_replaced_local_manifest_cannot_relabel_a_trusted_build(self):
+        artifacts,manifest=self.publication_fixture()
+        manifest['images']['auth']['sha256']='0'*64
+        result,calls=self.invoke_publish(artifacts,manifest)
+        self.assertNotEqual(result.returncode,0)
+        self.assertEqual(calls,[])
+
+    def test_wrong_publisher_account_never_loads_or_pushes_an_image(self):
+        artifacts,manifest=self.publication_fixture()
+        self.env['PUBLISH_ACCOUNT']='222222222222'
+        result,calls=self.invoke_publish(artifacts,manifest)
+        self.assertNotEqual(result.returncode,0)
+        self.assertEqual(calls,[])
+
+    def test_source_artifact_digest_mismatch_prevents_aws_access(self):
+        artifacts,manifest=self.publication_fixture()
+        self.routes[f'GET {PREFIX}/actions/runs/200/artifacts?per_page=100&page=1']['artifacts'][0]['digest']='sha256:'+'0'*64
+        result,calls=self.invoke_publish(artifacts,manifest)
+        self.assertNotEqual(result.returncode,0)
+        self.assertEqual(calls,[])
+        self.assertFalse((self.directory/'aws-calls.jsonl').exists())
+
+    def test_changed_candidate_never_exchanges_or_publishes(self):
+        artifacts,manifest=self.publication_fixture()
+        self.pr['head']['sha']='e'*40
+        result,calls=self.invoke_publish(artifacts,manifest)
+        self.assertNotEqual(result.returncode,0)
+        self.assertEqual(calls,[])
+        self.assertFalse((self.directory/'aws-calls.jsonl').exists())
+
+    def test_remote_tag_is_not_enough_when_pushed_digest_does_not_match(self):
+        artifacts,manifest=self.publication_fixture()
+        self.env['PUSH_DIGEST']='2'*64
+        result,_=self.invoke_publish(artifacts,manifest)
+        self.assertNotEqual(result.returncode,0)
+        self.assertFalse((self.directory/'images.json').exists())
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -300,6 +300,9 @@ the disposable host/runtime and final gate remain unfinished. See
 [infrastructure boundaries/recovery](./infra/aws/README.md) and the operational
 runbook for verified status. Packaging/failure finalization commands are covered
 by black-box stories; they do not imply completed publication or deployment.
+The manual `AWS validation` workflow increment is packaging-only: request,
+credential-free build, isolated publisher OIDC, then failure-only finalization.
+Until runtime/evidence stages are wired and proved, it cannot satisfy the gate.
 
 ## Debug Info
 
