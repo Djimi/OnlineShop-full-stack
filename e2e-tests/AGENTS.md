@@ -32,6 +32,8 @@ Never bake credentials into this image or add candidate-test execution to a
 credential-bearing publisher/controller job.
 
 Local runtime reset passed the four existing tests before and after dedicated
-DB/cache/broker volume recreation. Runtime provides `E2E_TEST_PASSWORD`, but the
-current registration journey does not consume it; generated test credential
-support remains pending before AWS acceptance.
+DB/cache/broker volume recreation. The registration journey consumes generated
+`E2E_TEST_PASSWORD` when provided, otherwise a fresh random per-journey password.
+Never reuse a committed registration credential. The reset integration assertion
+logs in as the journey-created user using the generated password to prove it was
+actually consumed; four recognized report tests remain unchanged.
