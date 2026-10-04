@@ -86,6 +86,15 @@ it never applies, resets data or publishes AWS success. Only sanitized proof JSO
 is an artifact; snapshots/plans/logs are private and must never be uploaded.
 Timeout/failure requires lock reconciliation before retry. Missing-state stories
 do not prove live recovery refusal, and live operator proof remains pending.
+The first hosted operator trial passed authorization/OIDC but failed planning.
+Failure evidence now exposes only fixed stages and allowlisted error/action
+labels; raw snapshots/logs are never artifacts. Diagnose/reconcile before retry,
+not by widening IAM permissions speculatively or exposing raw Terraform logs.
+Focused reproduction found that the initial global 16 MiB file-size limit also
+capped provider downloads. Capture now streams bounded stdout/stderr separately
+and terminates the owned process group on overflow/deadline, without capping
+legitimate provider artifacts. Large-provider/excessive-log stories and actual
+credential-free backend-disabled init pass. Hosted operator retry remains required.
 
 ### Account-plan preflight and partial apply
 

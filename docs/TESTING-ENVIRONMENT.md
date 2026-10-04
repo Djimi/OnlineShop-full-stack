@@ -488,6 +488,29 @@ YAML separately verified the exact shared group/max/no-cancellation and dispatch
 only/read+OIDC contract. This is a documented narrow tooling limitation, not a
 claim of full schema support. Hosted manual syntax/permission proof is still required.
 
+PR #85 merged at `a55d0f0` after hosted CI. Manual trial `37243793027` accepted the
+workflow, authorized both actors and exchanged operator OIDC, but the protected
+plan phase failed. No apply/app mutation or AWS success occurred. The original
+diagnostic was intentionally private but too coarse to identify the failed stage;
+raw runner logs/state were not uploaded. The command now retains create-only
+failed proof JSON containing only a fixed stage/reason and allowlisted error/action
+labels, never raw exception text, resource IDs, state or credentials. Its failure
+story was observed RED-to-GREEN; the first live plan proof is still unresolved
+until a reviewed trusted-main retry exposes the safe cause and passes.
+
+Following the owner-requested quick-feedback approach, a read-only owner check
+confirmed the exact state/pointer validation accepts current production data;
+permission simulation allows the state/pointer reads (not actual-role proof).
+A focused reproduction then found a concrete capture bug: `RLIMIT_FSIZE` capped
+every child file at 16 MiB, including Terraform provider downloads. A 20 MiB
+provider-file story failed at init, then passed with independent bounded streamed
+stdout/stderr capture. A separate excessive-log story still stops the command at
+16 MiB and retains only sanitized failure. No IAM permissions were widened.
+Credential-free actual `terraform init -backend=false` passed with the pinned AWS
+provider larger than 16 MiB and bounded private logs. Trusted GitHub account/
+bucket/operator-role metadata matches the independently recorded identifiers.
+The full hosted operator retry is still required before claiming the live proof.
+
 ### Open merge-gate provenance issue
 
 GitHub's expected status-check source binds an **App**, not a workflow. The shared
