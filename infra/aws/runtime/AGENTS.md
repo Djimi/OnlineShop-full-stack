@@ -14,9 +14,20 @@ Trusted generation/bootstrap/digests/fixtures -> host lock
 ```
 
 **Unfinished:** cloud-side SSM transport/reconciliation, actual EC2 metadata,
-restart/reboot/cancellation proofs, diagnostics and final AWS gate. No host exists.
+restart/reboot/cancellation proofs, diagnostics and final AWS gate. The eligible
+Free-plan host now exists; owner setup is running, not application deployment.
+
+`scripts/aws-host-setup.py` owns the initial owner-only SSM setup proof. It transfers
+only trusted-main host files with chunk bounds/checksums and persists command
+intent/IDs to protected storage before polling. Existing/unknown records block
+automatic retry. This is not the routine validation/disposal orchestrator.
 
 ## Host interface
+
+The pinned AL2023 image supplies `curl-minimal`; request that package during
+setup, not full `curl` which conflicts with it. Do not mask dependency failures
+with broad package removal or `--skip-broken`. The first real SSM setup proved
+this failure; corrected setup still needs its live GREEN verification.
 
 Install trusted root-owned files at `/opt/onlineshop-test`: `host-setup.sh`,
 `run-stack.py`, `compose.yml` and restricted `bootstrap.json` containing only

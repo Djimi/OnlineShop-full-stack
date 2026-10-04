@@ -297,11 +297,11 @@ validate AWS or publish successful **AWS validation**. Its controller requires e
 merge-checkout evidence and rejects candidate edits to the trusted CI workflow.
 Protected state/bootstrap have been provisioned from inspected saved plans;
 initial environment apply created eight network/template resources but the
-active Free account plan rejected the selected host. Partial state is reconciled;
-no host exists. The account MUST remain on the Free plan; never upgrade it.
-The replacement selection is `m7i-flex.large`, verified Free-Tier-eligible and
-offered in the configured AZ. Configuration/IAM updates and live capacity proof
-must precede a refreshed apply; never retry the failed saved plan.
+active Free account plan rejected the original host. After reconciliation and
+tested configuration/IAM updates, a refreshed host-only plan launched the eligible
+`m7i-flex.large`; actual host/storage settings and unchanged Free plan were verified.
+The account MUST remain on the Free plan; never upgrade it. Host setup is in
+progress; application deployment/capacity/isolation proofs remain unfinished.
 The disposable host/runtime and final gate remain unfinished. See
 [infrastructure boundaries/recovery](./infra/aws/README.md) and the operational
 runbook for verified status. Packaging/failure finalization commands are covered

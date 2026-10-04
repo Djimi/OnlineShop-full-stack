@@ -79,6 +79,13 @@ during packaging; never bypass Maven `clean` failures by silently skipping it.
 
 ## GitHub Actions Checks
 
+Owner host-setup command stories:
+`python3 -m unittest -v tests/scripts/aws_host_setup_test.py`.
+These substitute only the AWS process boundary and verify no mutation for foreign
+generation/active remote operation, finite checksummed transfer, no raw output,
+visibility-delay polling and conditional persistent intent. They do not prove
+host installation/isolation or routine OIDC orchestration; record those separately.
+
 Every push and pull request runs independent Java, frontend, and image/PR-E2E
 jobs. Three explicit Java jobs use Temurin 25: Auth and API Gateway each run
 `./mvnw --batch-mode clean verify` at their module root, while one runner runs

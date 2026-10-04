@@ -315,6 +315,29 @@ proof of a successful launch or unlimited zero-cost usage: Free-plan resources
 can consume account credits. Terraform/IAM/test updates and a fresh inspected
 partial-state plan are still pending; no host has launched.
 
+### Free-plan host launch: verified infrastructure only
+
+PR #79 merged at `79ff571` after hosted CI. Both host/type-policy assertions were
+observed RED against the old selection, then GREEN; 79 automation stories passed.
+An inspected bootstrap plan changed only the operator launch type condition;
+actual IAM policy was read back. After partial-state reconciliation, a refreshed
+environment plan created only the missing host; it preserved all eight prior
+resources. Actual `m7i-flex.large`, pinned AMI/profile, On-Demand mode, IMDSv2/hop
+limit 1, empty ingress and encrypted 50 GiB delete-on-termination gp3 were verified.
+`GetAccountPlanState` still reports `FREE`; no upgrade occurred.
+
+Protected foundation intent is `provisioned`, not application validation. SSM
+reports the managed host online. Owner-only bounded setup command is being tested
+and run; no application/E2E/isolation/reboot/cancellation/disposal proof exists yet.
+Raw host/state/operation identifiers stay in ignored `infra/aws/.runtime/`.
+
+The actual initial setup transferred/verified all trusted files, then failed in
+AL2023 dependency installation: the pinned image already supplies `curl-minimal`,
+which conflicts with installing full `curl`. Setup now requests `curl-minimal`,
+preserving that package rather than using broad `--allowerasing`/`--skip-broken`.
+The failed command is terminal; its operation remains `unknown` pending owner
+reconciliation. No candidate application has started.
+
 ### Open merge-gate provenance issue
 
 GitHub's expected status-check source binds an **App**, not a workflow. The shared
