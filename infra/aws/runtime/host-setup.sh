@@ -33,7 +33,7 @@ setup_host() {
   [[ -f /etc/os-release ]] && grep -q '^ID="\?amzn"\?$' /etc/os-release
   grep -q '^VERSION_ID="\?2023"\?$' /etc/os-release
   # Download only a pinned controller dependency; never run an install pipe.
-  dnf install -y docker python3 curl iptables
+   dnf install -y docker python3 curl-minimal iptables
   install -d -m 0700 "$runtime/.runtime"
   install -d -m 0755 /usr/local/lib/docker/cli-plugins
   local temporary

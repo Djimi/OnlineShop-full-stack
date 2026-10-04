@@ -243,8 +243,9 @@ and plan checkboxes/issues with actual evidence. Configure GitHub protection onl
   state reconciled; no host/disk/ENI, ingress empty, lock released. The owner
   rejected a paid-plan upgrade: account MUST remain Free. Select verified
   eligible/offered `m7i-flex.large` (2 vCPU/8 GiB/x86_64). Update Terraform/IAM
-  constraints/tests and reprove real capacity; no host launched. Resume with a new
-  inspected plan against existing state, not the failed initial saved plan.
+  constraints/tests are updated RED-to-GREEN; inspected policy-only and host-only
+  plans applied, host/storage settings verified, Free plan unchanged. Real capacity
+  proof remains pending; never reuse the failed initial saved plan.
 
 - [ ] **Check-writer provenance:** expected-source GitHub Actions App does not
   identify a trusted workflow; same-repository workflow permission overrides can
