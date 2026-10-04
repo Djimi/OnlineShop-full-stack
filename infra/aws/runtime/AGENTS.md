@@ -27,6 +27,11 @@ automatic retry. This is not the routine validation/disposal orchestrator.
 
 ## Host interface
 
+Host replacement for an inspected infrastructure change requires installing these
+trusted prerequisites again before any application. A mere attempt-tag update
+must not replace the host. Keep remote operation/evidence history in protected
+storage, not solely on the disposable disk.
+
 The pinned AL2023 image supplies `curl-minimal`; request that package during
 setup, not full `curl` which conflicts with it. Do not mask dependency failures
 with broad package removal or `--skip-broken`. The first real SSM setup proved

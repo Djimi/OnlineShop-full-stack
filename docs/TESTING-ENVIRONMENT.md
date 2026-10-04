@@ -381,6 +381,17 @@ and **USD 5.42/month retained/disposed equivalent**, excluding traffic/requests/
 taxes. On this unchanged Free plan these are pricing/credit-consumption estimates,
 not a paid-account bill or a guarantee of unlimited zero-cost use.
 
+### Generation lifecycle correction: not applied yet
+
+A refreshed generation plan unexpectedly replaces the EC2 host because changing
+launch-time generation tags produces a new launch-template version. That plan was
+not applied. The environment definition now separates stable launch ownership
+from mutable attempt tags; an explicit primary-interface tag tracks generation.
+Assertions observed RED on dynamic launch tags, then GREEN after correction.
+The initial migration requires one reviewed replacement of the empty host;
+subsequent generation-tag changes must not replace it. No lifecycle drift-ignore
+or account-plan upgrade is introduced. Live migration/future-plan proof is pending.
+
 ### Open merge-gate provenance issue
 
 GitHub's expected status-check source binds an **App**, not a workflow. The shared

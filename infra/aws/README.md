@@ -20,6 +20,16 @@ See [operational evidence](../../docs/TESTING-ENVIRONMENT.md) and the
 
 ## Fixed inputs and storage
 
+Attempt generation must not alter the launch-template body: a numeric version
+change forces EC2 replacement. Launch-time ownership tags are stable
+`ManagedBy`/`Repository`; Terraform separately manages the primary interface's
+mutable `Generation` tag, alongside instance/disk/network generation tags.
+No lifecycle ignore suppresses template/configuration drift. Migrating the initial
+template to this model requires one inspected host replacement (there is no
+application data yet); thereafter tag-only attempts must not replace the host.
+Live migration/replanning proof is pending. The environment root now includes
+the interface tag resource as well as its nine original infrastructure resources.
+
 | Root | Remote key | Caller |
 | --- | --- | --- |
 | `backend/` | `state/backend.tfstate` | Owner only |
