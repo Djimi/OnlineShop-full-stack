@@ -288,7 +288,9 @@ is the owner-facing reading path, with topic links to the
 The [implementation plan](./planning/aws-testing-environment-PLAN.md) is authorized
 for inline execution; implementation agents must read the plan and both spec
 documents. Account inventory and candidate-request foundations have started.
-Cleanup-list/cost approval and live GitHub check-selection proof remain explicit gates.
+The owner authorized continuation without further approvals; verified cleanup
+and capacity/cost selection are recorded in the runbook. Verify scope/account
+before mutations. Live check-selection/protection proofs still precede the final gate.
 The manual `AWS candidate check proof` workflow tests pending/failure association
 only; it cannot validate AWS or publish success. Its controller requires exact CI
 merge-checkout evidence and rejects candidate edits to the trusted CI workflow.

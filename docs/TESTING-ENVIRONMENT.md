@@ -12,9 +12,10 @@ not a duplicate specification.
 **Current status (2026-10-04):** Owner authorized inline execution of the
 [implementation plan](../planning/aws-testing-environment-PLAN.md). Read-only AWS
 inventory and local candidate-request foundations are implemented on
-`feat/aws-testing-environment`. Cleanup-list review and live GitHub association
-proof block completion of Tasks 1–2. No AWS deletion, provisioning, deployment,
-or branch-protection change has been performed.
+`feat/aws-testing-environment` (foundation PR #72 is merged). The owner explicitly
+authorized continuing all operations without further approvals. Documented
+playground cleanup is verified; live proofs and packaging/infrastructure work
+continue on `feat/aws-testing-runtime`. No AWS provisioning or deployment yet.
 
 GitHub plan is Free; repository visibility was verified as public on 2026-10-02.
 The agreed AWS trigger is **Run workflow** with a PR number, not automatic
@@ -92,20 +93,23 @@ settings, and IAM credential/access internals are not exhaustively audited.
 Cost Explorer is a discovery aid, not proof of resource absence. Initial cleanup
 and routine managed-stack disposal remain separate operations.
 
-### Explicit proposed deletion/preservation list — awaiting review
+### Authorized deletion/preservation list — executed 2026-10-04
 
 | Resource | Proposed handling | Ownership/evidence |
 | --- | --- | --- |
-| Stockholm `launch-wizard-1`, `sg-08f329388aa888bf8` | Delete after list review | No ENIs/instances returned; permits public HTTP/SSH; no testing stack depends on it |
-| Stockholm SSH registration `key-0615e90fa708a0471` | Clarify access ownership before deletion | Named `DPM-test-key-pair`; no instances returned |
-| `us-east-1` SSH registration `key-012d5a2838dce5c1b` | Clarify access ownership before deletion | Same name; no instances returned |
-| Custom `rds-monitoring-role` | Clarify before deletion | Trusts `monitoring.rds.amazonaws.com`, attached `AmazonRDSEnhancedMonitoringRole`; no covered RDS instances returned |
+| Stockholm `launch-wizard-1`, `sg-08f329388aa888bf8` | Deleted; absence verified | Rechecked no ENIs/instances immediately before deletion |
+| Stockholm SSH registration `key-0615e90fa708a0471` | Deleted; absence verified | Named `DPM-test-key-pair`; no instances immediately before deletion |
+| `us-east-1` SSH registration `key-012d5a2838dce5c1b` | Deleted; absence verified | Same name; no instances immediately before deletion |
+| Custom `rds-monitoring-role` | Monitoring policy detached; role deleted; absence verified | Rechecked monitoring-only trust/policy, no profiles/inline policies, and no RDS instances/clusters across all 17 regions |
 | Default networks, `admin` user, service-linked roles, AWS-managed KMS keys, Resource Explorer indexes | Preserve baseline | Access/security/discovery or default-account resources; not assigned to the new environment |
 | Account, billing, organization, account-level access/security settings | Preserve | Contract D2 |
 
-No deletion list has been approved or executed yet. Re-inventory approved
-resources immediately before deletion and verify absence afterward. Task 1
-remains incomplete until that evidence exists.
+The owner authorized the documented scope by instructing continuation without
+further approvals. STS identity and dependencies were rechecked immediately
+before mutation, and every deletion was read back. The covered inventory was
+repeated after cleanup: 739 queries, with only the same 17 MSK subscription gaps.
+The admin user and six service-linked roles remain. Protected receipts are at
+`/tmp/opencode/aws-testing-inventory/{cleanup-receipt.json,after-cleanup/}`.
 
 ### GitHub candidate evidence
 
@@ -143,6 +147,49 @@ The report artifact (ID `11306400770`) also passed digest verification. XML show
 
 Future report validation must recognize both suites: four total tests, including
 three API journeys. Counting all XML tests as only three would reject valid runs.
+
+### Trusted-main request trials
+
+Disposable [PR #73](https://github.com/Djimi/OnlineShop-full-stack/pull/73) is not
+intended to merge. Run [37211489404](https://github.com/Djimi/OnlineShop-full-stack/actions/runs/37211489404)
+rejected pending exact CI immediately, without AWS access or a successful
+result. After CI passed, run
+[37211810814](https://github.com/Djimi/OnlineShop-full-stack/actions/runs/37211810814)
+accepted merge candidate `12af6968ce9ab7d2c021810d309dca937c8b2ade` and created
+GitHub Actions App check `111464385702`, external ID `aws-validation:37211810814:1`.
+The candidate check completed as failure, not success. Artifact `11306916858`
+retains the record. A separate synthetic context will exercise newest pending/
+failure versus delayed old success; it never succeeds as **AWS validation**.
+
+### Capacity and pricing — before provisioning
+
+Local Compose plus containerized E2E passed with Auth's existing 100-connection
+pool. A brief cached E2E measurement (two samples) observed combined peak
+1,753 MiB RAM and 259.33% CPU; this is not worst-case stress-test evidence.
+Select On-Demand `c7i.xlarge`, four x86_64 vCPUs and 8 GiB RAM, to cover observed
+CPU demand with substantial startup/memory margin, without burstable credits.
+Pin AL2023 AMI `ami-04478a3e21a0d79a7` (2023.12.20260930.0, kernel 6.1) and a
+50 GiB encrypted delete-on-termination gp3 disk. Stockholm public pricing was
+queried on 2026-10-04 through Price List's required global `us-east-1` endpoint.
+Service codes must be discovered, not inferred from Cost Explorer labels;
+standard private ECR is `AmazonECR` and excludes its separate archive tiers.
+
+| Item | Stockholm USD rate |
+| --- | --- |
+| `m7i.large`, 2 cores/8 GiB | 0.1071/hour; below observed CPU demand |
+| `m7i.xlarge`, 4 cores/16 GiB | 0.2142/hour; unnecessary extra memory |
+| Selected `c7i.xlarge`, 4 cores/8 GiB | 0.1911/hour |
+| Public IPv4 | 0.005/hour |
+| gp3 | 0.0836/GiB-month; 50 GiB = 4.18/month |
+| Standard ECR | 0.10/GiB-month |
+| S3 Standard | 0.023/GiB-month plus requests |
+| Dedicated secret | 0.40/month plus 0.05/10,000 API requests |
+
+Decimal calculations at 730 hours/month, assuming 50 GiB retained ECR and 1 GiB
+S3: **live 0.2093/hour or 152.76/month; disposed 5.42/month**. Requests, traffic,
+taxes and excess retained storage are additional. Selection proceeds under the
+owner's delegated no-further-approval instruction. No Spot, commitments, NAT,
+load balancer or managed database is introduced. Bootstrap/state survive disposal.
 
 For CI retries, rerun **all jobs** so the new attempt has both candidate evidence
 and successful required jobs. A partial failed-job rerun without fresh complete
