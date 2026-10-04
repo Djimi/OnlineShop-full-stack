@@ -120,7 +120,7 @@ update operational record with trial findings. No branch protection enabled yet.
 - [ ] Create a new check run per accepted attempt (`external_id` = run/attempt identity), immediately non-success; complete only that check ID. An old run never updates another attempt's check. Re-query candidate identities and newest accepted attempt before final success; detect duplicates without AWS mutation.
 - [x] Re-run focused tests; expected PASS with no AWS invocations for rejection stories.
 - [ ] On a real trial PR, use a trusted `main` test harness with minimum `checks: write` to prove candidate association and latest-attempt selection: newer pending/failing check must defeat older success, including delayed old completion. Record API/UI evidence. If GitHub does not enforce this association, stop and revise the mechanism before implementing the deployment workflow.
-- [ ] Commit tested controller/proof record: `feat(e2e): resolve manually requested AWS candidates`.
+- [x] Commit/integrate tested request controller and hosted proof records via PRs #72/#74; final gate provenance remains separately blocked.
 
 ### Task 3: Package exact candidate without credentials
 
@@ -144,10 +144,10 @@ update `.gitignore` and operational record.
 **Consumes:** Task 1 baseline, verified account, repository/Environment identity.
 **Produces:** Approved nonsensitive bootstrap identifiers and recreatable environment root.
 
-- [ ] Write `tests/boundary.tftest.hcl` in each root with mock-provider plan assertions for separate resource boundaries, encryption, empty ingress, delete-on-termination disk, IMDSv2, no Spot and no forbidden paid services. Check routine-role policy boundaries locally and prove actual denies after bootstrap.
+- [x] Three roots have plan-only boundary assertions; IAM condition/trust regressions were observed RED->GREEN. Selected actual read denials passed OIDC run 37221612286; operator mutation/version boundaries remain part of the later live-proof step.
 - [ ] Pin supported Terraform/provider versions and record compatibility with native S3 locking; run `terraform fmt -check -recursive infra/aws`, root-specific `init -backend=false`/`validate`, and `terraform test` against plan-only assertions. Confirm intentionally unsafe fixtures fail checks.
 - [x] Implement protected backend root; inspected saved plan applied under owner authorization. Native state migration/version/resource verification completed before removing owned temporary local copies.
-- [x] Implement/apply 19-resource bootstrap saved plan with actual immutable-ID Environment subject, separate roles, fixed repositories/retention and secret metadata. Generated values initialized solely through protected API; trust/repositories/state read back. Actual OIDC role tests remain pending.
+- [x] Implement/apply 19-resource bootstrap saved plan with actual immutable-ID Environment subject, separate roles, fixed repositories/retention and secret metadata. Generated values initialized solely through protected API; trust/repositories/state read back. OIDC read-boundary tests passed; mutation boundaries remain pending.
 - [x] Define disposable environment root with dedicated network, no ingress, pinned On-Demand host/encrypted disposable storage and explicit profile; mock boundary test passes. Host provisioning/live proof remains pending.
 - [ ] Measure representative full Compose+E2E CPU/memory/disk use locally; include current Auth connection-pool demand. Compare regional On-Demand sizes (including burstable-credit cost if considered), disk, public IPv4, ECR, S3/secrets/log retention costs. Obtain owner approval of host/AMI/disk and live-hourly/live-monthly/disposed estimates before first apply.
 - [ ] Bootstrap and provision using refreshed saved plans with restrictive file permissions. Inspect permitted changes before `terraform apply SAVED_PLAN`; record exact inputs/root/key/tool versions and resource identities. Never publish plan JSON or state as artifacts.
@@ -236,6 +236,21 @@ and plan checkboxes/issues with actual evidence. Configure GitHub protection onl
 | Failures/evidence §10, A1–A33, handoff §12 | 6, 7, 8 |
 
 ## Issues and resolutions
+
+- [ ] **Active Free account plan blocks the chosen host:** initial apply created
+  eight network/template resources, then EC2 rejected `c7i.xlarge` as ineligible
+  for Free Tier. `GetAccountPlanState` confirms `FREE`/`ACTIVE`. Partial versioned
+  state reconciled; no host/disk/ENI, ingress empty, lock released. The owner
+  rejected a paid-plan upgrade: account MUST remain Free. Select verified
+  eligible/offered `m7i-flex.large` (2 vCPU/8 GiB/x86_64). Update Terraform/IAM
+  constraints/tests and reprove real capacity; no host launched. Resume with a new
+  inspected plan against existing state, not the failed initial saved plan.
+
+- [ ] **Check-writer provenance:** expected-source GitHub Actions App does not
+  identify a trusted workflow; same-repository workflow permission overrides can
+  grant check writes. Resolve/prove the final gate before enabling protection.
+  Dedicated App signing versus workflow-specific enforcement needs an explicit
+  design decision; no App/secret has been added.
 
 - [x] Manual opt-in vs mandatory merging resolved: manual dispatch produces a separately required candidate result; existing CI stays automatic.
 - [x] Pending-request replacement resolved in the design: current GitHub documentation supports `queue: max`; both mutation jobs share one fixed group.

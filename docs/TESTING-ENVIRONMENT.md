@@ -260,7 +260,78 @@ DB/cache/broker reset. The local image was resolved by immutable Docker image ID
 the other four app images retained their verified ECR digests. This fix has not
 yet been republished through the trusted candidate workflow or run on AWS.
 
+Generated-credential candidate publication
+[37222500228](https://github.com/Djimi/OnlineShop-full-stack/actions/runs/37222500228)
+has since passed; source artifact `11310428701` and digest receipt `11311460203`
+were verified, and all five ECR digests read back independently. Its exact
+candidate check remains **failure**, not AWS test success. PR #77 merged at
+`4a41b87`; newer local read-only build-directory changes are not in that receipt.
+
+Two simultaneous owner Terraform plans against the fixed environment backend
+proved native S3 exclusion: one planned nine approved resource creations and the
+other failed acquiring the lock. Both terminated; the lock was released and no
+environment state or host was created. Saved plans/logs stay protected locally in
+`infra/aws/.runtime/`; they are never uploaded as artifacts. Saved-plan staleness,
+drift/missing-state recovery and operator mutation proofs remain pending.
+
+Local hardening now bounds command output at the kernel/file level and runs E2E
+with a read-only root/bounded tmpfs. Actual integration exposed two configuration
+defects: mounting `target` prevents normal Maven `clean`, and `go-offline` alone
+missed its dynamically selected Surefire provider. The POM now supports a child
+build directory and explicitly cached provider/launcher. Real read-only/offline
+integration passed (85.825 seconds), including generated-password login, clean
+DB/cache/Kafka state and four tests before/after reset. Report transport uses
+bounded `docker exec tar`: Docker documents that `cp` cannot read tmpfs. Explicit
+provider `dependency:get`, not `go-offline` alone, made offline read-only Maven
+succeed. Fresh module-root `clean test` also passed; no EC2 host exists.
+
+### Initial environment apply: account-plan blocker
+
+PR #78 merged at `26ec8de` after hosted CI passed. The owner-authorized initial
+environment apply then created eight network/template resources but failed at
+EC2 `RunInstances`: `InvalidParameterCombination`, selected instance type not
+eligible for Free Tier. Read-only `GetAccountPlanState` confirms `FREE`/`ACTIVE`.
+No account-plan upgrade was performed. The original `c7i.xlarge` selection is
+superseded by the Free-plan-compatible selection below.
+
+Reconciliation verified eight persisted resources, matching remote resource/
+output/lineage/serial identity, versioned environment state, empty ingress and a
+released Terraform lock. No host, disk or ENI exists for the recorded generation.
+The operation intent conservatively remains `unknown`; protected reconciliation
+evidence records `blocked-account-plan`. No application or AWS success exists.
+Resolve the capacity configuration before a refreshed, inspected apply; never
+retry the original creation plan blindly. See [recovery](../infra/aws/README.md).
+
+**Mandatory Free-plan constraint (owner correction):** never upgrade this account.
+Read-only EC2 `DescribeInstanceTypes` with `free-tier-eligible=true` and
+`DescribeInstanceTypeOfferings` verified `m7i-flex.large` in `eu-north-1a`.
+Select it: two x86_64 vCPUs and 8 GiB RAM preserve image compatibility and memory
+headroom. Other offered eligible x86_64 options are `c7i-flex.large` (4 GiB),
+`t3.small` (2 GiB) and `t3.micro` (1 GiB); the eligible T4g options require ARM
+images. Prefer the 8 GiB option for the full stack, not a tiny instance chosen
+merely for eligibility. Two vCPUs may lengthen the measured CPU-intensive E2E;
+real capacity/timing proof remains required. Catalog eligibility/offering is not
+proof of a successful launch or unlimited zero-cost usage: Free-plan resources
+can consume account credits. Terraform/IAM/test updates and a fresh inspected
+partial-state plan are still pending; no host has launched.
+
+### Open merge-gate provenance issue
+
+GitHub's expected status-check source binds an **App**, not a workflow. The shared
+GitHub Actions App does not distinguish trusted-main AWS validation from another
+same-repository workflow requesting `checks: write`. This public/personal
+repository's read-only default token setting is not a workflow-specific identity.
+Current controller authorization/CI-workflow comparison protect our code path,
+not arbitrary check writers. Do not enable or claim a trustworthy final AWS gate
+until this is resolved/proved. No alternative App/secret/migration was created.
+See [expected-source semantics](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-protected-branches/about-protected-branches)
+and [permission overrides](https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#permissions).
+
 ### Capacity and pricing — before provisioning
+
+**Historical paid-capacity comparison, superseded:** the owner now requires the
+Free plan and selects eligible `m7i-flex.large` as described above. The following
+`c7i.xlarge` rate/total is not a current estimate for the replacement host.
 
 Local Compose plus containerized E2E passed with Auth's existing 100-connection
 pool. A brief cached E2E measurement (two samples) observed combined peak

@@ -71,6 +71,12 @@ Lint `.github/workflows/aws-boundary-proof.yml` with actionlint. Actual OIDC
 allowed/denied reads are proved only by a trusted-main hosted manual run;
 process-boundary tests do not substitute for that run or prove mutations.
 
+Read-only E2E integration must exercise the trusted runtime's actual execution
+helper, including offline Maven, writable bounded build-parent tmpfs and report
+copy before container termination. A passing writable `docker run` does not prove
+the read-only configuration. Cache dynamically selected test providers explicitly
+during packaging; never bypass Maven `clean` failures by silently skipping it.
+
 ## GitHub Actions Checks
 
 Every push and pull request runs independent Java, frontend, and image/PR-E2E

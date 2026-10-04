@@ -371,35 +371,15 @@ class ActualComposeResetStory(unittest.TestCase):
             + "\n"
         )
         secret_file.chmod(0o600)
-        self.run_command(
-            [
-                "docker",
-                "run",
-                "--name",
-                container,
-                "--network",
-                project + "_network",
-                "--user",
-                "10001:10001",
-                "--cap-drop=ALL",
-                "--security-opt=no-new-privileges:true",
-                "--pids-limit",
-                "512",
-                "--memory",
-                "1g",
-                "--env-file",
-                str(secret_file),
-                "--entrypoint",
-                "./mvnw",
-                "--workdir",
-                "/workspace/e2e-tests",
-                getattr(self, "local_e2e", record["images"]["e2e"]),
-                "--batch-mode",
-                "clean",
-                "test",
-            ],
-            env,
-            timeout=900,
+        spec = importlib.util.spec_from_file_location(
+            "trusted_runtime", ROOT / "infra/aws/runtime/run-stack.py"
+        )
+        runtime = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(runtime)
+        runtime.PROJECT = project
+        runtime.STATE = path
+        runtime.execute_e2e(
+            getattr(self, "local_e2e", record["images"]["e2e"]), env, generation
         )
         compose = [
             "docker",
@@ -451,19 +431,13 @@ class ActualComposeResetStory(unittest.TestCase):
             self.fail(
                 "E2E registration did not consume the generated test password; response omitted"
             )
-        spec = importlib.util.spec_from_file_location(
-            "trusted_runtime", ROOT / "infra/aws/runtime/run-stack.py"
-        )
-        runtime = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(runtime)
-        runtime.PROJECT = project
         runtime.STATE = path / "evidence"
         runtime.STATE.mkdir(mode=0o700, exist_ok=True)
         runtime.collect_reports(env, passwords, generation)
         self.assertEqual(
             len(list((runtime.STATE / "reports" / generation).glob("*.xml"))), 2
         )
-        self.run_command(["docker", "rm", "--volumes", container], env)
+        runtime.remove_test_container(env, generation)
 
     def owner_aws(self, arguments, *, json_output=True):
         args = [

@@ -37,3 +37,12 @@ DB/cache/broker volume recreation. The registration journey consumes generated
 Never reuse a committed registration credential. The reset integration assertion
 logs in as the journey-created user using the generated password to prove it was
 actually consumed; four recognized report tests remain unchanged.
+
+The POM exposes `e2e.build.directory` (default `target`) for read-only runtimes.
+The AWS host runs `clean test` offline with the output at
+`/workspace/e2e-tests/.build/target` inside a bounded parent tmpfs. Do not mount
+`target` itself: Maven `clean` must be able to remove that directory. Packaging
+explicitly resolves the Surefire provider with `dependency:get` (version must
+match the POM) and declares the JUnit launcher dependency without executing tests.
+Stream reports with `docker exec tar` while the isolated container remains alive;
+`docker cp` cannot access tmpfs, and stopping the container removes its contents.

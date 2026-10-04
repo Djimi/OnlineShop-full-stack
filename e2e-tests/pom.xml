@@ -16,6 +16,7 @@
         <maven.compiler.source>25</maven.compiler.source>
         <maven.compiler.target>25</maven.compiler.target>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <e2e.build.directory>${project.basedir}/target</e2e.build.directory>
 
         <!-- Dependency versions -->
         <junit.version>6.0.2</junit.version>
@@ -34,6 +35,12 @@
         <dependency>
             <groupId>org.junit.jupiter</groupId>
             <artifactId>junit-jupiter</artifactId>
+            <version>${junit.version}</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.junit.platform</groupId>
+            <artifactId>junit-platform-launcher</artifactId>
             <version>${junit.version}</version>
             <scope>test</scope>
         </dependency>
@@ -70,6 +77,7 @@
     </dependencies>
 
     <build>
+        <directory>${e2e.build.directory}</directory>
         <plugins>
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
