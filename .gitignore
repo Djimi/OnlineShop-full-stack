@@ -19,3 +19,5 @@ __pycache__/
 *.tfplan
 *.tfvars
 infra/aws/.runtime/
+infra/aws/runtime/.runtime/
+infra/aws/runtime/bootstrap.json

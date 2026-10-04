@@ -1,0 +1,199 @@
+name: onlineshop-test
+
+x-common: &common
+  restart: unless-stopped
+  cap_drop: [ALL]
+  security_opt: [no-new-privileges:true]
+  pids_limit: 512
+  labels:
+    ManagedBy: onlineshop-test
+    Generation: ${GENERATION:?required}
+  networks: [network]
+  logging:
+    driver: json-file
+    options:
+      max-size: 5m
+      max-file: "2"
+
+x-java: &java
+  <<: *common
+  user: "10001:10001"
+  read_only: true
+  mem_limit: 1g
+  tmpfs: ["/tmp:uid=10001,gid=10001,mode=1777"]
+
+x-postgres: &postgres
+  <<: *common
+  image: postgres:18-alpine
+  user: "70:70"
+  read_only: true
+  mem_limit: 768m
+  tmpfs:
+    - /tmp:uid=70,gid=70,mode=1777
+    - /var/run/postgresql:uid=70,gid=70,mode=0775
+  healthcheck:
+    test: [CMD-SHELL, "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+    interval: 5s
+    timeout: 5s
+    retries: 20
+
+services:
+  auth-postgres:
+    <<: *postgres
+    command: [postgres, -c, max_connections=125]
+    environment:
+      POSTGRES_DB: auth
+      POSTGRES_USER: auth
+      POSTGRES_PASSWORD: ${AUTH_DB_PASSWORD:?required}
+    volumes:
+      - auth-postgres-data:/var/lib/postgresql
+      - ./.runtime/fixtures/Auth/init-db:/docker-entrypoint-initdb.d:ro
+
+  items-postgres:
+    <<: *postgres
+    environment:
+      POSTGRES_DB: items
+      POSTGRES_USER: items
+      POSTGRES_PASSWORD: ${ITEMS_DB_PASSWORD:?required}
+    volumes:
+      - items-postgres-data:/var/lib/postgresql
+      - ./.runtime/fixtures/Items/init-db:/docker-entrypoint-initdb.d:ro
+
+  redis:
+    <<: *common
+    image: redis:8-alpine
+    user: "999:1000"
+    read_only: true
+    mem_limit: 128m
+    command: [redis-server, --appendonly, "yes"]
+    volumes: [redis-data:/data]
+    healthcheck:
+      test: [CMD, redis-cli, ping]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  kafka:
+    <<: *common
+    image: apache/kafka:4.1.1
+    user: "1000:1000"
+    hostname: kafka
+    mem_limit: 1g
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,CONTROLLER:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_LOG_DIRS: /var/lib/kafka/data
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      KAFKA_NUM_PARTITIONS: 3
+      KAFKA_DEFAULT_REPLICATION_FACTOR: 1
+      KAFKA_HEAP_OPTS: -Xms256m -Xmx512m
+      CLUSTER_ID: MkU3OEVBNTcwNTJENDM2Qk
+    volumes: [kafka-data:/var/lib/kafka/data]
+    healthcheck:
+      test: [CMD-SHELL, "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092"]
+      interval: 10s
+      timeout: 10s
+      retries: 20
+      start_period: 30s
+
+  auth-service:
+    <<: *java
+    image: ${AUTH_IMAGE:?required}
+    environment:
+      JAVA_TOOL_OPTIONS: -XX:MaxRAMPercentage=60.0
+      SPRING_DATASOURCE_URL: jdbc:postgresql://auth-postgres:5432/auth
+      SPRING_DATASOURCE_USERNAME: auth
+      SPRING_DATASOURCE_PASSWORD: ${AUTH_DB_PASSWORD:?required}
+    depends_on:
+      auth-postgres: {condition: service_healthy}
+    healthcheck:
+      test: [CMD-SHELL, "curl -f http://localhost:9001/actuator/health || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 40s
+
+  items-service:
+    <<: *java
+    image: ${ITEMS_IMAGE:?required}
+    environment:
+      JAVA_TOOL_OPTIONS: -XX:MaxRAMPercentage=60.0
+      SPRING_DATASOURCE_URL: jdbc:postgresql://items-postgres:5432/items
+      SPRING_DATASOURCE_USERNAME: items
+      SPRING_DATASOURCE_PASSWORD: ${ITEMS_DB_PASSWORD:?required}
+    depends_on:
+      items-postgres: {condition: service_healthy}
+    healthcheck:
+      test: [CMD-SHELL, "curl -f http://localhost:9000/actuator/health || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 40s
+
+  api-gateway:
+    <<: *java
+    image: ${GATEWAY_IMAGE:?required}
+    ports: [127.0.0.1:10000:10000]
+    environment:
+      JAVA_TOOL_OPTIONS: -XX:MaxRAMPercentage=60.0
+      GATEWAY_AUTH_SERVICE_URL: http://auth-service:9001
+      GATEWAY_ITEMS_SERVICE_URL: http://items-service:9000
+      GATEWAY_RATELIMIT_ENABLED: "false"
+      SPRING_DATA_REDIS_HOST: redis
+    depends_on:
+      auth-service: {condition: service_healthy}
+      items-service: {condition: service_healthy}
+      redis: {condition: service_healthy}
+    healthcheck:
+      test: [CMD-SHELL, "curl -f http://localhost:10000/actuator/health || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 40s
+
+  frontend:
+    <<: *common
+    image: ${FRONTEND_IMAGE:?required}
+    user: "1000:1000"
+    read_only: true
+    mem_limit: 512m
+    tmpfs:
+      - /tmp:uid=1000,gid=1000,mode=1777
+      - /home/node/.npm:uid=1000,gid=1000
+      - /app/node_modules/.vite:uid=1000,gid=1000
+      - /app/node_modules/.vite-temp:uid=1000,gid=1000
+    ports: [127.0.0.1:5173:5173]
+    environment:
+      VITE_API_URL: http://localhost:10000
+    depends_on:
+      api-gateway: {condition: service_healthy}
+    healthcheck:
+      test: [CMD, node, -e, "fetch('http://127.0.0.1:5173/').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+volumes:
+  auth-postgres-data:
+    labels: {ManagedBy: onlineshop-test, Generation: "${GENERATION:?required}"}
+  items-postgres-data:
+    labels: {ManagedBy: onlineshop-test, Generation: "${GENERATION:?required}"}
+  redis-data:
+    labels: {ManagedBy: onlineshop-test, Generation: "${GENERATION:?required}"}
+  kafka-data:
+    labels: {ManagedBy: onlineshop-test, Generation: "${GENERATION:?required}"}
+
+networks:
+  network:
+    name: onlineshop-test_network
+    labels: {ManagedBy: onlineshop-test, Generation: "${GENERATION:?required}"}

@@ -113,6 +113,14 @@ do not weaken exact trust to silence that warning. Eleven custom-policy
 simulations passed launch-resource and isolation scenarios. These are not actual
 OIDC assumed-role deny proofs; live role tests still precede routine deployment.
 
+The [trusted runtime](runtime/AGENTS.md) has process-boundary coverage and an
+actual local Compose reset proof. Host setup/hooks are defined, not applied on
+EC2. SSM orchestration, host isolation and final merge gate remain unfinished.
+The pending `AWS role boundary proof` workflow separately verifies selected
+publisher/operator allowed and denied reads using actual OIDC credentials.
+It never mutates AWS or reads data into retained artifacts; only operation labels
+survive. Live proof remains pending until the workflow is integrated/run.
+
 ## Saved plans and recovery
 
 Every mutation uses the same trusted root, recorded backend/inputs and provider

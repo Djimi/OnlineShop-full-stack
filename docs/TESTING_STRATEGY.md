@@ -59,6 +59,18 @@ reject source-artifact/candidate/account mismatches and compare pushed digests.
 The manual validation workflow is currently packaging-only and always concludes
 its candidate check as failure; actual runtime validation remains unfinished.
 
+Runtime stories: `python3 -m unittest -v tests/scripts/aws_runtime_test.py`.
+Opt-in actual local reset:
+`AWS_IMAGE_RECEIPT=<protected-images-receipt> python3 -m unittest -v tests/integration/aws_compose_reset_test.py`.
+See [runtime contract](../infra/aws/runtime/AGENTS.md) for prerequisites/scope.
+This verifies clean DB/cache/broker state and E2E, not EC2 metadata/reboot isolation.
+
+Read-only role proof stories:
+`python3 -m unittest -v tests/scripts/aws_boundary_proof_test.py`.
+Lint `.github/workflows/aws-boundary-proof.yml` with actionlint. Actual OIDC
+allowed/denied reads are proved only by a trusted-main hosted manual run;
+process-boundary tests do not substitute for that run or prove mutations.
+
 ## GitHub Actions Checks
 
 Every push and pull request runs independent Java, frontend, and image/PR-E2E
