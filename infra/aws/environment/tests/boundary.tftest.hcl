@@ -1,13 +1,16 @@
 mock_provider "aws" {}
 variables {
-  account_id    = "111111111111"
-  host_profile  = "onlineshop-test-host"
-  ami_id        = "ami-04478a3e21a0d79a7"
-  instance_type = "c7i.xlarge"
-  generation    = "run-123-attempt-1"
+  account_id   = "111111111111"
+  host_profile = "onlineshop-test-host"
+  ami_id       = "ami-04478a3e21a0d79a7"
+  generation   = "run-123-attempt-1"
 }
 run "private_on_demand_host" {
   command = plan
+  assert {
+    condition     = aws_instance.host.instance_type == "m7i-flex.large"
+    error_message = "Use the selected Free-plan-compatible x86_64 host."
+  }
   assert {
     condition     = length(aws_security_group.host.ingress) == 0
     error_message = "No public inbound rule is allowed."

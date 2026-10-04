@@ -35,7 +35,7 @@ Protected local identifiers live in ignored `.runtime/bootstrap-identifiers.json
 Do not infer ownership from a matching bucket/resource name. Do not print raw
 state, plans, secrets, environment dumps or credentials.
 
-The disposable host is On-Demand `c7i.xlarge`, pinned x86_64 AL2023 AMI
+The disposable host is On-Demand Free-plan-eligible `m7i-flex.large`, pinned x86_64 AL2023 AMI
 `ami-04478a3e21a0d79a7`, 50 GiB encrypted gp3 deleted on termination. No security
 group ingress, SSH key, NAT, load balancer or managed DB exists in its definition.
 Outbound-only public IPv4 is intentional; inspection will use SSM. IMDSv2/hop
@@ -47,9 +47,15 @@ limit alone is not container isolation; runtime firewall/probes are still pendin
 
 Before provisioning paid-only capacity, read the verified account's Free Tier
 `GetAccountPlanState` (in `us-east-1`). An active Free plan can reject the chosen
-instance even when the AMI, IAM and regional offerings are valid. Never upgrade
-the account plan or substitute undersized capacity implicitly; an account-wide
-paid-plan upgrade changes billing exposure and cannot be reverted to Free.
+instance even when the AMI, IAM and regional offerings are valid. This account
+MUST remain on the Free plan. Never upgrade it. Check `DescribeInstanceTypes`
+with `free-tier-eligible=true` and offerings for the configured AZ before selecting
+capacity; regional availability alone does not prove account-plan eligibility.
+The replacement selection is `m7i-flex.large` (two x86_64 vCPUs, 8 GiB), verified
+eligible/offered in `eu-north-1a`. Environment validation and operator launch
+policy now pin this selection; both plan assertions were observed RED then GREEN.
+Live policy application, launch/capacity proofs remain pending. Eligibility is
+not unlimited free usage.
 
 The first environment apply failed at EC2 `RunInstances` with
 `InvalidParameterCombination: The specified instance type is not eligible for Free Tier`.

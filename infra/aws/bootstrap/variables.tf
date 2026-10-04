@@ -19,5 +19,9 @@ variable "ami_id" {
 }
 variable "instance_type" {
   type    = string
-  default = "c7i.xlarge"
+  default = "m7i-flex.large"
+  validation {
+    condition     = var.instance_type == "m7i-flex.large"
+    error_message = "Operator permissions must stay limited to the selected Free-plan host."
+  }
 }

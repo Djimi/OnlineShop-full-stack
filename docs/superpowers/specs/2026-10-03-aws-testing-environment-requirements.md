@@ -15,6 +15,13 @@ operational commands and evidence are recorded incrementally in the runbook.
 
 ## 4. Implementation contract: resources and identities
 
+**Binding owner correction:** the account MUST remain on the Free plan, without
+upgrade. Capacity must be verified Free-Tier-eligible and offered in the target
+AZ before apply. Selected replacement: `m7i-flex.large`, 2 x86_64 vCPUs/8 GiB,
+verified in `eu-north-1a`; actual launch and bounded full-stack capacity proofs
+remain required. This supersedes the earlier paid-only `c7i.xlarge` selection,
+not the isolation, state, timing or E2E requirements.
+
 **Open gate-provenance issue:** expected-source App selection is not workflow
 identity. The no-custom-App approach must not be treated as sufficient until
 same-repository check-writer spoofing is addressed/proved. The binding outcome

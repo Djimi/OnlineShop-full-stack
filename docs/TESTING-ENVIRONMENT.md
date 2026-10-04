@@ -291,15 +291,29 @@ PR #78 merged at `26ec8de` after hosted CI passed. The owner-authorized initial
 environment apply then created eight network/template resources but failed at
 EC2 `RunInstances`: `InvalidParameterCombination`, selected instance type not
 eligible for Free Tier. Read-only `GetAccountPlanState` confirms `FREE`/`ACTIVE`.
-The `c7i.xlarge` selection is unchanged; no account-plan upgrade was performed.
+No account-plan upgrade was performed. The original `c7i.xlarge` selection is
+superseded by the Free-plan-compatible selection below.
 
 Reconciliation verified eight persisted resources, matching remote resource/
 output/lineage/serial identity, versioned environment state, empty ingress and a
 released Terraform lock. No host, disk or ENI exists for the recorded generation.
 The operation intent conservatively remains `unknown`; protected reconciliation
 evidence records `blocked-account-plan`. No application or AWS success exists.
-Resolve the account-plan prerequisite before a refreshed, inspected apply; never
+Resolve the capacity configuration before a refreshed, inspected apply; never
 retry the original creation plan blindly. See [recovery](../infra/aws/README.md).
+
+**Mandatory Free-plan constraint (owner correction):** never upgrade this account.
+Read-only EC2 `DescribeInstanceTypes` with `free-tier-eligible=true` and
+`DescribeInstanceTypeOfferings` verified `m7i-flex.large` in `eu-north-1a`.
+Select it: two x86_64 vCPUs and 8 GiB RAM preserve image compatibility and memory
+headroom. Other offered eligible x86_64 options are `c7i-flex.large` (4 GiB),
+`t3.small` (2 GiB) and `t3.micro` (1 GiB); the eligible T4g options require ARM
+images. Prefer the 8 GiB option for the full stack, not a tiny instance chosen
+merely for eligibility. Two vCPUs may lengthen the measured CPU-intensive E2E;
+real capacity/timing proof remains required. Catalog eligibility/offering is not
+proof of a successful launch or unlimited zero-cost usage: Free-plan resources
+can consume account credits. Terraform/IAM/test updates and a fresh inspected
+partial-state plan are still pending; no host has launched.
 
 ### Open merge-gate provenance issue
 
@@ -314,6 +328,10 @@ See [expected-source semantics](https://docs.github.com/en/repositories/configur
 and [permission overrides](https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#permissions).
 
 ### Capacity and pricing — before provisioning
+
+**Historical paid-capacity comparison, superseded:** the owner now requires the
+Free plan and selects eligible `m7i-flex.large` as described above. The following
+`c7i.xlarge` rate/total is not a current estimate for the replacement host.
 
 Local Compose plus containerized E2E passed with Auth's existing 100-connection
 pool. A brief cached E2E measurement (two samples) observed combined peak
