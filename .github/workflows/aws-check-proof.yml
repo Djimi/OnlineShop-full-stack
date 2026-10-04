@@ -65,7 +65,6 @@ jobs:
               with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as summary:
                   summary.write(f"Candidate `{record['candidate_sha']}`; check `{check}`; no AWS execution.\n")
           PY
-
       - name: Retain accepted request evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
@@ -74,3 +73,91 @@ jobs:
           path: ${{ runner.temp }}/request.json
           if-no-files-found: ignore
           retention-days: 14
+
+      - name: Prove latest-check selection without successful AWS validation
+        if: success()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          import subprocess
+          from urllib.parse import quote
+
+          record = json.loads((Path(os.environ['RUNNER_TEMP']) / 'request.json').read_text())
+          name = 'AWS validation selection proof'
+          root = 'repos/Djimi/OnlineShop-full-stack/'
+          def api(path, method='GET', body=None):
+              args = ['gh', 'api', root + path, '--method', method]
+              if body is not None:
+                  args += ['--input', '-']
+              result = subprocess.run(args, input=json.dumps(body).encode() if body is not None else None,
+                                      capture_output=True, timeout=30)
+              if result.returncode:
+                  raise SystemExit('Selection proof API operation failed')
+              return json.loads(result.stdout)
+          summary = {'title': 'Synthetic result-selection test only',
+                     'summary': 'This separate context tests GitHub selection mechanics, not AWS validation.'}
+          older = api('check-runs', 'POST', {
+              'name': name, 'head_sha': record['candidate_sha'], 'status': 'completed',
+              'conclusion': 'success', 'output': summary})
+          newer = api('check-runs', 'POST', {
+              'name': name, 'head_sha': record['candidate_sha'], 'status': 'in_progress',
+              'output': summary})
+          def selected(status, conclusion):
+              checks = api(f"commits/{record['candidate_sha']}/check-runs?check_name={quote(name)}&filter=latest")['check_runs']
+              matching = [check for check in checks if check['app']['slug'] == 'github-actions']
+              if len(matching) != 1 or matching[0]['id'] != newer['id'] or matching[0]['status'] != status or matching[0]['conclusion'] != conclusion:
+                  raise SystemExit('GitHub did not select the newest attempt; deployment must remain disabled')
+          selected('in_progress', None)
+          api(f"check-runs/{older['id']}", 'PATCH', {'status': 'completed', 'conclusion': 'success', 'output': summary})
+          selected('in_progress', None)
+          api(f"check-runs/{newer['id']}", 'PATCH', {'status': 'completed', 'conclusion': 'failure', 'output': summary})
+          api(f"check-runs/{older['id']}", 'PATCH', {'status': 'completed', 'conclusion': 'success', 'output': summary})
+          selected('completed', 'failure')
+          with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as output:
+              output.write(f"Newest pending/failure defeats older success and delayed older completion. Synthetic check IDs: `{older['id']}`, `{newer['id']}`. Actual AWS validation remains unsuccessful.\n")
+          PY
+
+  oidc-proof:
+    name: Inspect actual Environment OIDC subject
+    needs: request-proof
+    if: github.ref == 'refs/heads/main'
+    environment: aws-testing
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      id-token: write
+    steps:
+      - name: Retain only nonsensitive audience and subject claims
+        run: |
+          python3 - <<'PY'
+          import base64
+          import json
+          import os
+          from pathlib import Path
+          from urllib.request import Request, urlopen
+
+          try:
+              url = os.environ['ACTIONS_ID_TOKEN_REQUEST_URL'] + '&audience=sts.amazonaws.com'
+              request = Request(url, headers={'Authorization': 'bearer ' + os.environ['ACTIONS_ID_TOKEN_REQUEST_TOKEN']})
+              with urlopen(request, timeout=30) as response:
+                  token = json.load(response)['value']
+              payload = token.split('.')[1]
+              claims = json.loads(base64.urlsafe_b64decode(payload + '=' * (-len(payload) % 4)))
+              record = {'aud': claims['aud'], 'sub': claims['sub'], 'ref': claims['ref']}
+              if record['aud'] != 'sts.amazonaws.com' or record['ref'] != 'refs/heads/main':
+                  raise ValueError('Unexpected claims')
+              (Path(os.environ['RUNNER_TEMP']) / 'oidc-subject.json').write_text(json.dumps(record))
+              print(json.dumps(record))
+          except Exception:
+              raise SystemExit('OIDC claim inspection failed; no token was retained or printed')
+          PY
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: oidc-subject-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/oidc-subject.json
+          retention-days: 14
+          if-no-files-found: error
