@@ -30,3 +30,8 @@ report transport remain unfinished; local packaging does not prove isolation.
 Lint changed Dockerfiles with hadolint as described in the testing strategy.
 Never bake credentials into this image or add candidate-test execution to a
 credential-bearing publisher/controller job.
+
+Local runtime reset passed the four existing tests before and after dedicated
+DB/cache/broker volume recreation. Runtime provides `E2E_TEST_PASSWORD`, but the
+current registration journey does not consume it; generated test credential
+support remains pending before AWS acceptance.

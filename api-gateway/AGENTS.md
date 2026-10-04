@@ -21,6 +21,15 @@ docker compose up -d --build api-gateway
 
 `api-gateway/Dockerfile` is a self-contained multi-stage build. It compiles the current source inside Docker, so a host-side `target/*.jar` is not required. Use `docker compose up -d --build` to rebuild and start the complete stack.
 
+## AWS testing runtime (in progress)
+
+The trusted runtime consumes the candidate gateway image by digest, runs UID
+10001 with a read-only filesystem and writable `/tmp`, and publishes port 10000
+only on host loopback for SSM forwarding. Auth/Items URLs remain network-local;
+Redis has a dedicated resettable volume and rate limiting is disabled for E2E.
+No gateway source mounts or public ingress are added. See the
+[operational status](../docs/TESTING-ENVIRONMENT.md); AWS deployment remains pending.
+
 ## CI Verification
 
 On every push and pull request, the independent API Gateway Java job uses

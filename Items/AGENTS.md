@@ -48,6 +48,16 @@ docker compose up -d --build items-service
 
 `Items/Dockerfile` uses the repository root as its build context, installs `common`, and packages Items inside Docker. A host-side `target/*.jar` is not required. Use `docker compose up -d --build` to rebuild and start the complete stack.
 
+## AWS testing runtime (in progress)
+
+The trusted runtime consumes the candidate Items image by digest and the
+Items-owned schema fixtures, never Auth's schema. Its PostgreSQL 18 volume is
+dedicated and recreated per validation with a generated DB password. Items runs
+UID 10001 with a read-only filesystem and writable `/tmp`, without published
+service ports or source mounts. This changes deployment configuration, not
+Items behavior. See [operational status](../docs/TESTING-ENVIRONMENT.md);
+AWS deployment remains pending.
+
 ## CI Verification
 
 On every push and pull request, the independent `common -> Items` Java job

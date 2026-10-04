@@ -209,6 +209,38 @@ configured as `aws-testing` Environment variables. No AWS keys are stored there.
 Hosted publication, actual role boundaries, runtime/disposal and protection are
 still pending; local publication stories do not prove those live properties.
 
+Live packaging trial
+[37218248383](https://github.com/Djimi/OnlineShop-full-stack/actions/runs/37218248383)
+then passed request/build/publisher/outcome. Publisher OIDC used the observed
+subject successfully. Trusted build artifact `11309510499` and digest receipt
+`11308474386` were verified; all five images were independently read back by digest
+from ECR. The candidate's exact check completed as **failure**, as required for
+packaging-only work. This does not prove operator permissions, runtime isolation,
+reset, E2E in AWS, disposal, or branch protection. PR #75 is merged at `06cbb0c`.
+
+Runtime implementation has started locally. Process-boundary stories exercise
+generation/process locks, metadata-rule prerequisites, scoped reset, readiness,
+executed report checks and sanitized failure evidence. Unknown test termination
+is persisted as unknown and blocks a subsequent run; temporary credential files
+are still removed. No runtime/Compose/reset/isolation story has yet been proved
+on an AWS host; no host has been provisioned.
+
+The actual **local** Compose reset story passed after adding Vite's missing
+`.vite-temp` tmpfs: verified candidate digests -> gateway/frontend readiness ->
+four E2E tests -> markers in both DBs/Redis/Kafka -> scoped volume recreation ->
+markers absent -> four E2E tests again (85.921 seconds). Scoped cleanup completed.
+This is not AWS-host evidence. Runtime also checks fixture transport hashes,
+removed SQL and forwarding-chain attachment. Host setup/hooks are defined but
+not applied on EC2. Generated DB credentials are wired; the current E2E journey
+does not consume the provided generated registration-test password yet. See
+[runtime contract](../infra/aws/runtime/AGENTS.md) for pending boundaries.
+
+The manual `AWS role boundary proof` workflow is being added separately. It uses
+trusted-main Environment OIDC for publisher/operator and read-only live APIs,
+requires exact authorization denials (not network/missing-resource errors), and
+retains only operation labels. It cannot publish AWS success or prove mutation
+permissions. Local command stories pass; hosted role proof remains pending.
+
 ### Capacity and pricing — before provisioning
 
 Local Compose plus containerized E2E passed with Auth's existing 100-connection

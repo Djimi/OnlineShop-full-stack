@@ -303,6 +303,11 @@ by black-box stories; they do not imply completed publication or deployment.
 The manual `AWS validation` workflow increment is packaging-only: request,
 credential-free build, isolated publisher OIDC, then failure-only finalization.
 Until runtime/evidence stages are wired and proved, it cannot satisfy the gate.
+The [trusted runtime](./infra/aws/runtime/AGENTS.md) has local reset/report stories
+and an actual isolated Compose clean-state/E2E proof. Host setup/hooks are defined
+only; no AWS host, SSM orchestration or real-host isolation proof exists yet.
+The separate manual `AWS role boundary proof` checks selected allowed/denied
+reads with publisher/operator OIDC; it never mutates AWS or publishes AWS success.
 
 ## Debug Info
 
