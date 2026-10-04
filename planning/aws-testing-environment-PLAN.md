@@ -129,13 +129,13 @@ update operational record with trial findings. No branch protection enabled yet.
 **Consumes:** Task 2 request and existing four application Dockerfiles.
 **Produces:** Five immutable image archives plus build manifest; verified ECR digest manifest.
 
-- [x] Write failing archive/build stories for candidate/run/attempt/checksum/names/traversal/links/size/tag/dirty-checkout and superseded attempt. Publication-specific stories remain part of the unfinished publisher step.
-- [ ] Run focused automation tests and confirm new rejection stories initially fail.
-- [x] Define trusted build orchestration with separate read-only job/controller/candidate checkouts, fixed service contexts and no OIDC/write credentials. Hosted packaging-only trial still required.
+- [x] Write archive/build/publication stories for candidate/run/attempt/checksum/names/traversal/links/size/tag/dirty-checkout and superseded attempt. Missing commands were observed failing before implementation; additional existing-behavior boundary cases were characterized afterward.
+- [x] Run focused automation tests and confirm missing build/verification/publication behavior fails before implementation.
+- [x] Define separate read-only controller/candidate build job with fixed contexts and no OIDC/write credentials; verified by hosted manual packaging-only trial 37218248383.
 - [x] Add E2E image with pinned Java 25/Maven-compatible base and Dockerfile lint compliance. Runs nonroot at `/workspace/e2e-tests`; compile/cache build does not execute tests; default is module-root wrapper `clean test`. Containerized local E2E and hadolint passed.
-- [ ] Implement manifest/archive verification and fixed-repository publication, with no candidate hooks, command substitution, or unsafe extraction. Validate ECR digest after push, not just tag existence. Publisher has no environment/SSM permissions.
-- [ ] Verify with focused stories, `hadolint e2e-tests/Dockerfile`, existing Compose builds, and actual isolated E2E against the local stack. Run the E2E wrapper from `e2e-tests/`; expect current three API tests to pass and reports to exist.
-- [ ] Commit packaging and independent module documentation: `feat(e2e): package digest-pinned AWS validation images`.
+- [x] Implement inert archive/provenance verification and fixed-repository publication; compare remote/pushed digests. Live run 37218248383 produced all five independently verified ECR digests through publisher OIDC, with no application host.
+- [x] Focused stories, hadolint, Compose builds, module-root wrapper E2E and nonroot pinned-image E2E pass. Both E2E reports contain three API tests and one logging regression, with no failures/errors/skips.
+- [x] Commit packaging and independent E2E-module docs in 0df92f8/271e19e; integrated via PR #75 with hosted CI, then verified manual publisher trial.
 
 ### Task 4: Establish Terraform roots and protected bootstrap
 
@@ -162,10 +162,10 @@ update each affected module's AGENTS and operational flows.
 **Consumes:** Bootstrap identifiers, fixed runtime definition and five image digests.
 **Produces:** `run-stack.py --generation ID --images FILE` exit code, stage record and reports; controller reconciliation used by validation/disposal.
 
-- [ ] Write failing runtime stories: preseeded DB/cache/broker state is absent next run; both independent schemas initialize; failed readiness cannot run E2E; old remote process or unknown operation blocks reset; report loss/invalid reports prevents success.
-- [ ] Run `python3 -m unittest -v tests/scripts/aws_runtime_test.py`; observe missing runtime behavior failures. Keep API fakes at process boundaries; use disposable Compose for actual reset/isolation stories.
-- [ ] Implement AWS-only Compose without local source mounts/admin UIs/build directives: four application digests, repository-aligned backing versions, named dedicated volumes, loopback gateway/frontend ports. Package each candidate's service-owned `init-db` scripts as verified data, preserving Auth/Items ownership; never source fixture content in the controller shell.
-- [ ] Inject generated DB/application test credentials through restricted runtime files. Audit committed seed scripts for embedded credentials and provide supported test-only fixtures where needed; do not use local committed passwords. Frontend uses documented forwarded gateway URL `http://localhost:10000`, with frontend forwarding at `5173`.
+- [x] Runtime stories cover missing behavior RED->GREEN for generation/process locks, readiness/report failure, scoped reset, sanitized failure evidence and unknown test termination. Actual local Compose test proves both schemas and removal of DB/cache/broker markers; real remote-process/cancellation proof still pending.
+- [x] Run focused runtime stories after observed failures, with external command-boundary fakes and actual disposable Compose/reset/E2E coverage. Local isolation checks do not imply EC2 isolation proof.
+- [x] Implement AWS-only Compose with four app digests, aligned backing versions, named dedicated volumes, loopback gateway/frontend ports and independent verified service-owned fixtures. No builds/source mounts/admin UIs or shell-sourced SQL.
+- [x] Inject generated DB/application test credentials through restricted files; omit Auth's committed password seed, consume generated E2E registration password with random local fallback. Actual local reset regression proves generated-password login before/after reset. Frontend/gateway loopback URLs/ports are fixed; AWS-host proof remains pending.
 - [ ] Implement host setup and `run-stack.py` top-down flow: host process lock -> verify project/generation -> stop writers/tests -> remove only project data -> initialize/start -> bounded readiness -> isolated E2E -> bounded sanitized evidence. Preserve app afterward; remove test container and secret temporary files safely.
 - [ ] Block container IMDS access with host firewall rules for IPv4/IPv6 and forwarded/container paths; require IMDSv2. Restrict capabilities/mounts and network modes. Verify Docker restart/reboot retains isolation; host SSM/ECR/secret access must still work.
 - [ ] Persist operation intent before launch, IDs immediately afterward, and terminal outcomes. Name/tag remote operations by generation; discover operations in launch/record crash gaps. Use bounded SSM execution plus a host process lock and termination verification; reconciliation checks Terraform locks/state, EC2 transitions, SSM and detached tests before mutation.

@@ -113,6 +113,20 @@ do not weaken exact trust to silence that warning. Eleven custom-policy
 simulations passed launch-resource and isolation scenarios. These are not actual
 OIDC assumed-role deny proofs; live role tests still precede routine deployment.
 
+The [trusted runtime](runtime/AGENTS.md) has process-boundary coverage and an
+actual local Compose reset proof. Host setup/hooks are defined, not applied on
+EC2. SSM orchestration, host isolation and final merge gate remain unfinished.
+The `AWS role boundary proof` workflow separately verifies selected
+publisher/operator allowed and denied reads using actual OIDC credentials.
+It never mutates AWS or reads data into retained artifacts; only operation labels
+survive; actual selected read boundaries are verified below.
+
+Live run 37221612286 passed selected publisher/operator OIDC allowed/denied read
+boundaries, with verified artifact hashes. Both roles were denied backend/bootstrap
+state and dedicated secrets. Operator's fixed-profile/environment-prefix discovery
+and publisher's ECR discovery passed. This does not prove mutation permissions,
+Terraform locks, pass-role denies or container/SSM isolation.
+
 ## Saved plans and recovery
 
 Every mutation uses the same trusted root, recorded backend/inputs and provider

@@ -32,6 +32,20 @@ npm run dev
 npm run build
 ```
 
+Fresh worktrees have no installed npm tools. Run `npm ci` from `frontend/`
+before local lint/build verification; do not rely on a sibling's `node_modules`.
+
+## AWS testing runtime (in progress)
+
+The trusted AWS runtime consumes the candidate frontend image by digest without
+source mounts. It runs UID 1000 with a read-only filesystem and narrow tmpfs
+mounts for `/tmp`, npm cache, Vite cache and `/app/node_modules/.vite-temp`.
+Vite writes the latter while loading its config; omitting it prevents startup.
+Frontend/gateway inspection uses loopback ports 5173/10000 forwarded through
+SSM, with `VITE_API_URL=http://localhost:10000`. This remains a development
+image, not a production static-server deployment. See the
+[operational status](../docs/TESTING-ENVIRONMENT.md); no AWS host exists yet.
+
 ## CI Verification
 
 On every push and pull request, the independent frontend job uses Node 24 and

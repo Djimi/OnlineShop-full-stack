@@ -29,6 +29,16 @@ docker compose up -d --build auth-service
 
 `Auth/Dockerfile` is a self-contained multi-stage build. It compiles the current source inside Docker, so a host-side `target/*.jar` is not required. Use `docker compose up -d --build` to rebuild and start the complete stack.
 
+## AWS testing runtime (in progress)
+
+The trusted runtime consumes the exact candidate image and Auth-owned schema
+fixtures independently. It omits the committed seed-password fixture, injects
+a generated dedicated DB password, and uses a fresh dedicated PostgreSQL 18
+volume per validation. Auth runs UID 10001 with a read-only filesystem and
+writable `/tmp`; its port stays private to the Compose network. The runtime
+does not alter Auth's API or schema ownership. See the
+[operational status](../docs/TESTING-ENVIRONMENT.md); AWS deployment remains pending.
+
 ## CI Verification
 
 On every push and pull request, the independent Auth Java job uses Temurin 25
