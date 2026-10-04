@@ -367,6 +367,20 @@ Private auth/probe containers/network were scoped and removed. These are selecte
 image-isolation proofs, not full application runtime/E2E, all-image probes, remote
 cancellation recovery or trustworthy merge-gate success.
 
+Actual cancellation proof also passed: a bounded SSM command launched an isolated
+detached test container, then was cancelled. A new trusted runtime invocation was
+blocked by its process lock/unknown-operation record rather than resetting data.
+Owner reconciliation removed the exact test container, verified absence and lock
+release, then wrote a terminal cancellation record. This proves the runtime guard
+and documented owner recovery, not an implemented automatic workflow reconciler.
+
+Current Stockholm Price List compute equivalent for `m7i-flex.large` is
+**USD 0.10175/hour**. Reusing the recorded 730-hour/month, 50 GiB gp3, public IPv4,
+50 GiB ECR/1 GiB S3/secret assumptions gives **USD 87.53/month live equivalent**
+and **USD 5.42/month retained/disposed equivalent**, excluding traffic/requests/
+taxes. On this unchanged Free plan these are pricing/credit-consumption estimates,
+not a paid-account bill or a guarantee of unlimited zero-cost use.
+
 ### Open merge-gate provenance issue
 
 GitHub's expected status-check source binds an **App**, not a workflow. The shared
