@@ -28,6 +28,8 @@ import xml.etree.ElementTree as ET
 import zipfile
 from pathlib import Path
 
+from aws_cloud_reconciliation import ReconciliationBlocked, observe_cloud
+
 REPOSITORY = "Djimi/OnlineShop-full-stack"
 API_ROOT = f"repos/{REPOSITORY}"
 CI_WORKFLOW = ".github/workflows/ci.yml"
@@ -78,10 +80,23 @@ def main():
     reports.add_argument("--request", type=Path, required=True)
     reports.add_argument("--reports", type=Path, required=True)
     reports.add_argument("--output", type=Path, required=True)
+    cloud = commands.add_parser("reconcile-cloud", help="Observe fixed state/EC2/SSM; never authorize mutation")
+    cloud.add_argument("--request", type=Path, required=True)
+    cloud.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
     try:
         context = trusted_dispatch()
         authorize_actors(context)
+        if args.command == "reconcile-cloud":
+            record = read_request(args.request, context)
+            observation = observe_cloud()
+            read_request(args.request, context)
+            observation.update({key: record[key] for key in [
+                "repository", "candidate_sha", "controller_sha", "validation_run_id", "validation_run_attempt",
+            ]})
+            write_request(args.output, observation)
+            print("Cloud boundaries observed; host/ledger reconciliation still required, no mutation authorized")
+            return 0
         if args.command == "verify-reports":
             record = read_request(args.request, context)
             summary = verify_test_reports(args.reports)
@@ -139,10 +154,11 @@ def main():
         write_request(args.output, record)
         print(json.dumps(record, sort_keys=True))
         return 0
-    except RequestRejected as error:
+    except (RequestRejected, ReconciliationBlocked) as error:
         print(f"Request rejected: {error}; correct prerequisites and retry manually", file=sys.stderr)
         return 1
-    except (KeyError, TypeError, ValueError, OSError, argparse.ArgumentTypeError):
+    except (KeyError, TypeError, ValueError, OSError, IndexError, AttributeError,
+            StopIteration, subprocess.TimeoutExpired, argparse.ArgumentTypeError):
         # External values and exception bodies can contain tokens. Only fixed
         # rejection diagnostics reach logs; detailed secrets never do.
         print("Request rejected: authorization, candidate or exact CI evidence is invalid; retry manually after correcting prerequisites", file=sys.stderr)

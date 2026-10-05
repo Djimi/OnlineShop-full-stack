@@ -348,6 +348,11 @@ recovery remain unfinished; observation is not retry authorization.
 Controller `verify-reports` now validates bounded inert content for exactly the
 two known suites/four cases, but explicitly leaves runtime provenance/AWS success
 false. Transport/stage binding and genuine candidate validation remain unfinished.
+Routine `reconcile-cloud` now observes fixed operator state/lock/EC2/SSM parent
+and invocation boundaries under finite snapshot/output/pagination/deadline bounds.
+The guarded operator proof exercises it before planning; updated live proof is
+pending. It never authorizes mutation and still requires host/persistent-ledger
+reconciliation; no IAM widening or automatic recovery was introduced.
 The separate manual `AWS role boundary proof` checks selected allowed/denied
 reads with publisher/operator OIDC; it never mutates AWS or publishes AWS success.
 Final merge protection is additionally blocked on check-writer provenance:

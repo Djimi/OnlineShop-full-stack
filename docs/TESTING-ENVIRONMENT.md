@@ -556,6 +556,30 @@ content, **not execution provenance**: output explicitly leaves
 `runtime_provenance_verified` and `aws_validation_success` false. Runtime transport,
 stage/report binding and genuine current-candidate validation remain unfinished.
 
+### Routine cloud-reconciliation observations
+
+`aws-validation.py reconcile-cloud --request <request.json> --output <observation.json>`
+authorizes/rechecks the current owned candidate, then observes only fixed operator
+reads: account/role -> state-lock absence -> bounded version/ETag state/pointer ->
+exact ten-resource/current-host identity -> running owned EC2 host -> paginated
+SSM commands **and actual invocations** terminal -> unchanged state/pointer ->
+candidate recheck -> create-only observation. Access denial is not lock absence;
+missing/empty/foreign state, host transitions, active/cancelling/unknown commands,
+malformed pagination or excessive private output refuse. Discovery has one
+five-minute deadline, at most twenty 50-command pages, and independent 1 MiB
+stdout/stderr bounds; snapshots are private and capped at 16 MiB before download.
+
+The independently readable `scripts/aws_cloud_reconciliation.py` owns this cloud
+boundary and allowlists read operations only. It sends no SSM commands, performs
+no mutation, and explicitly requires host observation/persistent-ledger recovery;
+`mutation_authorized` and `aws_validation_success` remain false. The guarded
+operator proof now exercises it before planning, with the helper included in the
+trusted-input check. Positive CLI, nonterminal invocation and operator-preplan
+refusal stories were observed RED-to-GREEN; actual updated hosted proof is pending.
+Quick owner read-only production checks accepted the exact state schema and all
+34 retained terminal invocations; largest SSM page was 117,848 bytes. Those owner
+checks do not prove the operator role or detached-test/whole-session recovery.
+
 ### Open merge-gate provenance issue
 
 GitHub's expected status-check source binds an **App**, not a workflow. The shared

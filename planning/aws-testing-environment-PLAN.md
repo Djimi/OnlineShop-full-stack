@@ -184,6 +184,11 @@ update each affected module's AGENTS and operational flows.
   Host `--reconcile` observation now has an observed RED-to-GREEN positive story
   and lock/foreign-record/detached-test/lookup-failure refusals. It leaves unknown
   outcomes unchanged and cannot authorize retry; cloud transport remains pending.
+  Routine `reconcile-cloud` now has fixed state/EC2/SSM observations, bounded
+  snapshot/pagination/output, actual invocation-terminal checks and candidate
+  rechecks. It never mutates/authorizes retry and still requires host/operation-
+  ledger reconciliation. Guarded operator proof exercises it before planning;
+  actual updated OIDC proof and whole-session recovery remain pending.
 - [ ] Run local runtime tests and real-host metadata/network/credential probes from app and E2E containers. Prove cancellation recovery by interrupting SSM/controller, then verify a subsequent run cannot overlap. Bounds: provision 20/reset-deploy 10/readiness 5/E2E 15/diagnostics 5 minutes.
 - [ ] Run module-root Maven verification for any changed Java/config/fixtures (install `common` before Items), frontend lint/build if affected, E2E and changed-Dockerfile hadolint; commit: `feat(e2e): reset and validate AWS runtime safely`.
 

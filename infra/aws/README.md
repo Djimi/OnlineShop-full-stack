@@ -190,6 +190,11 @@ Host recovery observations use the trusted runtime's `--reconcile` command under
 its process lock. They can prove test absence but never clear unknown outcomes,
 authorize retry, or replace cloud-side SSM/EC2/state reconciliation. See the
 [runtime contract](runtime/AGENTS.md) for the command and refusal boundaries.
+The controller's separate `reconcile-cloud` observation verifies fixed operator
+state/lock/EC2/SSM reads and rechecks candidate/snapshot identities, never authorizing
+mutation. It requires both host observation and persistent-ledger reconciliation.
+The guarded operator proof now runs this cloud half before planning; actual updated
+hosted proof is pending. No new IAM permissions or arbitrary state roots are introduced.
 
 ```text
 verify account and absent intended bucket/key
