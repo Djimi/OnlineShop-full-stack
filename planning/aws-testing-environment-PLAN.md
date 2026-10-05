@@ -189,6 +189,10 @@ update each affected module's AGENTS and operational flows.
   rechecks. It never mutates/authorizes retry and still requires host/operation-
   ledger reconciliation. Guarded operator proof exercises it before planning;
   actual updated OIDC proof and whole-session recovery remain pending.
+  Live cloud trial `37248840722` failed safely at the lock HEAD lookup. Scoped
+  exact-prefix `ListObjectsV2` replaces the missing-HEAD/404 assumption without
+  broadening IAM; realistic 403 story observed RED-to-GREEN. Denial/truncation
+  remain refusal. Updated actual role retry is pending.
 - [ ] Run local runtime tests and real-host metadata/network/credential probes from app and E2E containers. Prove cancellation recovery by interrupting SSM/controller, then verify a subsequent run cannot overlap. Bounds: provision 20/reset-deploy 10/readiness 5/E2E 15/diagnostics 5 minutes.
 - [ ] Run module-root Maven verification for any changed Java/config/fixtures (install `common` before Items), frontend lint/build if affected, E2E and changed-Dockerfile hadolint; commit: `feat(e2e): reset and validate AWS runtime safely`.
 

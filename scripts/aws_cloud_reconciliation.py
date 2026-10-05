@@ -21,6 +21,7 @@ READ_OPERATIONS = {
     ("sts", "get-caller-identity"),
     ("s3api", "head-object"),
     ("s3api", "get-object"),
+    ("s3api", "list-objects-v2"),
     ("ec2", "describe-instances"),
     ("ssm", "list-commands"),
     ("ssm", "get-command-invocation"),
@@ -57,21 +58,7 @@ def observe_cloud():
     ):
         raise ReconciliationBlocked("wrong operator account or role")
     location = ["--bucket", bucket, "--expected-bucket-owner", account]
-    if (
-        read_aws(
-            [
-                "s3api",
-                "head-object",
-                *location,
-                "--key",
-                "state/environment.tfstate.tflock",
-            ],
-            absent_ok=True,
-            deadline=deadline,
-        )
-        is not None
-    ):
-        raise ReconciliationBlocked("environment state lock requires reconciliation")
+    verify_lock_absent(location, deadline)
     with tempfile.TemporaryDirectory(prefix="aws-cloud-observation-") as temporary:
         directory = Path(temporary)
         state = read_snapshot(
@@ -114,7 +101,7 @@ def observe_cloud():
     }
 
 
-def read_aws(arguments, *, deadline, absent_ok=False):
+def read_aws(arguments, *, deadline):
     operation = tuple(arguments[:2])
     if operation not in READ_OPERATIONS:
         raise ReconciliationBlocked("unsupported cloud read operation")
@@ -171,12 +158,6 @@ def read_aws(arguments, *, deadline, absent_ok=False):
             for stream in [process.stdout, process.stderr]:
                 stream.close()
     if process.returncode:
-        if (
-            absent_ok
-            and bytes(buffers["stderr"]).strip()
-            == b"An error occurred (404) when calling the HeadObject operation: Not Found"
-        ):
-            return None
         raise ReconciliationBlocked(
             "required cloud read failed at "
             + "/".join(operation)
@@ -195,6 +176,42 @@ def unique_fields(pairs):
             raise ReconciliationBlocked("duplicate cloud record field")
         result[key] = value
     return result
+
+
+def verify_lock_absent(location, deadline):
+    # HEAD of a missing object may be 403 under prefix-restricted ListBucket.
+    # List with the exact authorized prefix; errors never establish absence.
+    key = "state/environment.tfstate.tflock"
+    listing = read_aws(
+        [
+            "s3api",
+            "list-objects-v2",
+            *location,
+            "--prefix",
+            key,
+            "--max-keys",
+            "2",
+            "--no-paginate",
+        ],
+        deadline=deadline,
+    )
+    contents = listing.get("Contents", [])
+    if (
+        listing.get("IsTruncated") is not False
+        or not isinstance(contents, list)
+        or type(listing.get("KeyCount")) is not int
+        or listing["KeyCount"] != len(contents)
+        or len(contents) > 2
+        or any(
+            not isinstance(item, dict)
+            or not isinstance(item.get("Key"), str)
+            or not item["Key"].startswith(key)
+            for item in contents
+        )
+    ):
+        raise ReconciliationBlocked("lock listing is not bounded or authoritative")
+    if any(item["Key"] == key for item in contents):
+        raise ReconciliationBlocked("environment state lock requires reconciliation")
 
 
 def read_snapshot(location, key, path, deadline):
