@@ -219,6 +219,11 @@ the uploaded artifact through GitHub's API, verifies the exact trusted active jo
 successful upload step, artifact identity/digest, bounded content and at least
 14-day retention, then rechecks current candidate/latest attempt before success.
 Upload failure, pre-upload cancellation or summary-write failure stays non-success.
+The workflow normalizes the pinned upload action's bare hex digest to the REST
+`sha256:` representation. Runtime artifacts request 15-day retention to cover the
+upload-start/creation timestamp difference; the consumer still requires 14 actual
+days. Hosted trial `37382173568` passed runtime/four tests/cleanup but failed this
+adapter before success publication; its required check remains failure.
 
 Previous and incoming digests stay protected during replacement. Only known
 routine `active-<generation>` tags are released after the new recorded deployment
@@ -262,7 +267,9 @@ Connected local lifecycle coverage consumes production-generated immutable recor
 through disposal/no-op and a second recreation; unknown statuses/shapes still refuse.
 The provider's explicit ENI generation-tag resource requires `ec2:DeleteTags`;
 the local policy limits this to `Generation` on owned ENIs with present tag keys.
-Its inspected live policy apply and disposal/recreation proofs are pending.
+Its exact inspected saved policy apply and actual IAM readback passed after PR #94
+integration; Free/Active plan remained unchanged. Hosted disposal/recreation proofs
+remain pending.
 The fresh coordinator automation suite passed 214 tests in 317.056s after the
 provider tag-ID shape regression; local checks do not establish hosted success.
 

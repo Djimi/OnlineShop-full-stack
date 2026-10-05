@@ -35,6 +35,10 @@ repository tree; generated files may have different names than expected.
 For local probes that load a script by path, establish its sibling-module import
 path explicitly or invoke its normal entry point. A dynamic file load does not
 reproduce the executable's module search path; verify loading before cloud calls.
+After an asynchronous branch update, bounded discovery may wait for the PR snapshot
+to reflect the expected base/head while independently verifying the trusted branch
+has not moved. Stale metadata must never authorize dispatch; a durable dispatch
+intent and confirmed run ID distinguish pre-dispatch refusal from uncertain launch.
 
 Validate action inputs against `action.yml` at the exact pinned commit, not the
 latest README. Unsupported security inputs can be ignored with only a runner

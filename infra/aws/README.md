@@ -46,7 +46,9 @@ repeated lifecycles. Sanitized partial-failure evidence reports bounded leftover
 and observation uncertainty, never raw provider output or resource identifiers.
 The pinned provider deletes the explicit ENI `Generation` tag during destroy.
 Its local operator grant is ENI-only, owned-resource-conditioned, `Generation`-only
-and requires present `aws:TagKeys`; inspected live apply remains pending.
+and requires present `aws:TagKeys`. The exact inspected saved policy plan was applied
+after PR #94 integration; actual IAM readback matched and Free/Active plan remained
+unchanged. Actual disposal/recreation and current-candidate success remain pending.
 See [operational evidence](../../docs/TESTING-ENVIRONMENT.md) and the
 [implementation plan](../../planning/aws-testing-environment-PLAN.md).
 

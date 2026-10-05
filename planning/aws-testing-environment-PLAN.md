@@ -254,8 +254,7 @@ extend controller tests and operational disposal/recovery instructions.
 - [ ] Run focused suites, workflow/Terraform checks and recreation E2E; commit: `feat(e2e): add generation-safe AWS disposal`.
 
   Local workstream implemented disposal and verified disposed-to-recreation with
-  68 affected tests passing; independent review and combined verification are in
-  progress. Independent review requires fixes for refreshed secondary-ID/ownership
+  68 affected tests passing. Independent review identified refreshed secondary-ID/ownership
   admission, actual route IDs/creation outputs, repeated lifecycle intent handling,
   unknown destroy outcome/recorded-host reconciliation and partial-failure evidence.
   All seven findings are addressed in one consolidated local pass reporting 109
@@ -267,8 +266,9 @@ extend controller tests and operational disposal/recovery instructions.
   The first runtime trial's exact owner migration pointer shape is now
   covered, with unknown purpose/fields/status still rejected. The provider-proven
   ENI `Generation` tag deletion grant passed bootstrap mock assertions RED-to-GREEN;
-  live inspected policy apply and Task 7 hosted proofs remain pending. These local
-  results do not complete the task's live contract.
+  exact inspected saved policy apply/readback passed after PR #94's six CI jobs and
+  guarded integration at `f452665`; account remains Free/Active. Task 7 hosted proofs
+  remain pending. Local results and policy readback do not complete the live contract.
 
 ### Task 8: Run acceptance trials and enable required merge protection
 
@@ -303,6 +303,15 @@ and plan checkboxes/issues with actual evidence. Configure GitHub protection onl
 | Failures/evidence §10, A1–A33, handoff §12 | 6, 7, 8 |
 
 ## Issues and resolutions
+
+- [ ] **Retained-evidence action/API adapter:** trial `37382173568` passed cloud
+  runtime/four tests/cleanup but refused finalization because action output is bare
+  hex while API digest is `sha256:`. Its actual 14-day artifact also falls one second
+  short of the strict lifetime minimum. Local regressions reproduced both failures;
+  workflow prefix normalization and 15-day requested retention are GREEN without
+  loosening downstream checks. Combined suite passed 215 tests in 321.545s; changed
+  lint/format/workflow/whitespace passed. CI and a new hosted trial precede closure.
+  The prior required AWS check remains failure.
 
 - [x] **Operator plan proof recovered:** trial `37243793027` authorized actors/
   OIDC but failed its protected plan phase, without apply or app mutation. Initial
