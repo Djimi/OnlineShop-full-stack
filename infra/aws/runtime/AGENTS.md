@@ -92,6 +92,11 @@ properties, environment dumps, system output and candidate-produced failure text
 Failed tests retain sanitized XML where available; zero exit alone cannot pass.
 Missing/invalid reports fail. Unknown test termination is recorded `unknown` and
 blocks the next run. Cloud cancellation/timeout reconciliation is unfinished.
+Before any credentials/reset, runtime now verifies the fixed test container is
+absent, regardless of a terminal prior local record. A failed Docker lookup is
+not absence; an existing container requires reconciliation, not automatic removal.
+This admission guard leaves prior records unchanged and does not clear unknown
+state or authorize recovery. The detached-test story was observed RED-to-GREEN.
 An actual owner proof cancelled SSM with a detached isolated test container;
 the next runtime invocation refused mutation until owner removal/absence and
 host-lock release were verified. This does not implement automatic reconciliation.

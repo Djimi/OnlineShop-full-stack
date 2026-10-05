@@ -85,7 +85,9 @@ with native S3 locking. Expected resource coverage and zero actions are mandator
 it never applies, resets data or publishes AWS success. Only sanitized proof JSON
 is an artifact; snapshots/plans/logs are private and must never be uploaded.
 Timeout/failure requires lock reconciliation before retry. Missing-state stories
-do not prove live recovery refusal, and live operator proof remains pending.
+do not prove live recovery refusal. Actual operator no-change/native-lock proof
+passed in trusted-main run `37245192463`; its sanitized report confirms no apply
+or AWS validation success, and an owner read-only post-check found no remaining lock.
 The first hosted operator trial passed authorization/OIDC but failed planning.
 Failure evidence now exposes only fixed stages and allowlisted error/action
 labels; raw snapshots/logs are never artifacts. Diagnose/reconcile before retry,
@@ -94,7 +96,9 @@ Focused reproduction found that the initial global 16 MiB file-size limit also
 capped provider downloads. Capture now streams bounded stdout/stderr separately
 and terminates the owned process group on overflow/deadline, without capping
 legitimate provider artifacts. Large-provider/excessive-log stories and actual
-credential-free backend-disabled init pass. Hosted operator retry remains required.
+credential-free backend-disabled init pass. The actual hosted retry passed without
+IAM widening. Credential action metadata also exposed an ignored account-allowlist
+input; reviewed v6.3.0 supports it. Hosted verification of the updated pin remains pending.
 
 ### Account-plan preflight and partial apply
 
@@ -157,20 +161,27 @@ Run from the repository root, separately for each root:
 
 ```bash
 terraform fmt -check -recursive infra/aws
+export TF_DATA_DIR="$(mktemp -d /tmp/opencode/aws-backend-definitions.XXXXXX)"
 terraform -chdir=infra/aws/backend init -backend=false
 terraform -chdir=infra/aws/backend validate
 terraform -chdir=infra/aws/backend test
+export TF_DATA_DIR="$(mktemp -d /tmp/opencode/aws-bootstrap-definitions.XXXXXX)"
 terraform -chdir=infra/aws/bootstrap init -backend=false
 terraform -chdir=infra/aws/bootstrap validate
 terraform -chdir=infra/aws/bootstrap test
+export TF_DATA_DIR="$(mktemp -d /tmp/opencode/aws-environment-definitions.XXXXXX)"
 terraform -chdir=infra/aws/environment init -backend=false
 terraform -chdir=infra/aws/environment validate
 terraform -chdir=infra/aws/environment test
+unset TF_DATA_DIR
 ```
 
 Never initialize a live backend implicitly with an inferred bucket. An already
-migrated working directory retains its backend even with `-backend=false`;
-mock-provider tests use isolated test state and never administer the live stack.
+migrated working directory retains its backend even with `-backend=false`.
+Fresh per-root `TF_DATA_DIR` directories above avoid cached live-backend metadata;
+without them even initialization can require live credentials. Keep these scratch
+directories separate from protected live state; never remove live `.terraform/`
+to run definition checks. Mock-provider tests never administer the live stack.
 
 ## Owner backend creation and migration
 
