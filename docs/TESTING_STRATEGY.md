@@ -138,6 +138,17 @@ Lock absence stories must model prefix-restricted roles accurately: missing HEAD
 can be 403, not the owner's 404. Use exact-prefix bounded listing and assert that
 denial/truncation cannot become absence. Policy simulation and owner reads remain
 quick diagnostic feedback, not live role proof.
+The corrected actual operator cloud/native-plan proof passed `37275392787`; host
+and persistent operation recovery still remain separate required evidence.
+
+Publication-input stories:
+`python3 -m unittest -v tests/scripts/aws_publication_evidence_test.py`. Authenticate
+the exact trusted-main publishing run/attempt/prerequisite jobs and artifact
+digest, verify a bounded inert receipt/fixture, and recheck candidate before output.
+Reject missing/duplicate/expired/corrupt artifacts, skipped publisher, forged run,
+wrong candidate/mutable target, unsafe ZIP and fixture mismatch. Historical owner
+GitHub reads can verify schema/provenance quickly but do not replace the command's
+current pending-attempt authorization or current-candidate runtime evidence.
 
 Owner host-setup command stories:
 `python3 -m unittest -v tests/scripts/aws_host_setup_test.py`.

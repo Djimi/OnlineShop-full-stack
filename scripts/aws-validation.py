@@ -83,10 +83,21 @@ def main():
     cloud = commands.add_parser("reconcile-cloud", help="Observe fixed state/EC2/SSM; never authorize mutation")
     cloud.add_argument("--request", type=Path, required=True)
     cloud.add_argument("--output", type=Path, required=True)
+    publication = commands.add_parser("verify-publication", help="Authenticate trusted publisher receipt and fixture bytes without AWS")
+    publication.add_argument("--request", type=Path, required=True)
+    publication.add_argument("--fixtures", type=Path, required=True)
+    publication.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
     try:
         context = trusted_dispatch()
         authorize_actors(context)
+        if args.command == "verify-publication":
+            record = read_request(args.request, context)
+            evidence = verify_publication(record, args.fixtures)
+            read_request(args.request, context)
+            write_request(args.output, evidence)
+            print("Trusted publisher receipt and fixture bytes verified; no image execution or AWS success")
+            return 0
         if args.command == "reconcile-cloud":
             record = read_request(args.request, context)
             observation = observe_cloud()
@@ -169,6 +180,70 @@ def positive_integer(value):
     if not re.fullmatch(r"[1-9][0-9]{0,18}", str(value)):
         raise argparse.ArgumentTypeError("expected a positive decimal integer")
     return int(value)
+
+
+def verify_publication(record, fixtures):
+    run_id, attempt = record["validation_run_id"], record["validation_run_attempt"]
+    source = github(f"actions/runs/{run_id}/attempts/{attempt}")
+    if (source.get("id") != run_id or source.get("run_attempt") != attempt
+            or source.get("repository", {}).get("full_name") != REPOSITORY
+            or source.get("head_branch") != "main" or source.get("head_sha") != record["controller_sha"]
+            or source.get("path") != ".github/workflows/aws-validation.yml"
+            or source.get("event") != "workflow_dispatch" or source.get("status") not in {"in_progress", "completed"}):
+        raise RequestRejected("publication source is not this trusted main attempt")
+    jobs = list(github_list(f"actions/runs/{run_id}/attempts/{attempt}/jobs", "jobs"))
+    for name in ["Candidate request", "Build candidate", "Publish candidate"]:
+        matches = [job for job in jobs if job.get("name") == name]
+        if len(matches) != 1 or matches[0].get("status") != "completed" or matches[0].get("conclusion") != "success":
+            raise RequestRejected("trusted publication prerequisite did not pass")
+    artifacts = github_list(f"actions/runs/{run_id}/artifacts", "artifacts")
+    matches = [artifact for artifact in artifacts if artifact.get("name") == f"aws-images-{run_id}-{attempt}"]
+    if len(matches) != 1:
+        raise RequestRejected("trusted publication artifact is missing or ambiguous")
+    artifact = matches[0]
+    if (artifact.get("expired") is not False or type(artifact.get("size_in_bytes")) is not int
+            or not 0 < artifact["size_in_bytes"] <= MAX_EVIDENCE_BYTES
+            or artifact.get("workflow_run", {}).get("id") != run_id
+            or artifact.get("workflow_run", {}).get("head_sha") != record["controller_sha"]
+            or not isinstance(artifact.get("digest"), str)
+            or not re.fullmatch(r"sha256:[0-9a-f]{64}", artifact["digest"])):
+        raise RequestRejected("invalid trusted publication artifact metadata")
+    artifact_id = positive_integer(artifact["id"])
+    data = github(f"actions/artifacts/{artifact_id}/zip", binary=True)
+    if (not 0 < len(data) <= MAX_EVIDENCE_BYTES
+            or "sha256:" + hashlib.sha256(data).hexdigest() != artifact["digest"]):
+        raise RequestRejected("publication artifact digest mismatch")
+    try:
+        with zipfile.ZipFile(io.BytesIO(data)) as archive:
+            members = archive.infolist()
+            if (len(members) != 1 or members[0].filename != "images.json"
+                    or not 0 < members[0].file_size <= MAX_EVIDENCE_BYTES
+                    or (members[0].external_attr >> 16) & 0o170000 == 0o120000):
+                raise RequestRejected("unsafe publication receipt archive")
+            receipt = json.loads(archive.read(members[0]), object_pairs_hook=unique_fields)
+    except (zipfile.BadZipFile, RuntimeError):
+        raise RequestRejected("corrupt publication receipt archive") from None
+    if set(receipt) != set(record) | {"images", "fixtures", "build_artifact_id", "build_artifact_digest"} or any(
+        receipt.get(key) != value for key, value in record.items()
+    ):
+        raise RequestRejected("publication receipt candidate or attempt mismatch")
+    account = os.environ.get("AWS_TESTING_ACCOUNT_ID", "")
+    if not re.fullmatch(r"[0-9]{12}", account) or set(receipt["images"]) != IMAGE_NAMES:
+        raise RequestRejected("invalid fixed publication targets")
+    for name, uri in receipt["images"].items():
+        prefix = f"{account}.dkr.ecr.{REGION}.amazonaws.com/onlineshop-test-{name}"
+        if not isinstance(uri, str) or not re.fullmatch(re.escape(prefix) + r"@sha256:[0-9a-f]{64}", uri):
+            raise RequestRejected("publication image is mutable or outside the fixed targets")
+    if (type(receipt["build_artifact_id"]) is not int or receipt["build_artifact_id"] <= 0
+            or not isinstance(receipt["build_artifact_digest"], str)
+            or not re.fullmatch(r"sha256:[0-9a-f]{64}", receipt["build_artifact_digest"])):
+        raise RequestRejected("invalid source build artifact identity")
+    if fixtures.name != "fixtures.tar":
+        raise RequestRejected("unexpected fixture transport name")
+    path = verify_archive_checksum(fixtures.parent, receipt["fixtures"], "fixtures.tar", MAX_FIXTURE_BYTES)
+    verify_fixture_archive(path)
+    return {"status": "publication-verified", "receipt": receipt, "publication_artifact_id": artifact_id,
+            "publication_artifact_digest": artifact["digest"], "aws_validation_success": False}
 
 
 def verify_test_reports(path):

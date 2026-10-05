@@ -194,12 +194,18 @@ The controller's separate `reconcile-cloud` observation verifies fixed operator
 state/lock/EC2/SSM reads and rechecks candidate/snapshot identities, never authorizing
 mutation. It requires both host observation and persistent-ledger reconciliation.
 The guarded operator proof now runs this cloud half before planning; actual updated
-hosted proof is pending. No new IAM permissions or arbitrary state roots are introduced.
+hosted proof passed `37275392787`. No new IAM permissions or arbitrary state roots are introduced.
 The first cloud increment's live trial failed its lock HEAD lookup. Missing-object
 HEAD can be forbidden under prefix-restricted bucket listing; it is not an absence
 proof. The corrected check lists only the authorized exact lock prefix, at most
 two keys, and refuses denial/truncation. No IAM widening is introduced. Updated
-actual role retry remains pending; never treat HTTP 403 as absence or force-unlock.
+actual role retry passed; never treat HTTP 403 as absence or force-unlock.
+Corrected actual operator trial `37275392787` passed scoped absence and bounded
+state/EC2/SSM observations plus a no-change native-lock plan. It still requires
+host/persistent-ledger reconciliation and cannot authorize mutation or AWS success.
+Controller `verify-publication` independently authenticates the exact trusted
+publisher receipt artifact and fixture bytes without AWS or code execution;
+historical input verification is not current-candidate deployment evidence.
 
 ```text
 verify account and absent intended bucket/key
