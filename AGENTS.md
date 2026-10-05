@@ -323,6 +323,17 @@ normal existing-host path permits inspected tag-only generation changes.
 Local Task 7 adds inspected saved-plan disposal and recreation only from matching
 immutable disposal evidence, retained empty state and verified recorded-resource
 absence. Missing/corrupt or unexpected partial state still refuses automatic creation.
+PR #94 integrated the reviewed local lifecycle batch after all six CI jobs passed;
+214 automation tests passed. Its one scoped owned-ENI Generation-only DeleteTags
+statement was applied from the exact inspected saved bootstrap plan and verified
+by actual IAM readback, preserving prior grants and Free/Active plan. Actual
+disposal/recreation, current-candidate success and final gate proofs remain pending.
+Hosted trial `37382173568` passed existing-host runtime/transport/four tests/cleanup
+but failed retained-evidence finalization on a bare action digest. The local adapter
+adds REST `sha256:` and requests 15-day artifact retention, preserving strict hash
+and 14-actual-day verification. Its RED-to-GREEN regression is locally green; the
+new revision's full suite passed 215 tests; CI/hosted proof remains pending, and
+the prior AWS check stays failure.
 Host S3 runtime-input/evidence grants were applied from an inspected exact saved
 bootstrap plan and verified by actual IAM readback; Free plan remains unchanged.
 Actual cloud recovery/transport, current-candidate success, disposal/recreation and

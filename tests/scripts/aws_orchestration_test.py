@@ -9,7 +9,10 @@ import sys
 import tarfile
 import unittest
 import zipfile
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
+
+import yaml
 
 from tests.scripts import aws_publication_evidence_test as publication
 from tests.scripts import aws_validation_test as validation
@@ -174,6 +177,20 @@ class ValidationSessionStories(unittest.TestCase):
             "expires_at": "2026-10-19T00:00:00Z",
             "workflow_run": {"id": int(run), "head_sha": "d" * 40},
         }
+        workflow = yaml.safe_load(
+            (
+                validation.SCRIPT.parents[1] / ".github/workflows/aws-validation.yml"
+            ).read_text()
+        )
+        upload = next(
+            step
+            for step in workflow["jobs"]["validate"]["steps"]
+            if step.get("id") == "runtime_evidence"
+        )
+        created = datetime(2026, 10, 5, tzinfo=timezone.utc)
+        # Artifact creation finishes after the expiration clock starts at upload.
+        expires = created + timedelta(days=upload["with"]["retention-days"], seconds=-1)
+        artifact["expires_at"] = expires.isoformat().replace("+00:00", "Z")
         if case == "expired":
             artifact["expired"] = True
         if case == "short-retention":
@@ -224,6 +241,21 @@ class ValidationSessionStories(unittest.TestCase):
         (self.directory / "routes.json").write_text(json.dumps(routes))
 
     def finalize_success(self):
+        workflow = yaml.safe_load(
+            (
+                validation.SCRIPT.parents[1] / ".github/workflows/aws-validation.yml"
+            ).read_text()
+        )
+        step = next(
+            item
+            for item in workflow["jobs"]["validate"]["steps"]
+            if "finalize-success" in item.get("run", "")
+        )
+        # The pinned upload action emits bare hex, while the REST API uses sha256:.
+        action_digest = self.runtime_digest.removeprefix("sha256:")
+        digest = step["env"]["RUNTIME_ARTIFACT_DIGEST"].replace(
+            "${{ steps.runtime_evidence.outputs.artifact-digest }}", action_digest
+        )
         return subprocess.run(
             [
                 sys.executable,
@@ -234,7 +266,7 @@ class ValidationSessionStories(unittest.TestCase):
                 "--artifact-id",
                 "800",
                 "--artifact-digest",
-                self.runtime_digest,
+                digest,
             ],
             env=self.env | {"GITHUB_JOB": "validate"},
             capture_output=True,
@@ -242,6 +274,11 @@ class ValidationSessionStories(unittest.TestCase):
             timeout=30,
             check=False,
         )
+
+    def test_real_upload_action_digest_and_retention_timing_finalize_success(self):
+        result = self.invoke()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(len(self.success_patches()), 1)
 
     def test_runtime_and_preupload_cancellation_leave_check_pending(self):
         result = self.invoke(retain=False)
