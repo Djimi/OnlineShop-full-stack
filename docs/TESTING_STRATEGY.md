@@ -108,6 +108,10 @@ content). Global child file-size limits are not selective log limits. Start with
 these focused stories before the full automation/hosted verification.
 Detached-test runtime stories additionally require absence before credentials or
 reset even when the local record is terminal; failed lookup must not mean absence.
+Host recovery-observation stories additionally exercise current-generation/prior
+identity, active lock and detached-test refusal, and unchanged unknown outcomes.
+The positive command story was observed RED-to-GREEN; these process-boundary
+stories are not actual cloud cancellation recovery or retry authorization.
 Workflow action inputs must match metadata at their exact pinned SHA. Live run
 `37245192463` proved operator locked no-change planning with the previous pin;
 the updated v6.3.0 credential action still requires a separate hosted proof.

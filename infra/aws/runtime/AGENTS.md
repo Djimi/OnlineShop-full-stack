@@ -97,6 +97,15 @@ absent, regardless of a terminal prior local record. A failed Docker lookup is
 not absence; an existing container requires reconciliation, not automatic removal.
 This admission guard leaves prior records unchanged and does not clear unknown
 state or authorize recovery. The detached-test story was observed RED-to-GREEN.
+
+`python3 run-stack.py --generation run-<id>-attempt-<n> --reconcile` observes
+recovery without credentials or reset: acquire host lock -> verify current/prior
+record identity -> prove fixed test container absent -> emit bounded JSON. Active
+locks, detached tests, failed Docker lookup and foreign/malformed records refuse.
+The observation leaves the prior outcome unchanged, even when `unknown`; it
+cannot authorize retry or publish success. Routine cloud orchestration must still
+reconcile SSM/EC2/Terraform and persist a reviewed recovery decision. This command
+does not clear a running/unknown operation just because its process ended.
 An actual owner proof cancelled SSM with a detached isolated test container;
 the next runtime invocation refused mutation until owner removal/absence and
 host-lock release were verified. This does not implement automatic reconciliation.

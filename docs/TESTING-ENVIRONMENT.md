@@ -524,6 +524,11 @@ Runtime recovery now also refuses a detached test container before credentials,
 operation-record replacement or reset—even when the previous local record is
 terminal. Docker lookup failure is not absence. The focused detached-test story
 was observed RED-to-GREEN; cloud-side reconciliation/termination remains unfinished.
+The next host recovery increment adds `run-stack.py --generation <generation>
+--reconcile`: lock/identity/absence observation only, without credentials/reset or
+overwriting the prior operation. Unknown remains unknown, with retry and AWS
+success explicitly false. Its 25 focused runtime stories pass; deployment of this
+host command and whole-session cloud reconciliation remain pending.
 
 ### Open merge-gate provenance issue
 

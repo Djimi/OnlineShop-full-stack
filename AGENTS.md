@@ -342,6 +342,9 @@ The hosted run exposed ignored `allowed-account-ids` on the prior credential act
 reviewed v6.3.0 supports configured inputs, but updated-pin hosted proof is pending.
 Runtime now refuses detached tests before credentials/reset even with terminal
 local records; routine cloud recovery/termination remains unfinished.
+Host runtime `--reconcile` now observes lock/identity/test absence without
+credentials/reset or clearing unknown outcomes. Cloud transport and whole-session
+recovery remain unfinished; observation is not retry authorization.
 The separate manual `AWS role boundary proof` checks selected allowed/denied
 reads with publisher/operator OIDC; it never mutates AWS or publishes AWS success.
 Final merge protection is additionally blocked on check-writer provenance:

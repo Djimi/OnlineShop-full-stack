@@ -185,6 +185,11 @@ to run definition checks. Mock-provider tests never administer the live stack.
 
 ## Owner backend creation and migration
 
+Host recovery observations use the trusted runtime's `--reconcile` command under
+its process lock. They can prove test absence but never clear unknown outcomes,
+authorize retry, or replace cloud-side SSM/EC2/state reconciliation. See the
+[runtime contract](runtime/AGENTS.md) for the command and refusal boundaries.
+
 ```text
 verify account and absent intended bucket/key
  -> protected local creation state (umask 077)
