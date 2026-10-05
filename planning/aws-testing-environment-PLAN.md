@@ -188,11 +188,13 @@ update each affected module's AGENTS and operational flows.
   snapshot/pagination/output, actual invocation-terminal checks and candidate
   rechecks. It never mutates/authorizes retry and still requires host/operation-
   ledger reconciliation. Guarded operator proof exercises it before planning;
-  actual updated OIDC proof and whole-session recovery remain pending.
+  actual updated OIDC proof passed `37275392787`; whole-session recovery remains pending.
   Live cloud trial `37248840722` failed safely at the lock HEAD lookup. Scoped
   exact-prefix `ListObjectsV2` replaces the missing-HEAD/404 assumption without
   broadening IAM; realistic 403 story observed RED-to-GREEN. Denial/truncation
-  remain refusal. Updated actual role retry is pending.
+  remain refusal. Updated actual role retry passed `37275392787`.
+  Corrected actual operator trial `37275392787` passed cloud observations and
+  zero-change native-lock planning. Host/ledger recovery still precede mutation.
 - [ ] Run local runtime tests and real-host metadata/network/credential probes from app and E2E containers. Prove cancellation recovery by interrupting SSM/controller, then verify a subsequent run cannot overlap. Bounds: provision 20/reset-deploy 10/readiness 5/E2E 15/diagnostics 5 minutes.
 - [ ] Run module-root Maven verification for any changed Java/config/fixtures (install `common` before Items), frontend lint/build if affected, E2E and changed-Dockerfile hadolint; commit: `feat(e2e): reset and validate AWS runtime safely`.
 
@@ -208,6 +210,12 @@ update each affected module's AGENTS and operational flows.
 - [ ] Implement workflow jobs: request (`contents/pull-requests/actions: read`, `checks: write`, no OIDC) -> build (read-only, no OIDC/write) -> publisher (Environment, publisher OIDC role) -> one validation job (Environment, operator OIDC role, check-write).
 - [ ] Give only the validation job shared `aws-testing-environment` concurrency with `queue: max` and no active cancellation. Keep publication outside lock without pruning images. Set validation timeout 65 minutes (55-minute stage sum plus orchestration); queue waiting is separate. Pin actions by reviewed commit SHA.
 - [ ] Implement locked `validate`: recheck identities -> verify account/state/ownership -> reconcile -> assign/persist generation -> saved plan/apply -> reset/deploy/readiness/E2E -> retrieve reports -> finalize only this attempt's check. Recheck candidate before AWS exchange, after lock and immediately before success.
+  Independent `verify-publication` now authenticates this exact trusted-main
+  run/attempt/three successful prerequisites/receipt artifact and digest, binds all
+  request fields/five fixed image digests and fixture bytes, and rechecks candidate
+  before create-only evidence. No AWS calls/code execution/success; transport and
+  runtime stages remain pending. Historical real GitHub receipt check passed,
+  explicitly not current-candidate authorization/runtime evidence.
 - [ ] Validate reports as bounded inert data: known suite names, expected current test count (`ItemsE2ETest`: three API tests; `RestAssuredLoggingTest`: one logging regression), no failures/errors and no all-skipped outcome; reject unsafe paths/links/XML external entities, malformed results or false zero-test success. Upload only sanitized records/reports/bounded logs with at least 14-day retention; never credentials/state/plans or raw environment dumps.
   Independent `verify-reports` content parser and rejection stories now pass:
   uncompressed flat tar, two known suites/four unique cases, matching zero-failure/

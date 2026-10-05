@@ -120,6 +120,11 @@ identity/outcomes and launch gaps must still be reconciled by the locked session
 Cloud lock absence uses exact-prefix bounded S3 listing, not a missing-object HEAD
 assumption under a prefix-restricted role. Denied/truncated lookups cannot authorize
 retry or establish absence; no IAM widening or automatic unlock is involved.
+Actual operator cloud observation/native-plan proof passed `37275392787`; it does
+not substitute for host recovery. The controller's `verify-publication` authenticates
+the exact trusted publishing attempt/receipt and verifies fixture bytes before
+transport. Host inputs must use that authenticated receipt, not a PR-provided
+manifest claiming the same candidate or an old owner's historical publication.
 An actual owner proof cancelled SSM with a detached isolated test container;
 the next runtime invocation refused mutation until owner removal/absence and
 host-lock release were verified. This does not implement automatic reconciliation.

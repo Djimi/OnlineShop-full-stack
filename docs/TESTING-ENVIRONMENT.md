@@ -575,7 +575,8 @@ no mutation, and explicitly requires host observation/persistent-ledger recovery
 `mutation_authorized` and `aws_validation_success` remain false. The guarded
 operator proof now exercises it before planning, with the helper included in the
 trusted-input check. Positive CLI, nonterminal invocation and operator-preplan
-refusal stories were observed RED-to-GREEN; actual updated hosted proof is pending.
+refusal stories were observed RED-to-GREEN; actual corrected hosted proof passed
+`37275392787`, as detailed below.
 Quick owner read-only production checks accepted the exact state schema and all
 34 retained terminal invocations; largest SSM page was 117,848 bytes. Those owner
 checks do not prove the operator role or detached-test/whole-session recovery.
@@ -594,9 +595,36 @@ The corrected absence check uses `ListObjectsV2` with the exact allowed lock pre
 lock, denied read, truncated/malformed/unbounded response refuses; errors never
 mean absence. The realistic missing-object HEAD/403 story failed first, then passed
 with this scoped listing. Owner read-only listing found zero keys. Updated hosted
-operator retry remains pending; original failure evidence remains retained.
+operator retry passed `37275392787`; original failure evidence remains retained.
+PR #91 merged at `6f89df4` after all six PR CI jobs passed. Corrected trusted-main
+trial [37275392787](https://github.com/Djimi/OnlineShop-full-stack/actions/runs/37275392787)
+passed actual operator scoped-list absence, state/EC2/SSM parent+invocation
+observations and zero-change native-lock planning. Its sanitized artifact retains
+`host_observation_required`, `operation_ledger_reconciliation_required`,
+`mutation_authorized: false` and `aws_validation_success: false`. No apply/app
+mutation or IAM widening occurred. Historical failed evidence remains available.
 See [HEAD permissions](https://docs.aws.amazon.com/aws-sdk-php/v3/api/api-s3-2006-03-01.html)
 and [prefix-scoped listing](https://docs.aws.amazon.com/AmazonS3/latest/userguide/amazon-s3-policy-keys.html).
+
+### Authenticated runtime publication inputs
+
+`aws-validation.py verify-publication --request <request.json>
+--fixtures <fixtures.tar> --output <verified-publication.json>` is credential-free
+with respect to AWS. It authorizes actors/current pending candidate -> verifies
+this exact trusted-main workflow run/attempt/controller and three successful
+request/build/publish jobs -> selects its unique unexpired `aws-images` artifact ->
+checks digest/bounded single-file ZIP -> requires the receipt's exact request
+identity/five fixed digest URIs/build identity -> verifies independent fixture
+bytes/schema paths -> rechecks candidate -> writes create-only evidence. It never
+executes image/fixture code, contacts AWS, or publishes a successful check.
+
+The positive command story was observed RED-to-GREEN; five focused stories cover
+forged source/skipped prerequisites, stale candidate, mutable/wrong receipt,
+missing/duplicate/expired/digest-mismatched artifacts and unsafe ZIP members.
+A quick **read-only historical** GitHub artifact/receipt/fixture check passed
+against publication `37238396197`; that does not prove current-candidate binding or
+authorization and cannot supply current runtime success. Routine transport and
+whole-session recovery remain unfinished.
 
 ### Open merge-gate provenance issue
 
