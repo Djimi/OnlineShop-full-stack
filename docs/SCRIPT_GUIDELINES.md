@@ -32,6 +32,9 @@ unrelated errors or claim full schema support. Discover a tool repository's defa
 branch before resolving a revision; do not guess `main`/`master`.
 For versioned upstream source evidence, resolve paths from that revision's
 repository tree; generated files may have different names than expected.
+For local probes that load a script by path, establish its sibling-module import
+path explicitly or invoke its normal entry point. A dynamic file load does not
+reproduce the executable's module search path; verify loading before cloud calls.
 
 Validate action inputs against `action.yml` at the exact pinned commit, not the
 latest README. Unsupported security inputs can be ignored with only a runner
@@ -125,6 +128,16 @@ the expected result without first learning a test framework.
   only when it contains meaningful logic that is clearer in isolation.
 - Test important failure and recovery paths, invariants, and side effects. Do
   not keep exhaustive tests for removed modes or implementation details.
+- External process doubles must preserve the pinned tool's actual identifier and
+  output shapes, including populated outputs and secondary resource identities.
+  Derive sanitized fixtures from inspected provider contracts or verified evidence;
+  an invented simpler shape can make an unusable production flow pass locally.
+- Finish external-shape probes before the combined suite, then keep production
+  inputs and fixtures stable for that run. If a new defect requires an edit during
+  verification, discard the affected result and rerun against the settled revision.
+- For durable lifecycle/recovery stories, consume records produced by earlier
+  production commands through the next cycle. Hand-seeding an idealized terminal
+  record can hide incompatible intent statuses or unreconciled interrupted applies.
 - A test suite is documentation too: group scenarios in the same order as the
   command's flow and keep failure output easy to diagnose.
 

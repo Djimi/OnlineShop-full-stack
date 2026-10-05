@@ -4,7 +4,8 @@
 Only trusted main workflows may call this command. GitHub CLI receives its job
 token through GH_TOKEN; API errors are never echoed. CI evidence is bounded inert
 data from an unchanged trusted workflow, not a PR's provenance claim. No AWS
-credentials or calls are needed except for isolated publication/locked validation. Builds run only candidate
+credentials or calls are needed except for publication and locked validation/disposal.
+Builds run only candidate
 Dockerfiles in Docker, with job/cloud tokens removed from client environments.
 Build/verification failure leaves no accepted manifest; no command publishes a
 successful AWS result outside the locked validation command. Publication verifies the trusted
@@ -14,7 +15,9 @@ bounded by repository lifecycle policies; failed publication emits no receipt.
 Validation joins immutable operation recovery, tag-only saved planning/apply,
 trusted S3/SSM host execution and bound stages/report/cleanup evidence. Success
 requires the current/latest candidate attempt; failure finalization preserves
-an already completed owned outcome. Missing/disposed state requires Task 7.
+an already completed owned outcome. Disposal retains protected prerequisites;
+recreation requires verified disposal records, empty retained state and resource
+absence. Missing/corrupt state never authorizes automatic recreation.
 """
 
 import argparse
@@ -39,7 +42,11 @@ REPOSITORY = "Djimi/OnlineShop-full-stack"
 API_ROOT = f"repos/{REPOSITORY}"
 CI_WORKFLOW = ".github/workflows/ci.yml"
 CHECK_NAME = "AWS validation"
-CONTROLLER_WORKFLOWS = ("aws-validation.yml", "aws-check-proof.yml")
+CONTROLLER_WORKFLOWS = (
+    "aws-validation.yml",
+    "aws-check-proof.yml",
+    "aws-dispose.yml",
+)
 SHA = re.compile(r"[0-9a-f]{40}")
 LOGIN = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})(?:\[bot\])?")
 MAX_EVIDENCE_BYTES = 65_536
@@ -127,10 +134,29 @@ def main():
         validation.add_argument("--images", type=Path, required=True)
         validation.add_argument("--fixtures", type=Path, required=True)
         validation.add_argument("--output", type=Path, required=True)
+    for name in ["dispose-preflight", "dispose"]:
+        disposal = commands.add_parser(
+            name,
+            help="Authorize fixed-root disposal before OIDC; dispose holds the shared operator session",
+        )
+        disposal.add_argument("--generation", required=True)
+        disposal.add_argument("--confirmation", required=True)
+        if name == "dispose":
+            disposal.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
     try:
         context = trusted_dispatch()
         authorize_actors(context)
+        if args.command in {"dispose-preflight", "dispose"}:
+            validate_disposal_scope(args.generation, args.confirmation)
+            if args.command == "dispose-preflight":
+                print("Trusted main actor, generation, account, backend and fixed-root preflight passed")
+                return 0
+            from aws_disposal_orchestration import dispose_session
+
+            dispose_session(args.generation, args.output)
+            print("Disposable environment removal verified; retained prerequisites preserved")
+            return 0
         if args.command in {"validate-preflight", "validate"}:
             from aws_runtime_orchestration import validate_session, verify_controller
 
@@ -276,6 +302,36 @@ def positive_integer(value):
     if not re.fullmatch(r"[1-9][0-9]{0,18}", str(value)):
         raise argparse.ArgumentTypeError("expected a positive decimal integer")
     return int(value)
+
+
+def validate_disposal_scope(generation, confirmation):
+    if not isinstance(generation, str) or not re.fullmatch(
+        r"run-[1-9][0-9]*-attempt-[1-9][0-9]*", generation
+    ):
+        raise RequestRejected("invalid expected environment generation")
+    if confirmation != "dispose":
+        raise RequestRejected("explicit disposal confirmation is required")
+    account = os.environ.get("AWS_TESTING_ACCOUNT_ID", "")
+    bucket = os.environ.get("AWS_TESTING_STATE_BUCKET", "")
+    role = os.environ.get("AWS_TESTING_OPERATOR_ROLE", "")
+    if not re.fullmatch(r"[0-9]{12}", account):
+        raise RequestRejected("invalid fixed operator account")
+    if role != f"arn:aws:iam::{account}:role/onlineshop-test-operator":
+        raise RequestRejected("operator role and fixed account do not match")
+    if not re.fullmatch(r"[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]", bucket):
+        raise RequestRejected("invalid fixed environment state bucket")
+    root = Path(__file__).resolve().parents[1] / "infra/aws/environment"
+    backend = root / "backend.tf"
+    if (
+        root.is_symlink()
+        or not root.is_dir()
+        or backend.is_symlink()
+        or not backend.is_file()
+        or 'key                  = "state/environment.tfstate"' not in backend.read_text()
+        or 'region               = "eu-north-1"' not in backend.read_text()
+        or not (root / ".terraform.lock.hcl").is_file()
+    ):
+        raise RequestRejected("fixed environment root or backend identity is invalid")
 
 
 def verify_publication(record, fixtures):

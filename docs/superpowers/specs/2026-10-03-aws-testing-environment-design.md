@@ -27,7 +27,7 @@ maintainers and reviewed workflow definitions are trusted; workflow changes requ
 review. Normal GitHub Actions App identity and scoped `checks: write` are accepted,
 without a dedicated App. Exact candidate binding, manual authorization,
 latest-attempt selection and failure enforcement still require live proof.
-Runtime/disposal and final gate activation remain unfinished; see
+Hosted runtime/disposal acceptance and final gate activation remain unfinished; see
 [operational status](../../TESTING-ENVIRONMENT.md).
 
 ### 1.1 Goal and end-to-end flow

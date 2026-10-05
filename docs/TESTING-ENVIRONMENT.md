@@ -20,9 +20,11 @@ eligible replacement host are provisioned; owner full-stack E2E and clean-state
 proofs passed. Local Tasks 5–6 now implement locked validation orchestration,
 immutable intent/launched/terminal records, a CAS generation pointer, tag-only
 existing-host planning, trusted host transport/evidence and owned success/failure
-finalization. Host S3 transport grants are defined but not yet applied. Hosted
-current-candidate validation, actual transport/recovery, disposal/recreation and
-final merge protection remain unfinished; local tests are not live proof.
+finalization. The narrow host S3 transport grants are applied and read back. Hosted
+current-candidate validation, actual transport/recovery, live disposal/recreation
+and final merge protection remain unfinished; local tests are not live proof.
+Task 7's local disposal/recreation flow and strict initial-migration admission fix
+are under independent review and combined verification.
 
 GitHub plan is Free; repository visibility was verified as public on 2026-10-02.
 The agreed AWS trigger is **Run workflow** with a PR number, not automatic
@@ -703,9 +705,13 @@ trusted request -> credential-free candidate build -> isolated publisher
 
 Read-only verification confirms the nonsensitive `AWS_TESTING_SECRET_ARN`
 Environment variable already matches the exact retained secret ARN; no value was
-published or changed. Before a hosted run, inspect/apply the narrowly scoped host
-runtime-input/evidence policy update. Host setup remains a prerequisite; this local
-batch does not create/recreate a host. Operation intent/launched/terminal events are
+published or changed. The exact saved bootstrap plan changed only the existing
+host inline policy by adding input `GetObject` and evidence `PutObject` statements;
+all prior grants were preserved, no operator policy was widened, and actual IAM
+readback matched. Global Free Tier reads before/after confirmed `FREE` / `ACTIVE`.
+Protected source/plan/hash/apply evidence is retained privately. Host setup remains
+a prerequisite; Task 7's local recreation path installs it on the fresh host.
+Operation intent/launched/terminal events are
 immutable and the generation pointer uses conditional CAS. Lost launch IDs and
 unknown outcomes refuse retry; recovered-aborted needs terminal SSM plus fresh host
 lock/process/test/temporary-credential absence. There is no automatic unlock.
@@ -719,8 +725,10 @@ point cannot leave a successful required check.
 Evidence artifacts are sanitized and retained for at least 14 days. Known previous
 and incoming images remain protected across failure; unknown owner tags remain, and
 more than 20 failed predecessors requires reviewed recovery. Task 7 disposal and
-recreation is not implemented: missing/disposed/partial unexpected state fails
-closed. No hosted current-candidate success, routine recovery or final gate is
+recreation is locally implemented: recreation requires matching immutable disposal
+intent/terminal evidence, retained empty state and verified resource absence.
+Missing/corrupt/partial unexpected state fails closed. No hosted current-candidate
+success, routine recovery or final gate is
 claimed; see the [infrastructure recovery contract](../infra/aws/README.md).
 
 The coordinator additionally ran the actual isolated local Compose reset/E2E
@@ -742,6 +750,74 @@ Python lint/format, workflow lint plus parsed queue contract, isolated bootstrap
 init/validate/mock assertions, whitespace and 60 local document links passed.
 This coherent local batch still requires trusted-main hosted mutation/transport/
 current-candidate and recovery proofs before merge-gate activation.
+
+The first trusted-main current-candidate trial, run `37362741325`, passed request,
+build and publication but failed runtime reconciliation. Read-only actual snapshots
+reproduced rejection of the initial owner's migration pointer: it has the known
+`owner-empty-host-generation-migration` purpose in addition to generation, host
+and provisioned status; local doubles had omitted that field. No trial recovery
+command or new environment generation was launched at that boundary. Retained
+sanitized evidence reports failure, and the exact merge-candidate **AWS validation**
+check is completed with failure. A strict real-shape regression and local boundary
+verification precede the next coherent retry; this is not current-candidate success.
+
+### Local generation-safe disposal/recreation batch
+
+```text
+owner requests Dispose testing environment on main (generation + dispose)
+  -> actor/input authorization before OIDC -> shared non-cancelling session queue
+  -> compare locked current generation -> reconcile cloud/ledger/idle host
+  -> immutable inventory/intent -> inspect saved destroy plan -> exact apply
+  -> retained empty state + every recorded disposable ID absent -> disposed receipt/CAS
+next owner-requested AWS validation
+  -> verify disposed receipt/state/absence -> create-only inspected saved plan/apply
+  -> verify new host -> trusted hash-bound host setup -> fresh reset/E2E/evidence
+  -> retained-artifact verification + current/latest recheck -> required result
+```
+
+The initial local workstream reported 68 affected tests passing, including partial
+destroy retries, verified repeated no-op, altered/missing evidence and recreation.
+The initial owner migration pointer now has strict positive/negative regressions.
+Independent review found an unsafe refreshed root-volume admission and gaps in
+provider route IDs, creation output shapes, repeated lifecycle intent handling,
+unknown destroy-outcome reconciliation and partial-state host absence/idle proof.
+Partial-failure diagnostics also need bounded actionable leftover evidence.
+All seven findings are addressed in a consolidated local pass reporting 109 affected
+stories passing. Refreshed plans validate immutable secondary IDs/tags/references;
+the actual recorded host is observed despite partial-state omission. Unknown apply
+outcomes require a fresh, exact operation-bound immutable recovery decision before
+retry. Creation validates real populated output records, and a connected second
+lifecycle uses production-generated intent bytes. Partial-failure evidence is fixed,
+bounded and explicitly complete-vs-unknown. Final combined coordinator verification
+precedes integration; these local results are not hosted lifecycle proof.
+The coordinator's fresh settled-revision suite passed **214 tests in 317.056s**
+with AWS/Docker execution trapped. Changed Python lint/format, both workflow lints
+with only the exact documented queue exception, parsed identical queue settings,
+all three isolated Terraform init/validate/mock suites, recursive Terraform format,
+54 local document links and tracked/added-file whitespace passed. The earlier
+in-flight suite result was superseded after the provider tag-ID correction.
+Read-only actual state then exposed another invented fixture shape: the pinned
+provider's ENI tag ID is `<interface-id>,Generation`, not `_Generation`. A disposal/
+verified-no-op regression was observed RED-to-GREEN; all lifecycle fixtures now
+use the actual format and an unsupported-format case refuses before destroy.
+Pure validators now pass against the actual retained pointer and all ten state
+resource identities/ownership/relationships, including computed route and two
+secondary IDs. This does not establish runtime live admission or mutation success.
+Disposal is bounded to a 30-minute session and a 20-minute destroy operation.
+Backend/bootstrap, state versions, roles, images, secrets and evidence are retained.
+The pinned Terraform provider's ENI generation-tag resource requires `DeleteTags`;
+the added local statement allows only `Generation` deletion on owned ENIs with
+present `aws:TagKeys`. Bootstrap mock assertions were observed RED-to-GREEN;
+inspected live policy apply/readback and actual disposal/recreation are pending.
+Read-only IAM simulation of the proposed single statement allowed owned ENI
+Generation deletion and denied five cases: foreign owner, ownership-tag deletion,
+mixed keys, absent tag keys and another resource kind. This is neither a deployed
+grant nor actual deletion proof. A private pre-trial preservation receipt records
+backend/bootstrap versions/hashes, three role identities/policies, five repository
+identities, secret version metadata and unchanged Free/Active plan; no secret
+values were read. Post-trial comparisons must account for the exact reviewed
+bootstrap policy addition and distinguish it from unintended protected changes.
+Do not force-unlock, clear unknown outcomes or recreate from missing state.
 
 After this foundation is reviewed and reaches trusted `main`, use **Actions ->
 AWS candidate check proof -> Run workflow** on `main`, entering a reviewed PR

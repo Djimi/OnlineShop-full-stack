@@ -1,6 +1,7 @@
 """Durable process boundary double; never imported by production."""
 
 import base64
+import copy
 import hashlib
 import io
 import json
@@ -65,8 +66,51 @@ if tool == "git":
     sys.exit(0)
 if tool == "terraform":
     if args[0] == "plan":
-        Path("current.tfplan").write_bytes(b"inspected-plan")
+        plan_name = next(
+            (
+                argument.removeprefix("-out=")
+                for argument in args
+                if argument.startswith("-out=")
+            ),
+            "current.tfplan",
+        )
+        Path(plan_name).write_bytes(
+            b"inspected-create-plan"
+            if plan_name == "create.tfplan"
+            else b"inspected-plan"
+        )
+        if plan_name == "create.tfplan" and cloud.pop(
+            "state_changes_after_create_plan", False
+        ):
+            cloud["state"]["serial"] += 1
+            save()
     if args[0] == "show":
+        if args[-1] == "create.tfplan":
+            emit(cloud["create_plan"])
+            sys.exit(0)
+        if args[-1] == "destroy.tfplan":
+            changes = []
+            for resource in cloud["state"]["resources"]:
+                address = resource["type"] + "." + resource["name"]
+                before = copy.deepcopy(resource["instances"][0]["attributes"])
+                changes.append(
+                    {
+                        "address": address,
+                        "change": {
+                            "actions": ["delete"],
+                            "before": before,
+                            "after": None,
+                            "after_unknown": {},
+                        },
+                    }
+                )
+            emit(
+                {
+                    "planned_values": {"root_module": {"resources": []}},
+                    "resource_changes": changes,
+                }
+            )
+            sys.exit(0)
         resources = []
         changes = []
         for resource in cloud["state"]["resources"]:
@@ -106,6 +150,29 @@ if tool == "terraform":
             }
         )
     if args[0] == "apply":
+        if args[-1] == "destroy.tfplan":
+            cloud["state"]["resources"] = []
+            cloud["state"]["outputs"] = {}
+            cloud["state"]["serial"] += 1
+            cloud["environment_destroyed"] = True
+            save()
+            sys.exit(0)
+        if args[-1] == "create.tfplan":
+            if cloud.get("create_apply_failure"):
+                sys.exit(1)
+            cloud["state"] = copy.deepcopy(cloud["create_state"])
+            cloud["environment_destroyed"] = False
+            cloud["created_host_id"] = next(
+                resource["instances"][0]["attributes"]["id"]
+                for resource in cloud["create_state"]["resources"]
+                if resource["type"] == "aws_instance"
+            )
+            cloud["live_generation"] = os.environ["TF_VAR_generation"]
+            save()
+            if cloud.pop("create_crash_after_apply", False):
+                save()
+                sys.exit(1)
+            sys.exit(0)
         if cloud.get("apply_failure"):
             print("raw-secret-canary", file=sys.stderr)
             sys.exit(1)
@@ -172,13 +239,20 @@ elif operation == ["s3api", "put-object"]:
     save()
     emit({"ETag": hashlib.sha256(data).hexdigest(), "VersionId": "v1"})
 elif operation == ["ec2", "describe-instances"]:
+    requested_id = value("--instance-ids")
+    if cloud.get("environment_destroyed"):
+        emit({"Reservations": []})
+        sys.exit(0)
+    if cloud.get("resources_absent") and requested_id != cloud.get("created_host_id"):
+        emit({"Reservations": []})
+        sys.exit(0)
     emit(
         {
             "Reservations": [
                 {
                     "Instances": [
                         {
-                            "InstanceId": cloud["pointer"]["host_id"],
+                            "InstanceId": requested_id,
                             "State": {"Name": "running"},
                             "Tags": [
                                 {"Key": k, "Value": v}
@@ -194,7 +268,43 @@ elif operation == ["ec2", "describe-instances"]:
             ]
         }
     )
+elif tuple(operation) in {
+    ("ec2", "describe-volumes"),
+    ("ec2", "describe-network-interfaces"),
+    ("ec2", "describe-vpcs"),
+    ("ec2", "describe-subnets"),
+    ("ec2", "describe-internet-gateways"),
+    ("ec2", "describe-route-tables"),
+    ("ec2", "describe-security-groups"),
+    ("ec2", "describe-launch-templates"),
+}:
+    collection = {
+        "describe-volumes": "Volumes",
+        "describe-network-interfaces": "NetworkInterfaces",
+        "describe-vpcs": "Vpcs",
+        "describe-subnets": "Subnets",
+        "describe-internet-gateways": "InternetGateways",
+        "describe-route-tables": "RouteTables",
+        "describe-security-groups": "SecurityGroups",
+        "describe-launch-templates": "LaunchTemplates",
+    }[operation[1]]
+    emit({collection: []})
+elif operation == ["ssm", "describe-instance-information"]:
+    filters = json.loads(value("--filters"))
+    emit(
+        {
+            "InstanceInformationList": [
+                {"InstanceId": filters[0]["Values"][0], "PingStatus": "Online"}
+            ]
+        }
+    )
 elif operation == ["ssm", "list-commands"]:
+    if cloud.get("ssm_history_expired"):
+        print(
+            "An error occurred (InvalidInstanceId): command history expired",
+            file=sys.stderr,
+        )
+        sys.exit(254)
     commands = cloud["commands"]
     if cloud.get("zero_discovery"):
         commands = []
@@ -219,6 +329,16 @@ elif operation == ["ssm", "send-command"]:
         "test_container_absent": True,
         "temporary_credentials_absent": True,
     }
+    if comment.endswith(":host-setup"):
+        if "--initialize-disposed-predecessor" not in body or "--setup" not in body:
+            sys.exit(1)
+        cloud["host_setup"] = True
+        output = {
+            "generation": cloud["pointer"]["generation"],
+            "host_id": cloud["pointer"]["host_id"],
+            "predecessor_generation": cloud["host_setup_predecessor"],
+            "setup_verified": True,
+        }
     if cloud.get("host_lock") or cloud.get("detached_test"):
         output["host_lock_acquired"] = False
     if comment.endswith(":runtime"):
