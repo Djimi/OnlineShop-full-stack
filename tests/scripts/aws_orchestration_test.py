@@ -6,6 +6,7 @@ import io
 import json
 import subprocess
 import sys
+import tarfile
 import unittest
 import zipfile
 from pathlib import Path
@@ -111,6 +112,39 @@ class ValidationSessionStories(unittest.TestCase):
         if result.returncode == 0 and command == "validate" and retain:
             self.retain_evidence()
             return self.finalize_success()
+        return result
+
+    def invoke_dispose(self, generation):
+        self.routes = json.loads((self.directory / "routes.json").read_text())
+        (self.directory / "routes.json").write_text(json.dumps(self.routes))
+        env = {
+            **self.env,
+            "AWS_TESTING_OPERATOR_ROLE": (
+                "arn:aws:iam::111111111111:role/onlineshop-test-operator"
+            ),
+            "GITHUB_WORKFLOW_REF": (
+                f"{validation.REPO}/.github/workflows/aws-dispose.yml@refs/heads/main"
+            ),
+        }
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(validation.SCRIPT),
+                "dispose",
+                "--generation",
+                generation,
+                "--confirmation",
+                "dispose",
+                "--output",
+                str(self.directory / "dispose-evidence"),
+            ],
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=False,
+        )
+        self.load_cloud()
         return result
 
     def retain_evidence(self, *, case=None):
@@ -481,6 +515,715 @@ class ValidationSessionStories(unittest.TestCase):
                 self.assertNotEqual(self.invoke().returncode, 0)
                 self.assertFalse(self.success_patches())
                 self.assertFalse(self.load_cloud()["commands"])
+                self.cloud = original
+                self.save_cloud()
+                import shutil
+
+                shutil.rmtree(self.directory / "evidence", ignore_errors=True)
+
+    def test_exact_owner_empty_host_migration_pointer_admits_verified_existing_state(
+        self,
+    ):
+        self.cloud["pointer"]["purpose"] = "owner-empty-host-generation-migration"
+        self.save_cloud()
+        result = self.invoke()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        cloud = self.load_cloud()
+        self.assertEqual(cloud["pointer"]["generation"], "run-200-attempt-1")
+        self.assertEqual(cloud["pointer"]["status"], "completed")
+        self.assertTrue(any(call["tool"] == "terraform" for call in self.calls()))
+
+    def prepare_verified_disposed_environment(self):
+        generation = "run-200-attempt-1"
+        host_id = "i-11111111111111111"
+        request = json.loads((self.directory / "request.json").read_text())
+        request["validation_run_attempt"] = 1
+        self.pointer = {
+            "schema": 1,
+            "generation": generation,
+            "host_id": host_id,
+            "status": "disposed",
+            "predecessor": {"generation": "run-199-attempt-1", "host_id": host_id},
+            "host_predecessor": {"generation": generation, "host_id": host_id},
+            "request": request,
+            "images": self.receipt["images"],
+            "retained": [],
+        }
+        self.cloud.update(
+            pointer=self.pointer,
+            state={
+                "version": 4,
+                "lineage": "owned-lineage",
+                "serial": 2,
+                "resources": [],
+                "outputs": {},
+            },
+            host_id=host_id,
+            live_generation=generation,
+            host_generation=generation,
+            prior_generation=generation,
+            create_environment=True,
+            host_setup=False,
+            resources_absent=True,
+            ssm_history_expired=True,
+        )
+        inventory = {
+            "aws_vpc.main": "vpc-11111111111111111",
+            "aws_subnet.host": "subnet-11111111111111111",
+            "aws_internet_gateway.main": "igw-11111111111111111",
+            "aws_route_table.host": "rtb-11111111111111111",
+            "aws_route.outbound": "r-rtb-111111111111111111080289494",
+            "aws_route_table_association.host": "rtbassoc-11111111111111111",
+            "aws_security_group.host": "sg-11111111111111111",
+            "aws_launch_template.host": "lt-11111111111111111",
+            "aws_instance.host": host_id,
+            "aws_ec2_tag.network_generation": "eni-11111111111111111,Generation",
+            "instance_network_interface": "eni-11111111111111111",
+            "instance_root_volume": "vol-11111111111111111",
+        }
+        terminal = {
+            "schema": 1,
+            "operation": "dispose",
+            "generation": generation,
+            "host_id": host_id,
+            "status": "disposed",
+            "account_id": "111111111111",
+            "region": "eu-north-1",
+            "root": "infra/aws/environment",
+            "state_key": "state/environment.tfstate",
+            "state_lineage": "owned-lineage",
+            "state_serial": 2,
+            "resource_ids": inventory,
+            "verified_absence": True,
+        }
+        self.cloud["objects"][f"operations/{generation}/dispose-terminal.json"] = (
+            validation.base64.b64encode(json.dumps(terminal).encode()).decode()
+        )
+        disposal_intent = {
+            "schema": 1,
+            "operation": "dispose",
+            "generation": generation,
+            "host_id": host_id,
+            "account_id": "111111111111",
+            "region": "eu-north-1",
+            "root": "infra/aws/environment",
+            "state_key": "state/environment.tfstate",
+            "state_lineage": "owned-lineage",
+            "initial_state_serial": 1,
+            "resource_ids": inventory,
+            "status": "intent",
+        }
+        self.cloud["objects"][f"operations/{generation}/dispose-intent.json"] = (
+            validation.base64.b64encode(json.dumps(disposal_intent).encode()).decode()
+        )
+        self.cloud["objects"][f"operations/{generation}/intent.json"] = (
+            validation.base64.b64encode(
+                json.dumps(dict(self.pointer, status="running")).encode()
+            ).decode()
+        )
+        self.save_cloud()
+
+    def prepare_recreation_fixture(self, generation):
+        suffix = (
+            "33333333333333333"
+            if generation.endswith("attempt-3")
+            else "22222222222222222"
+        )
+        identifiers = {
+            "aws_vpc.main": "vpc-" + suffix,
+            "aws_subnet.host": "subnet-" + suffix,
+            "aws_internet_gateway.main": "igw-" + suffix,
+            "aws_route_table.host": "rtb-" + suffix,
+            "aws_route.outbound": "r-rtb-" + suffix + "1080289494",
+            "aws_route_table_association.host": "rtbassoc-" + suffix,
+            "aws_security_group.host": "sg-" + suffix,
+            "aws_launch_template.host": "lt-" + suffix,
+            "aws_instance.host": "i-" + suffix,
+            "aws_ec2_tag.network_generation": "eni-" + suffix + ",Generation",
+        }
+        tags = {
+            "ManagedBy": "onlineshop-test",
+            "Repository": "Djimi/OnlineShop-full-stack",
+            "Generation": generation,
+        }
+        stable_tags = {key: value for key, value in tags.items() if key != "Generation"}
+        state_values = {
+            "aws_vpc.main": {
+                "id": identifiers["aws_vpc.main"],
+                "cidr_block": "10.83.0.0/16",
+                "enable_dns_support": True,
+                "enable_dns_hostnames": True,
+                "tags": tags,
+            },
+            "aws_subnet.host": {
+                "id": identifiers["aws_subnet.host"],
+                "vpc_id": identifiers["aws_vpc.main"],
+                "cidr_block": "10.83.1.0/24",
+                "availability_zone": "eu-north-1a",
+                "map_public_ip_on_launch": True,
+                "tags": tags,
+            },
+            "aws_internet_gateway.main": {
+                "id": identifiers["aws_internet_gateway.main"],
+                "vpc_id": identifiers["aws_vpc.main"],
+                "tags": tags,
+            },
+            "aws_route_table.host": {
+                "id": identifiers["aws_route_table.host"],
+                "vpc_id": identifiers["aws_vpc.main"],
+                "tags": tags,
+            },
+            "aws_route.outbound": {
+                "id": identifiers["aws_route.outbound"],
+                "route_table_id": identifiers["aws_route_table.host"],
+                "destination_cidr_block": "0.0.0.0/0",
+                "gateway_id": identifiers["aws_internet_gateway.main"],
+            },
+            "aws_route_table_association.host": {
+                "id": identifiers["aws_route_table_association.host"],
+                "subnet_id": identifiers["aws_subnet.host"],
+                "route_table_id": identifiers["aws_route_table.host"],
+            },
+            "aws_security_group.host": {
+                "id": identifiers["aws_security_group.host"],
+                "name": "onlineshop-test-host",
+                "description": "SSM-only testing host; no incoming connectivity",
+                "vpc_id": identifiers["aws_vpc.main"],
+                "ingress": [],
+                "egress": [
+                    {
+                        "from_port": 0,
+                        "to_port": 0,
+                        "protocol": "-1",
+                        "cidr_blocks": ["0.0.0.0/0"],
+                    }
+                ],
+                "tags": tags,
+            },
+            "aws_launch_template.host": {
+                "id": identifiers["aws_launch_template.host"],
+                "name": "onlineshop-test-host",
+                "tags": stable_tags,
+                "tag_specifications": [
+                    {"resource_type": kind, "tags": stable_tags}
+                    for kind in ["instance", "volume", "network-interface"]
+                ],
+            },
+            "aws_instance.host": {
+                "id": identifiers["aws_instance.host"],
+                "ami": "ami-04478a3e21a0d79a7",
+                "instance_type": "m7i-flex.large",
+                "subnet_id": identifiers["aws_subnet.host"],
+                "vpc_security_group_ids": [identifiers["aws_security_group.host"]],
+                "associate_public_ip_address": True,
+                "iam_instance_profile": "onlineshop-test-host",
+                "launch_template": [
+                    {"id": identifiers["aws_launch_template.host"], "version": "1"}
+                ],
+                "primary_network_interface_id": "eni-" + suffix,
+                "root_block_device": [
+                    {
+                        "volume_id": "vol-" + suffix,
+                        "volume_size": 50,
+                        "volume_type": "gp3",
+                        "encrypted": True,
+                        "delete_on_termination": True,
+                    }
+                ],
+                "metadata_options": [
+                    {
+                        "http_endpoint": "enabled",
+                        "http_tokens": "required",
+                        "http_put_response_hop_limit": 1,
+                        "http_protocol_ipv6": "disabled",
+                        "instance_metadata_tags": "disabled",
+                    }
+                ],
+                "tags": tags,
+                "volume_tags": tags,
+            },
+            "aws_ec2_tag.network_generation": {
+                "id": "eni-" + suffix + ",Generation",
+                "resource_id": "eni-" + suffix,
+                "key": "Generation",
+                "value": generation,
+            },
+        }
+        planned_values = copy.deepcopy(state_values)
+        for address in identifiers:
+            planned_values[address]["id"] = None
+        planned_values["aws_subnet.host"]["vpc_id"] = None
+        planned_values["aws_internet_gateway.main"]["vpc_id"] = None
+        planned_values["aws_route_table.host"]["vpc_id"] = None
+        planned_values["aws_route.outbound"].update(
+            route_table_id=None, gateway_id=None
+        )
+        planned_values["aws_route_table_association.host"].update(
+            subnet_id=None, route_table_id=None
+        )
+        planned_values["aws_security_group.host"]["vpc_id"] = None
+        planned_values["aws_instance.host"].update(
+            subnet_id=None,
+            vpc_security_group_ids=[None],
+            primary_network_interface_id=None,
+            root_block_device=[
+                {
+                    **planned_values["aws_instance.host"]["root_block_device"][0],
+                    "volume_id": None,
+                }
+            ],
+            launch_template=[{"id": None, "version": None}],
+        )
+        planned_values["aws_ec2_tag.network_generation"]["resource_id"] = None
+        resources = [
+            {"address": address, "values": values}
+            for address, values in planned_values.items()
+        ]
+        changes = [
+            {
+                "address": address,
+                "change": {
+                    "actions": ["create"],
+                    "before": None,
+                    "after": values,
+                    "after_unknown": {},
+                },
+            }
+            for address, values in planned_values.items()
+        ]
+        resources_by_address = [
+            {
+                "type": address.split(".", 1)[0],
+                "name": address.split(".", 1)[1],
+                "mode": "managed",
+                "instances": [{"attributes": values}],
+            }
+            for address, values in state_values.items()
+        ]
+        self.cloud.update(
+            create_plan={
+                "planned_values": {"root_module": {"resources": resources}},
+                "resource_changes": changes,
+            },
+            create_state={
+                "version": 4,
+                "lineage": "owned-lineage",
+                "serial": self.cloud["state"]["serial"] + 1,
+                "resources": resources_by_address,
+                "outputs": {
+                    "instance_id": {
+                        "value": identifiers["aws_instance.host"],
+                        "type": "string",
+                        "sensitive": False,
+                    },
+                    "vpc_id": {
+                        "value": identifiers["aws_vpc.main"],
+                        "type": "string",
+                        "sensitive": False,
+                    },
+                    "security_group_id": {
+                        "value": identifiers["aws_security_group.host"],
+                        "type": "string",
+                        "sensitive": False,
+                    },
+                    "generation": {
+                        "value": generation,
+                        "type": "string",
+                        "sensitive": False,
+                    },
+                    "root_volume_id": {
+                        "value": "vol-" + suffix,
+                        "type": "string",
+                        "sensitive": False,
+                    },
+                },
+            },
+            created_host_id=identifiers["aws_instance.host"],
+            host_setup_predecessor=self.cloud["pointer"]["generation"],
+        )
+        self.save_cloud()
+
+    def test_verified_disposal_recreates_new_host_runs_reset_reports_and_finalizes_retained_success(
+        self,
+    ):
+        self.prepare_verified_disposed_environment()
+        self.new_attempt(attempt=2)
+        self.prepare_recreation_fixture("run-200-attempt-2")
+        result = self.invoke()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        cloud = self.load_cloud()
+        self.assertEqual(cloud["pointer"]["generation"], "run-200-attempt-2")
+        self.assertEqual(cloud["pointer"]["status"], "completed")
+        self.assertEqual(cloud["pointer"]["schema"], 1)
+        self.assertEqual(
+            set(cloud["pointer"]),
+            {
+                "schema",
+                "generation",
+                "host_id",
+                "status",
+                "predecessor",
+                "host_predecessor",
+                "request",
+                "images",
+                "retained",
+            },
+        )
+        self.assertEqual(cloud["pointer"]["host_id"], "i-22222222222222222")
+        self.assertTrue(cloud["host_setup"])
+        comments = [command["Comment"] for command in cloud["commands"]]
+        self.assertTrue(any(comment.endswith(":host-setup") for comment in comments))
+        self.assertTrue(
+            any(comment.endswith(":recreation-probe") for comment in comments)
+        )
+        self.assertTrue(any(comment.endswith(":runtime") for comment in comments))
+        setup_command = next(
+            command
+            for command in cloud["commands"]
+            if command["Comment"].endswith(":host-setup")
+        )
+        self.assertEqual(setup_command["InstanceIds"], ["i-22222222222222222"])
+        setup_body = setup_command["Parameters"]["commands"][0]
+        self.assertIn(
+            "operations/runtime-input/run-200-attempt-2/host-setup.tar", setup_body
+        )
+        self.assertIn("--initialize-disposed-predecessor", setup_body)
+        self.assertIn("run-200-attempt-1", setup_body)
+        setup_key = "operations/runtime-input/run-200-attempt-2/host-setup.tar"
+        setup_bytes = validation.base64.b64decode(cloud["objects"][setup_key])
+        with tarfile.open(fileobj=io.BytesIO(setup_bytes), mode="r:") as archive:
+            self.assertEqual(
+                set(archive.getnames()),
+                {
+                    "run-stack.py",
+                    "compose.yml",
+                    "host-setup.sh",
+                    "host-session.py",
+                    "bootstrap.json",
+                },
+            )
+            bootstrap = json.load(archive.extractfile("bootstrap.json"))
+            self.assertEqual(bootstrap["account_id"], "111111111111")
+            self.assertEqual(bootstrap["region"], "eu-north-1")
+            self.assertEqual(
+                bootstrap["secret_arn"],
+                "arn:aws:secretsmanager:eu-north-1:111111111111:secret:onlineshop-test/credentials-example",
+            )
+        self.assertIn(hashlib.sha256(setup_bytes).hexdigest(), setup_body)
+        self.assertEqual(len(self.success_patches()), 1)
+        summary = json.loads((self.directory / "evidence" / "summary.json").read_text())
+        self.assertEqual(summary["status"], "pending-success")
+        self.assertEqual(summary["tests"], 4)
+        self.assertTrue((self.directory / "evidence" / "reports.tar").is_file())
+
+    def test_recreation_rejects_foreign_or_inconsistent_terraform_outputs(self):
+        cases = ["unknown", "sensitive", "wrong-type", "wrong-root-volume"]
+        baseline = copy.deepcopy(self.cloud)
+        for case in cases:
+            with self.subTest(case=case):
+                self.cloud = copy.deepcopy(baseline)
+                self.prepare_verified_disposed_environment()
+                self.new_attempt(attempt=2)
+                self.prepare_recreation_fixture("run-200-attempt-2")
+                outputs = self.cloud["create_state"]["outputs"]
+                if case == "unknown":
+                    outputs["unexpected"] = {
+                        "value": "foreign",
+                        "type": "string",
+                        "sensitive": False,
+                    }
+                elif case == "sensitive":
+                    outputs["instance_id"]["sensitive"] = True
+                elif case == "wrong-type":
+                    outputs["generation"]["type"] = "number"
+                else:
+                    outputs["root_volume_id"]["value"] = "vol-99999999999999999"
+                self.save_cloud()
+
+                result = self.invoke(retain=False)
+
+                self.assertNotEqual(result.returncode, 0)
+                cloud = self.load_cloud()
+                self.assertEqual(cloud["pointer"]["status"], "provisioning")
+                self.assertFalse(cloud["host_setup"])
+                self.assertFalse(self.success_patches())
+
+    def test_production_recreation_record_survives_disposal_noop_and_second_recreation(
+        self,
+    ):
+        self.prepare_verified_disposed_environment()
+        self.new_attempt(attempt=2)
+        self.prepare_recreation_fixture("run-200-attempt-2")
+
+        recreated = self.invoke()
+
+        self.assertEqual(recreated.returncode, 0, recreated.stderr)
+        cloud = self.load_cloud()
+        generation = "run-200-attempt-2"
+        immutable_intent = cloud["objects"][f"operations/{generation}/intent.json"]
+        original_record = json.loads(validation.base64.b64decode(immutable_intent))
+        self.assertEqual(original_record["status"], "provisioned")
+        # The expired-history shortcut admitted the first validation attempt;
+        # the newly created SSM commands are now observable to disposal.
+        self.cloud["ssm_history_expired"] = False
+        self.save_cloud()
+        applies_before_dispose = sum(
+            call["tool"] == "terraform" and call["args"][0] == "apply"
+            for call in self.calls()
+        )
+
+        disposed = self.invoke_dispose(generation)
+
+        self.assertEqual(disposed.returncode, 0, disposed.stderr)
+        cloud = self.load_cloud()
+        self.assertEqual(cloud["pointer"]["status"], "disposed")
+        self.assertEqual(
+            cloud["objects"][f"operations/{generation}/intent.json"], immutable_intent
+        )
+        noop = self.invoke_dispose(generation)
+        self.assertEqual(noop.returncode, 0, noop.stderr)
+        summary = json.loads(
+            (self.directory / "dispose-evidence" / "summary.json").read_text()
+        )
+        self.assertEqual(summary["status"], "no-op")
+        self.assertEqual(
+            sum(
+                call["tool"] == "terraform" and call["args"][0] == "apply"
+                for call in self.calls()
+            ),
+            applies_before_dispose + 1,
+        )
+
+        self.new_attempt(attempt=3)
+        self.prepare_recreation_fixture("run-200-attempt-3")
+        second_recreation = self.invoke()
+
+        self.assertEqual(second_recreation.returncode, 0, second_recreation.stderr)
+        cloud = self.load_cloud()
+        self.assertEqual(cloud["pointer"]["generation"], "run-200-attempt-3")
+        self.assertEqual(cloud["pointer"]["status"], "completed")
+        self.assertEqual(cloud["pointer"]["host_id"], "i-33333333333333333")
+        self.assertTrue(cloud["host_setup"])
+
+    def test_recreation_refuses_an_uninspected_or_noncreate_plan_before_host_setup(
+        self,
+    ):
+        self.prepare_verified_disposed_environment()
+        self.new_attempt(attempt=2)
+        self.prepare_recreation_fixture("run-200-attempt-2")
+        self.cloud["create_plan"]["resource_changes"][0]["change"]["actions"] = [
+            "delete",
+            "create",
+        ]
+        self.save_cloud()
+        result = self.invoke(retain=False)
+        self.assertNotEqual(result.returncode, 0)
+        cloud = self.load_cloud()
+        self.assertEqual(cloud["pointer"]["status"], "provisioning")
+        self.assertFalse(
+            any(
+                call["tool"] == "terraform" and call["args"][0] == "apply"
+                for call in self.calls()
+            )
+        )
+        self.assertFalse(
+            any(
+                command["Comment"].endswith((":host-setup", ":runtime"))
+                for command in cloud["commands"]
+            )
+        )
+        self.assertFalse(self.success_patches())
+
+    def test_recreation_refuses_a_plan_that_changes_the_pinned_free_plan_host(self):
+        self.prepare_verified_disposed_environment()
+        self.new_attempt(attempt=2)
+        self.prepare_recreation_fixture("run-200-attempt-2")
+        instance = next(
+            resource["values"]
+            for resource in self.cloud["create_plan"]["planned_values"]["root_module"][
+                "resources"
+            ]
+            if resource["address"] == "aws_instance.host"
+        )
+        instance["instance_type"] = "unapproved.large"
+        self.save_cloud()
+        result = self.invoke(retain=False)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertFalse(
+            any(
+                call["tool"] == "terraform" and call["args"][0] == "apply"
+                for call in self.calls()
+            )
+        )
+        self.assertFalse(
+            any(
+                command["Comment"].endswith(":host-setup")
+                for command in self.load_cloud()["commands"]
+            )
+        )
+        self.assertFalse(self.success_patches())
+
+    def test_recreation_refuses_state_changes_between_inspection_and_exact_apply(self):
+        self.prepare_verified_disposed_environment()
+        self.new_attempt(attempt=2)
+        self.prepare_recreation_fixture("run-200-attempt-2")
+        self.cloud["state_changes_after_create_plan"] = True
+        self.save_cloud()
+        result = self.invoke(retain=False)
+        self.assertNotEqual(result.returncode, 0)
+        cloud = self.load_cloud()
+        self.assertEqual(cloud["state"]["resources"], [])
+        self.assertEqual(cloud["pointer"]["status"], "provisioning")
+        self.assertFalse(
+            any(
+                call["tool"] == "terraform" and call["args"][0] == "apply"
+                for call in self.calls()
+            )
+        )
+        self.assertFalse(
+            any(
+                command["Comment"].endswith(":host-setup")
+                for command in cloud["commands"]
+            )
+        )
+        self.assertFalse(self.success_patches())
+
+    def test_recreation_apply_crash_after_state_mutation_stays_non_success_and_never_sets_up_host(
+        self,
+    ):
+        self.prepare_verified_disposed_environment()
+        self.new_attempt(attempt=2)
+        self.prepare_recreation_fixture("run-200-attempt-2")
+        self.cloud["create_crash_after_apply"] = True
+        self.save_cloud()
+        result = self.invoke(retain=False)
+        self.assertNotEqual(result.returncode, 0)
+        cloud = self.load_cloud()
+        self.assertEqual(cloud["pointer"]["status"], "provisioning")
+        self.assertEqual(len(cloud["state"]["resources"]), 10)
+        self.assertFalse(cloud["host_setup"])
+        self.assertFalse(
+            any(
+                command["Comment"].endswith(":runtime") for command in cloud["commands"]
+            )
+        )
+        self.assertFalse(self.success_patches())
+
+    def test_recreation_requires_exact_disposal_terminal_and_empty_retained_state(self):
+        self.prepare_verified_disposed_environment()
+        baseline = copy.deepcopy(self.cloud)
+        cases = [
+            "missing-terminal",
+            "state-advanced",
+            "partial-state",
+            "foreign-intent",
+        ]
+        for case in cases:
+            with self.subTest(case=case):
+                self.cloud = copy.deepcopy(baseline)
+                self.pointer = self.cloud["pointer"]
+                self.new_attempt(attempt=2)
+                if case == "missing-terminal":
+                    self.cloud["objects"].pop(
+                        "operations/run-200-attempt-1/dispose-terminal.json"
+                    )
+                elif case == "state-advanced":
+                    self.cloud["state"]["serial"] += 1
+                elif case == "partial-state":
+                    self.cloud["state"]["resources"] = [
+                        {"type": "aws_vpc", "name": "main", "instances": []}
+                    ]
+                else:
+                    key = "operations/run-200-attempt-1/dispose-intent.json"
+                    record = json.loads(
+                        validation.base64.b64decode(self.cloud["objects"][key])
+                    )
+                    record["resource_ids"]["aws_vpc.main"] = "vpc-99999999999999999"
+                    self.cloud["objects"][key] = validation.base64.b64encode(
+                        json.dumps(record).encode()
+                    ).decode()
+                self.save_cloud()
+                result = self.invoke(retain=False)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertEqual(self.cloud["pointer"]["status"], "disposed")
+                self.assertEqual(self.cloud["commands"], [])
+                self.assertFalse(
+                    any(call["tool"] == "terraform" for call in self.calls())
+                )
+                self.assertFalse(self.success_patches())
+                import shutil
+
+                shutil.rmtree(self.directory / "evidence", ignore_errors=True)
+
+    def test_exact_owner_migration_generation_can_be_recreated_after_verified_disposal(
+        self,
+    ):
+        self.prepare_verified_disposed_environment()
+        self.cloud["pointer"] = {
+            "generation": "run-200-attempt-1",
+            "host_id": "i-11111111111111111",
+            "status": "disposed",
+            "purpose": "owner-empty-host-generation-migration",
+        }
+        self.cloud["objects"].pop("operations/run-200-attempt-1/intent.json")
+        self.save_cloud()
+        self.new_attempt(attempt=2)
+        self.prepare_recreation_fixture("run-200-attempt-2")
+        result = self.invoke()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        cloud = self.load_cloud()
+        self.assertEqual(cloud["pointer"]["generation"], "run-200-attempt-2")
+        self.assertEqual(cloud["pointer"]["status"], "completed")
+        self.assertEqual(
+            cloud["pointer"]["predecessor"]["generation"], "run-200-attempt-1"
+        )
+        self.assertEqual(len(self.success_patches()), 1)
+
+    def test_disposed_legacy_generation_without_exact_migration_purpose_is_refused(
+        self,
+    ):
+        self.prepare_verified_disposed_environment()
+        self.cloud["pointer"] = {
+            "generation": "run-200-attempt-1",
+            "host_id": "i-11111111111111111",
+            "status": "disposed",
+        }
+        self.cloud["objects"].pop("operations/run-200-attempt-1/intent.json")
+        self.save_cloud()
+        self.new_attempt(attempt=2)
+        result = self.invoke(retain=False)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(self.load_cloud()["pointer"]["status"], "disposed")
+        self.assertFalse(any(call["tool"] == "terraform" for call in self.calls()))
+        self.assertFalse(self.success_patches())
+
+    def test_unknown_purpose_extra_initial_fields_and_nonprovisioned_status_refuse_before_ssm(
+        self,
+    ):
+        cases = [
+            {"purpose": "other-owner-operation"},
+            {"purpose": "owner-empty-host-generation-migration", "extra": "field"},
+            {"purpose": "owner-empty-host-generation-migration", "status": "completed"},
+        ]
+        for change in cases:
+            with self.subTest(change=change):
+                original = copy.deepcopy(self.cloud)
+                self.cloud["pointer"]["purpose"] = change["purpose"]
+                self.cloud["pointer"].update(
+                    {key: value for key, value in change.items() if key != "purpose"}
+                )
+                self.save_cloud()
+                result = self.invoke()
+                self.assertNotEqual(result.returncode, 0)
+                calls = self.calls()
+                self.assertFalse(any(call["tool"] == "terraform" for call in calls))
+                self.assertFalse(
+                    any(
+                        call["tool"] == "aws"
+                        and call["args"][:2] == ["ssm", "send-command"]
+                        for call in calls
+                    )
+                )
                 self.cloud = original
                 self.save_cloud()
                 import shutil

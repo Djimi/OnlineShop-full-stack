@@ -27,6 +27,23 @@ variables {
 run "retained_bootstrap" {
   command = plan
   assert {
+    condition = length([for statement in jsondecode(aws_iam_role_policy.operator.policy).Statement : statement
+      if contains(flatten([statement.Action]), "ec2:DeleteTags") &&
+      flatten([statement.Action]) == ["ec2:DeleteTags"] &&
+      flatten([statement.Resource]) == ["arn:aws:ec2:eu-north-1:111111111111:network-interface/*"] &&
+      try(statement.Condition.StringEquals["ec2:ResourceTag/ManagedBy"], "") == "onlineshop-test" &&
+      try(statement.Condition["ForAllValues:StringEquals"]["aws:TagKeys"], []) == ["Generation"] &&
+      try(statement.Condition.Null["aws:TagKeys"], "") == "false"
+    ]) == 1
+    error_message = "Disposal may delete only the Generation tag on owned ENIs, with present tag keys."
+  }
+  assert {
+    condition = length([for statement in jsondecode(aws_iam_role_policy.operator.policy).Statement : statement
+      if contains(flatten([statement.Action]), "ec2:DeleteTags")
+    ]) == 1
+    error_message = "Tag deletion must not gain an additional broad or ownership-tag grant."
+  }
+  assert {
     condition = alltrue([for pair in [
       { action = "s3:GetObject", resource = "arn:aws:s3:::test-protected-state/operations/runtime-input/*" },
       { action = "s3:PutObject", resource = "arn:aws:s3:::test-protected-state/operations/runtime-evidence/*" }

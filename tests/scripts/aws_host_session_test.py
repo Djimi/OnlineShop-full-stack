@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+import shutil
 import subprocess
 import sys
 import unittest
@@ -84,6 +85,85 @@ class HostSessionStories(unittest.TestCase):
         )
         self.assertNotIn("secret-canary", result.stdout + result.stderr)
         return result
+
+    def test_disposed_predecessor_can_be_initialized_only_on_fresh_host_runtime_state(
+        self,
+    ):
+        fixture_bytes = (self.state / "fixtures.tar").read_bytes()
+        for path in self.state.iterdir():
+            shutil.rmtree(path) if path.is_dir() else path.unlink()
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(self.runtime / "host-session.py"),
+                "--initialize-disposed-predecessor",
+                "run-200-attempt-1",
+            ],
+            env=self.env,
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(
+            json.loads((self.state / "current-generation.json").read_text()),
+            {"generation": "run-200-attempt-1"},
+        )
+        self.assertEqual(
+            json.loads((self.state / "operation.json").read_text()),
+            {"generation": "run-200-attempt-1", "status": "disposed"},
+        )
+
+        next_generation = "run-200-attempt-2"
+        self.binding["generation"] = next_generation
+        self.binding["predecessor_generation"] = "run-200-attempt-1"
+        self.binding["request"]["validation_run_attempt"] = 2
+        self.receipt["validation_run_attempt"] = 2
+        self.images.write_text(json.dumps(self.receipt))
+        (self.state / "images.json").write_bytes(self.images.read_bytes())
+        (self.state / "fixtures.tar").write_bytes(fixture_bytes)
+        self.binding["images_sha256"] = hashlib.sha256(
+            (self.state / "images.json").read_bytes()
+        ).hexdigest()
+        (self.state / "binding.json").write_text(json.dumps(self.binding))
+        admitted = subprocess.run(
+            [
+                sys.executable,
+                str(self.runtime / "host-session.py"),
+                "--generation",
+                next_generation,
+            ],
+            env=self.env,
+            capture_output=True,
+            text=True,
+            timeout=20,
+            check=False,
+        )
+        self.assertEqual(admitted.returncode, 0, admitted.stderr)
+        self.assertTrue((self.directory / "test-started").exists())
+
+        (self.state / "current-generation.json").write_text(
+            json.dumps({"generation": "run-199-attempt-1"})
+        )
+        rejected = subprocess.run(
+            [
+                sys.executable,
+                str(self.runtime / "host-session.py"),
+                "--initialize-disposed-predecessor",
+                "run-200-attempt-1",
+            ],
+            env=self.env,
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+        )
+        self.assertNotEqual(rejected.returncode, 0)
+        self.assertEqual(
+            json.loads((self.state / "current-generation.json").read_text()),
+            {"generation": "run-199-attempt-1"},
+        )
 
     def test_new_generation_archives_unknown_predecessor_only_after_idle_proof_and_uploads_bound_envelope(
         self,

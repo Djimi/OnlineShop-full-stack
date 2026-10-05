@@ -16,8 +16,11 @@ Trusted generation/bootstrap/digests/fixtures -> host lock
 **Local batch implemented; hosted proof pending:** routine locked existing-host
 validation now joins cloud/immutable-operation reconciliation, idle-host admission,
 tag-only saved-plan/apply, protected S3 input transport and bound report outcome.
-Disposal/recreation, owner intervention for stranded locks/detached tests, and the
-live final AWS gate remain unfinished. The eligible Free-plan host
+Local disposal/recreation is implemented with the independent review's seven
+findings addressed in a consolidated local pass and combined verification passed;
+its hosted
+proof, owner intervention for stranded locks/detached tests, and the live final
+AWS gate remain unfinished. The eligible Free-plan host
 now runs the app after owner full-stack/E2E and clean-state reset proofs.
 Owner setup and selected Auth/E2E isolation probes now pass, including Docker
 restart and actual reboot/firewall retention with host ECR/secret access. Actual
@@ -174,8 +177,10 @@ Failure-only finalization is idempotent: an already completed owned check return
 success without any PATCH. It must not turn a successful validation into failure
 when the always-run outcome job follows the locked validation job.
 
-The initial legacy `{generation, host_id, status: provisioned}` pointer is an
-explicit admission case. Routine schema 1 records the request, predecessor,
+The initial legacy `{generation, host_id, status: provisioned}` pointer and the
+exact owner migration shape with `purpose: owner-empty-host-generation-migration`
+are explicit admission cases. Unknown purposes, extra fields and other initial
+statuses refuse. Routine schema 1 records the request, predecessor,
 images and known retained-image history. Running/failed crash gaps permit the
 recorded predecessor's cloud generation; completed state must match exactly.
 Cloud generation and actual host predecessor are observed separately: a crash
@@ -196,8 +201,8 @@ Only a fresh host-lock/process/test/temporary-credential absence proof permits
 
 Host-role transport is limited to `GetObject` on `operations/runtime-input/*`
 and create-only `PutObject` on `operations/runtime-evidence/*`. The narrow policy
-change needs an inspected owner bootstrap apply before a hosted trial; routine
-operator permissions were not widened. A single finite bundle carries trusted
+change was applied from an inspected exact saved owner bootstrap plan and actual
+IAM readback matched; routine operator permissions were not widened. A single finite bundle carries trusted
 runtime files, receipt, independent fixtures, nonsensitive bootstrap and binding;
 the fixed SSM bootstrap verifies its exact size/SHA before flat restricted writes.
 Do not inline large fixtures into thousands of SSM chunks.
@@ -219,8 +224,47 @@ Previous and incoming digests stay protected during replacement. Only known
 routine `active-<generation>` tags are released after the new recorded deployment
 and report proof; owner/unknown tags remain. Failed-generation retention is carried
 forward and capped at 20 predecessors, then fails for reviewed recovery. A missing
-or disposed environment explicitly refuses recreation in this batch; Task 7 owns
-verified disposal/recreation. No automatic force-unlock or detached-test removal.
+state refuses recreation. A disposed environment admits recreation only after
+the matching immutable disposal intent/terminal receipt, unchanged empty state
+and absence of every recorded disposable resource are verified. No automatic
+force-unlock or detached-test removal.
+
+## Disposal and fresh-host recreation: local implementation
+
+```text
+dispose-preflight: trusted main/actor -> generation syntax + literal confirmation
+locked dispose: exact account/root/state -> compare current generation
+  -> ledger/cloud/host reconciliation -> ownership + immutable disposal intent
+  -> inspect saved destroy plan -> apply exact plan (20-minute bound)
+  -> retained empty state + all recorded IDs absent -> terminal receipt -> pointer CAS
+
+next locked validation: verify disposed intent/receipt/state/absence
+  -> immutable provisioning intent -> inspect create-only saved plan -> exact apply
+  -> verify fresh host/state -> hash-bound trusted host setup
+  -> initialize clean host predecessor -> ordinary reset/E2E/evidence/final-success
+```
+
+The 30-minute manual disposal job shares validation's exact non-cancelling queue.
+Partial deletion retains the original inventory and uses bounded immutable retry
+attempts with freshly inspected destroy plans. Repeat disposal is a no-op only
+after verifying the retained empty state and matching receipt/resource absence.
+Missing/corrupt state, foreign resources, active tests and ambiguous outcomes refuse.
+Backend/bootstrap, state versions, roles, secrets, images and history remain.
+Refreshed plans bind all primary/secondary IDs, mandatory ownership tags and
+recorded relationships; a changed disk/interface is never approved by host ID alone.
+The recorded host is observed even when omitted from partial state. A prior apply
+without a terminal result needs an exact attempt/plan/state/inventory-bound immutable
+recovery decision from fresh lock/state/resource/SSM/host observations before retry.
+Partial failures expose only fixed diagnostics, bounded leftover address/count and
+complete-vs-unknown observation status; raw provider output and IDs stay private.
+Recreation checks the five real Terraform output records against verified resources.
+Connected local lifecycle coverage consumes production-generated immutable records
+through disposal/no-op and a second recreation; unknown statuses/shapes still refuse.
+The provider's explicit ENI generation-tag resource requires `ec2:DeleteTags`;
+the local policy limits this to `Generation` on owned ENIs with present tag keys.
+Its inspected live policy apply and disposal/recreation proofs are pending.
+The fresh coordinator automation suite passed 214 tests in 317.056s after the
+provider tag-ID shape regression; local checks do not establish hosted success.
 
 ## Verification
 
@@ -229,6 +273,7 @@ From repository root:
 ```bash
 python3 -m unittest -v tests/scripts/aws_runtime_test.py
 python3 -m unittest -v tests/scripts/aws_host_session_test.py tests/scripts/aws_orchestration_test.py tests/scripts/aws_validation_workflow_test.py
+python3 -m unittest -v tests/scripts/aws_disposal_test.py tests/scripts/aws_disposal_workflow_test.py
 bash -n infra/aws/runtime/host-setup.sh
 shellcheck infra/aws/runtime/host-setup.sh
 AWS_IMAGE_RECEIPT=<protected-images-receipt> python3 -m unittest -v tests/integration/aws_compose_reset_test.py
