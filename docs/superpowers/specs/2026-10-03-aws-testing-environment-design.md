@@ -22,13 +22,13 @@ is superseded by catalog-verified eligible `m7i-flex.large` in `eu-north-1a`
 update provisioning/IAM boundaries before retry and prove full-stack timing on
 the actual host. No automatic downgrade to inadequate capacity or skipped tests.
 
-**Open verification issue:** the shared GitHub Actions App does not identify a
-specific check-writing workflow. Same-repository workflow permission overrides
-can grant check writes; controller-side authorization alone cannot protect the
-final required-check context from other writers. The original no-custom-App
-assumption is not proven sufficient. Resolve this before final gate activation;
-see [operational status](../../TESTING-ENVIRONMENT.md). No new signing design is
-approved by this note; runtime/infrastructure work continues independently.
+**Accepted trust model (owner decision, 2026-10-05):** Authorized repository
+maintainers and reviewed workflow definitions are trusted; workflow changes require
+review. Normal GitHub Actions App identity and scoped `checks: write` are accepted,
+without a dedicated App. Exact candidate binding, manual authorization,
+latest-attempt selection and failure enforcement still require live proof.
+Runtime/disposal and final gate activation remain unfinished; see
+[operational status](../../TESTING-ENVIRONMENT.md).
 
 ### 1.1 Goal and end-to-end flow
 

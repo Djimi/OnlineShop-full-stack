@@ -9,18 +9,26 @@ is the owner-facing architecture/decision record; its
 is the source of truth for exact requirements. This file is the operational record,
 not a duplicate specification.
 
-**Current status (2026-10-04):** Owner authorized inline execution of the
+**Current status (2026-10-05):** Owner authorized inline execution of the
 [implementation plan](../planning/aws-testing-environment-PLAN.md). Read-only AWS
 inventory and local candidate-request foundations are implemented on
 `feat/aws-testing-environment` (foundation PR #72 is merged). The owner explicitly
 authorized continuing all operations without further approvals. Documented
 playground cleanup is verified; live proofs and packaging/infrastructure work
-continue on `feat/aws-testing-runtime`. The protected state backend has since
-been provisioned/migrated; no application host has been provisioned or deployed.
+continue on `feat/aws-testing-runtime`. The protected state backend/bootstrap and
+eligible replacement host are provisioned; owner full-stack E2E and clean-state
+proofs passed. Local Tasks 5–6 now implement locked validation orchestration,
+immutable intent/launched/terminal records, a CAS generation pointer, tag-only
+existing-host planning, trusted host transport/evidence and owned success/failure
+finalization. Host S3 transport grants are defined but not yet applied. Hosted
+current-candidate validation, actual transport/recovery, disposal/recreation and
+final merge protection remain unfinished; local tests are not live proof.
 
 GitHub plan is Free; repository visibility was verified as public on 2026-10-02.
 The agreed AWS trigger is **Run workflow** with a PR number, not automatic
-Environment-reviewer approval. Workflow/protection settings are not configured yet.
+Environment-reviewer approval. Validation now extends beyond packaging to a
+locked runtime session; final required
+AWS merge protection is not enabled.
 
 ```text
 Intended flow: local CI passes -> owner manually requests PR -> shared lock -> clean data/deployment
@@ -626,15 +634,19 @@ against publication `37238396197`; that does not prove current-candidate binding
 authorization and cannot supply current runtime success. Routine transport and
 whole-session recovery remain unfinished.
 
-### Open merge-gate provenance issue
+### Accepted merge-gate trust model
 
-GitHub's expected status-check source binds an **App**, not a workflow. The shared
-GitHub Actions App does not distinguish trusted-main AWS validation from another
-same-repository workflow requesting `checks: write`. This public/personal
-repository's read-only default token setting is not a workflow-specific identity.
-Current controller authorization/CI-workflow comparison protect our code path,
-not arbitrary check writers. Do not enable or claim a trustworthy final AWS gate
-until this is resolved/proved. No alternative App/secret/migration was created.
+**Owner decision (2026-10-05):** Authorized repository maintainers and reviewed
+workflow definitions are trusted; workflow changes require review. Normal GitHub
+Actions App identity and scoped `checks: write` are accepted. The earlier
+check-writer provenance concern is resolved by this explicit threat-model decision,
+not by introducing a dedicated App, secret or signing mechanism.
+
+Expected-source selection binds an **App**, not a workflow; this limitation is
+accepted within that trust boundary. Exact candidate association, authorized manual
+dispatch/rerun, newest-attempt selection and failure enforcement remain mandatory.
+Runtime/disposal, genuine current-candidate success/negative-case proofs and final
+merge protection remain unfinished.
 See [expected-source semantics](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-protected-branches/about-protected-branches)
 and [permission overrides](https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#permissions).
 
@@ -678,9 +690,58 @@ attempt evidence is rejected; older artifacts do not satisfy a new attempt.
 
 ## Operational flows
 
-Reset commands, inspection prerequisites/port forwarding, disposal inputs,
-recreation behavior, and failure-recovery commands are not configured yet.
-Populate this section from verified implementation, not assumptions in the draft.
+The manual `AWS validation` workflow is locally wired as:
+
+```text
+trusted request -> credential-free candidate build -> isolated publisher
+  -> shared queue (65-minute operator job / 7200-second credentials)
+  -> verify exact receipt + fixture -> recheck candidate -> observe state/host/ledger
+  -> inspected tag-only existing-host plan/apply -> host reset/readiness/E2E
+  -> stage-bound pending-success evidence -> artifact upload/retention verification
+  -> recheck candidate/latest attempt -> owned success
+```
+
+Read-only verification confirms the nonsensitive `AWS_TESTING_SECRET_ARN`
+Environment variable already matches the exact retained secret ARN; no value was
+published or changed. Before a hosted run, inspect/apply the narrowly scoped host
+runtime-input/evidence policy update. Host setup remains a prerequisite; this local
+batch does not create/recreate a host. Operation intent/launched/terminal events are
+immutable and the generation pointer uses conditional CAS. Lost launch IDs and
+unknown outcomes refuse retry; recovered-aborted needs terminal SSM plus fresh host
+lock/process/test/temporary-credential absence. There is no automatic unlock.
+Verified host and cloud predecessors remain distinct across repeated pre-admission
+failures. Exact durable old/new admission transitions and unchanged predecessor
+archives reconcile interrupted local writes/launch; conflicting history refuses.
+`finalize-success` verifies the uploaded workflow artifact's exact trusted job/run,
+identity/digest, bounded content, successful upload and at least 14-day retention
+before the final current/latest recheck. Upload failure or cancellation before that
+point cannot leave a successful required check.
+Evidence artifacts are sanitized and retained for at least 14 days. Known previous
+and incoming images remain protected across failure; unknown owner tags remain, and
+more than 20 failed predecessors requires reviewed recovery. Task 7 disposal and
+recreation is not implemented: missing/disposed/partial unexpected state fails
+closed. No hosted current-candidate success, routine recovery or final gate is
+claimed; see the [infrastructure recovery contract](../infra/aws/README.md).
+
+The coordinator additionally ran the actual isolated local Compose reset/E2E
+story under a restrictive umask: PostgreSQL fixture access failed first, then
+passed after explicit nonsecret directory/SQL permissions. Credential files remain
+restricted. The corrected story passed in 81.984 seconds, including seeded
+Auth/Items DB, Redis and Kafka reset and E2E before/after reset. Zero owned local
+test containers, volumes and networks remained afterward. This uses historical
+authenticated images for local runtime proof, not current-candidate AWS success.
+Independent review then exposed that the earlier story assembled its own fixture
+directories. The corrected story now consumes the production initializer's
+receipt-verified sibling archive under `umask 077`, probes actual PostgreSQL UID
+70 access, and uses the hardened uncompressed report collector. That production-
+path reset/E2E proof passed in 91.055 seconds; zero owned test containers, volumes
+or networks remained afterward. It remains local proof, not hosted AWS success.
+After the independent review and five RED-to-GREEN fixes, final combined automation
+passed 172 tests in 219.656 seconds with AWS/Docker execution trapped. Changed
+Python lint/format, workflow lint plus parsed queue contract, isolated bootstrap
+init/validate/mock assertions, whitespace and 60 local document links passed.
+This coherent local batch still requires trusted-main hosted mutation/transport/
+current-candidate and recovery proofs before merge-gate activation.
 
 After this foundation is reviewed and reaches trusted `main`, use **Actions ->
 AWS candidate check proof -> Run workflow** on `main`, entering a reviewed PR

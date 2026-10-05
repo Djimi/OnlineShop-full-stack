@@ -223,6 +223,13 @@ compatibility without a current requirement. Treat growing size and shell
 complexity as signals to simplify the design or choose a more readable
 language, not as reasons to add layers.
 
+Batch coherent changes and prove them locally before AWS trials. Use fresh,
+scoped contexts for workstreams and subagents for independent review/preparation
+when delegation is authorized. Follow the fail-fast CI observation flow in
+[docs/TESTING_STRATEGY.md](./docs/TESTING_STRATEGY.md#automation-execution-feedback).
+For delegated work, use OpenAI models only and explicitly select the model and
+thinking level for the task; do not automatically inherit the coordinator's model.
+
 ## Git Workflow
 
 See [docs/GIT_WORKFLOW.md](./docs/GIT_WORKFLOW.md) for branch naming and
@@ -309,19 +316,35 @@ Auth/E2E isolation probes passed across Docker restart/real reboot on the initia
 host; current-host evidence must be checked independently after replacement.
 The migrated host now passed owner full-stack/four-test E2E and seeded
 DB/Redis/Kafka reset/retest proofs. Current-host candidate metadata/security
-probes and tag-only next-generation planning passed; routine workflow recovery,
-current-candidate validation, disposal/recreation and final gate remain unfinished.
-Routine host/runtime orchestration and the final gate remain unfinished. See
-[infrastructure boundaries/recovery](./infra/aws/README.md) and the operational
-runbook for verified status. Packaging/failure finalization commands are covered
-by black-box stories; they do not imply completed publication or deployment.
-The manual `AWS validation` workflow increment is packaging-only: request,
-credential-free build, isolated publisher OIDC, then failure-only finalization.
-Until runtime/evidence stages are wired and proved, it cannot satisfy the gate.
-The [trusted runtime](./infra/aws/runtime/AGENTS.md) has local reset/report stories
-and an actual isolated Compose clean-state/E2E proof. Host setup/hooks are defined
-and owner SSM proofs have run on an actual AWS host. Routine cloud orchestration
-and current-candidate success wiring remain unfinished; do not equate owner
+probes and tag-only next-generation planning passed. Local Tasks 5–6 now include
+the locked validation controller/workflow, immutable runtime ledger, conditional
+generation pointer, host transport/envelope and owned-success finalization. The
+normal existing-host path permits inspected tag-only generation changes; missing,
+disposed or partial unexpected state refuses rather than recreating infrastructure.
+Host S3 runtime-input/evidence grants are defined narrowly but not yet applied.
+Actual cloud recovery/transport, current-candidate success, disposal/recreation and
+final gate proofs remain unfinished. See [infrastructure boundaries/recovery](./infra/aws/README.md)
+and the operational runbook. Local stories do not constitute live proof.
+The manual `AWS validation` workflow now includes request, credential-free build,
+isolated publication, and one shared-queue 65-minute operator session with 7200-second
+credentials. It authenticates runtime inputs before OIDC, records immutable
+intent/launched/terminal operations with a CAS generation pointer, runs tag-only
+saved planning on the existing host, binds trusted host transport and stage evidence,
+and rechecks candidate/latest attempt before success. Recovered-aborted operations
+require terminal SSM plus fresh host lock/process/test/temporary-credential absence;
+lost IDs and unknown outcomes refuse automatic retry/unlock. Always-run evidence is
+sanitized and retained at least 14 days; finalization preserves completed success.
+Runtime produces pending-success only; the locked job uploads and verifies exact
+workflow evidence and retention before `finalize-success` rechecks candidate/latest
+attempt and publishes owned success. Repeated pre-admission crashes preserve the
+verified host predecessor separately from cloud generation; durable admission
+transitions reconcile exact interrupted phases without overwriting history.
+The exact nonsensitive `AWS_TESTING_SECRET_ARN` Environment variable is configured
+and its protected bootstrap identity was verified read-only. Runtime input/evidence host-role S3 grants still require
+reviewed bootstrap apply. Hosted current-candidate AWS proof and gate remain pending.
+Known previous/incoming image history is protected; routine tags release after
+recorded replacement, unknown owner tags remain, and failed history is bounded to
+20 predecessors before reviewed recovery is required. Do not equate owner
 historical-candidate evidence with the final AWS check.
 Owner setup now also has bounded read-only `--reconcile` discovery with a
 controlled live lost-command-ID proof; it cannot authorize retry, clear unknown
@@ -363,9 +386,11 @@ provenance/current request and fixture bytes without AWS/image execution. Histor
 publication input checks cannot supply current-candidate runtime success.
 The separate manual `AWS role boundary proof` checks selected allowed/denied
 reads with publisher/operator OIDC; it never mutates AWS or publishes AWS success.
-Final merge protection is additionally blocked on check-writer provenance:
-the shared GitHub Actions App is not a unique trusted-workflow identity. No
-replacement signing design/App/secret has been introduced; see the runbook issue.
+The owner accepts normal GitHub Actions identity under trust in authorized
+repository maintainers and reviewed workflows; a dedicated App is not required.
+Exact candidate binding, manual authorization, latest-attempt/failure enforcement
+and live gate proofs remain mandatory. Runtime/disposal and final merge protection
+remain unfinished; see the runbook's accepted trust model.
 
 ## Debug Info
 
