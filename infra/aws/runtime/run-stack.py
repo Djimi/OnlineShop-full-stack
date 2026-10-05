@@ -51,8 +51,17 @@ class TerminationUnknown(RuntimeFailed):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--generation", required=True)
-    parser.add_argument("--images", type=Path, required=True)
+    parser.add_argument("--images", type=Path)
+    parser.add_argument(
+        "--reconcile",
+        action="store_true",
+        help="Observe host lock/test absence and prior outcome; never authorize retry",
+    )
     args = parser.parse_args()
+    if (args.images is None) != args.reconcile:
+        parser.error(
+            "choose --images for runtime execution or --reconcile for observation"
+        )
     operation = None
     try:
         if not re.fullmatch(r"run-[1-9][0-9]*-attempt-[1-9][0-9]*", args.generation):
@@ -72,6 +81,9 @@ def main():
                 fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
             except BlockingIOError:
                 raise RuntimeFailed("another host operation is active") from None
+            if args.reconcile:
+                observe_recovery(args.generation)
+                return 0
             bootstrap, images = verify_generation(args.generation, args.images)
             verify_metadata_blocks()
             verify_no_detached_test()
@@ -171,6 +183,37 @@ def read_json(path):
         return result
 
     return json.loads(path.read_bytes(), object_pairs_hook=fields)
+
+
+def observe_recovery(generation):
+    if read_json(STATE / "current-generation.json") != {"generation": generation}:
+        raise RuntimeFailed("selected generation is not current")
+    previous = STATE / "operation.json"
+    status = "absent"
+    if previous.exists():
+        record = read_json(previous)
+        if record.get("generation") != generation or record.get("status") not in {
+            "running",
+            "unknown",
+            "passed",
+            "failed",
+            "cancelled",
+        }:
+            raise RuntimeFailed("previous operation identity is not recognized")
+        status = record["status"]
+    verify_no_detached_test()
+    print(
+        json.dumps(
+            {
+                "generation": generation,
+                "previous_status": status,
+                "host_lock_acquired": True,
+                "test_container_absent": True,
+                "automatic_retry_authorized": False,
+                "aws_validation_success": False,
+            }
+        )
+    )
 
 
 def verify_generation(generation, path):

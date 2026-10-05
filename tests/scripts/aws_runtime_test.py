@@ -109,15 +109,18 @@ else: sys.exit(0)
             "FAKE_RUNTIME": str(self.directory),
         }
 
-    def invoke(self, generation=GENERATION):
+    def invoke(self, generation=GENERATION, *, reconcile=False):
         result = subprocess.run(
             [
                 sys.executable,
                 str(self.runtime / "run-stack.py"),
                 "--generation",
                 generation,
-                "--images",
-                str(self.directory / "images.json"),
+                *(
+                    ["--reconcile"]
+                    if reconcile
+                    else ["--images", str(self.directory / "images.json")]
+                ),
             ],
             env=self.env,
             check=False,
@@ -185,6 +188,53 @@ else: sys.exit(0)
         self.assertNotEqual(result.returncode, 0)
         self.assertFalse(any(call["command"] == "aws" for call in calls))
         self.assertFalse((self.state / "operation.json").exists())
+
+    def test_recovery_observation_proves_idle_host_without_clearing_unknown_outcome(
+        self,
+    ):
+        record = json.dumps({"generation": GENERATION, "status": "unknown"})
+        (self.state / "operation.json").write_text(record)
+        result, calls = self.invoke(reconcile=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        report = json.loads(result.stdout)
+        self.assertEqual(report["generation"], GENERATION)
+        self.assertEqual(report["previous_status"], "unknown")
+        self.assertTrue(report["host_lock_acquired"])
+        self.assertTrue(report["test_container_absent"])
+        self.assertFalse(report["automatic_retry_authorized"])
+        self.assertFalse(report["aws_validation_success"])
+        self.assertEqual((self.state / "operation.json").read_text(), record)
+        self.assertTrue(
+            all(call["command"] == "docker" and "ps" in call["args"] for call in calls)
+        )
+
+    def test_recovery_observation_refuses_active_host_lock_without_external_calls(self):
+        with (self.state / "host.lock").open("w") as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            result, calls = self.invoke(reconcile=True)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(calls, [])
+
+    def test_recovery_observation_refuses_detached_test_or_inconclusive_lookup(self):
+        for variable in ["DETACHED_TEST", "ABSENCE_UNKNOWN"]:
+            with self.subTest(variable=variable):
+                self.env[variable] = "1"
+                result, calls = self.invoke(reconcile=True)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertEqual(result.stdout, "")
+                self.assertFalse(any(call["command"] == "aws" for call in calls))
+                self.env.pop(variable)
+
+    def test_recovery_observation_refuses_foreign_or_malformed_previous_operation(self):
+        for record in [
+            {"generation": "run-199-attempt-1", "status": "unknown"},
+            {"generation": GENERATION, "status": "unrecognized"},
+        ]:
+            with self.subTest(record=record):
+                (self.state / "operation.json").write_text(json.dumps(record))
+                result, calls = self.invoke(reconcile=True)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertEqual(calls, [])
 
     def test_mutable_or_other_account_image_cannot_reach_docker(self):
         path = self.directory / "images.json"
