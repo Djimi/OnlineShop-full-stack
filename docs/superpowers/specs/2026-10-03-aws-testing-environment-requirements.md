@@ -22,11 +22,13 @@ verified in `eu-north-1a`; actual launch and bounded full-stack capacity proofs
 remain required. This supersedes the earlier paid-only `c7i.xlarge` selection,
 not the isolation, state, timing or E2E requirements.
 
-**Open gate-provenance issue:** expected-source App selection is not workflow
-identity. The no-custom-App approach must not be treated as sufficient until
-same-repository check-writer spoofing is addressed/proved. The binding outcome
-remains authentic validation of the exact candidate, not merely a check with the
-right name. See [operational evidence/issues](../../TESTING-ENVIRONMENT.md).
+**Accepted trust model (owner decision, 2026-10-05):** Authorized repository
+maintainers and reviewed workflow definitions are trusted; workflow changes require
+review. Normal GitHub Actions App identity and scoped `checks: write` are accepted;
+workflow-specific App identity or a dedicated App is not required. Exact candidate
+validation, manual authorization, latest-attempt selection and failure enforcement
+remain binding under G2–G12. Live proof and gate activation remain unfinished;
+see [operational evidence/issues](../../TESTING-ENVIRONMENT.md).
 
 The following rules are the implementation contract after written-spec approval.
 **Must** is mandatory. Agents may choose mechanisms labeled **IMPLEMENTATION DETAIL**
@@ -298,7 +300,8 @@ finite whole-session timeout. Timeout is failure, not successful background work
 - **S1:** Use GitHub OIDC with temporary role sessions. Match exact audience and
   repository/Environment subject in AWS trust policy; inspect the actual subject
   format instead of assuming legacy names or broad repository wildcards.
-- **S2:** Environment/default-branch protection enforces trusted workflow provenance.
+- **S2:** Environment/default-branch protection and reviewed workflow changes enforce
+  the accepted maintainer/workflow trust boundary; normal Actions identity is accepted.
   Do not assume AWS can enforce unsupported custom OIDC claims. Scope GitHub
   `id-token` and API write permissions to jobs that need them, never candidate builds.
 - **S3:** Separate image publication from environment/host operation permissions. Routine

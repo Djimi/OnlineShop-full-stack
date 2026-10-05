@@ -158,6 +158,13 @@ def read_aws(arguments, *, deadline):
             for stream in [process.stdout, process.stderr]:
                 stream.close()
     if process.returncode:
+        if (
+            operation == ("ssm", "get-command-invocation")
+            and b"(InvocationDoesNotExist)" in buffers["stderr"]
+        ):
+            # SendCommand can be visible before its invocation. Only this exact
+            # bounded error means pending; observers still reject nonterminal state.
+            return {"Status": "Pending"}
         raise ReconciliationBlocked(
             "required cloud read failed at "
             + "/".join(operation)

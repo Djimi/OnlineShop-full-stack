@@ -1,10 +1,12 @@
 """Host-runtime stories at external command boundaries; no real cloud calls."""
 
 import fcntl
+import gzip
 import hashlib
 import io
 import json
 import os
+import resource
 import shutil
 import subprocess
 import sys
@@ -87,11 +89,15 @@ elif 'inspect' in args: sys.exit(1)
 elif 'ps' in args and any('name=' in value for value in args):
  if os.environ.get('DETACHED_TEST'):print('detached-test-container')
  sys.exit(1 if os.environ.get('ABSENCE_UNKNOWN') or (os.environ.get('CLEANUP_UNKNOWN') and (root/'test-started').exists()) else 0)
-elif 'up' in args and '--wait' in args: sys.exit(int(os.environ.get('READINESS_FAILURE','0')))
+elif 'up' in args and '--wait' in args:
+ (root/'private-modes.json').write_text(json.dumps({name:(root/'runtime/.runtime'/name).stat().st_mode & 0o777 for name in ['run.env','e2e.env','docker-config']}))
+ sys.exit(int(os.environ.get('READINESS_FAILURE','0')))
 elif 'run' in args:
  (root/'test-started').touch()
  sys.exit(0 if '-d' in args else int(os.environ.get('E2E_FAIL','0')))
 elif 'exec' in args and './mvnw' in args: sys.exit(int(os.environ.get('E2E_FAIL','0')))
+elif 'exec' in args and 'tar' in args and os.environ.get('REPORT_ARCHIVE'):
+ sys.stdout.buffer.write(pathlib.Path(os.environ['REPORT_ARCHIVE']).read_bytes())
 elif 'exec' in args and 'tar' in args and os.environ.get('REPORTS_VALID')=='1':
  with tarfile.open(fileobj=sys.stdout.buffer,mode='w|') as archive:
   for name,count in [('ItemsE2ETest',3),('RestAssuredLoggingTest',1)]:
@@ -109,7 +115,12 @@ else: sys.exit(0)
             "FAKE_RUNTIME": str(self.directory),
         }
 
-    def invoke(self, generation=GENERATION, *, reconcile=False):
+    def invoke(
+        self, generation=GENERATION, *, reconcile=False, umask=-1, memory_limit=None
+    ):
+        def limit_memory():
+            resource.setrlimit(resource.RLIMIT_AS, (memory_limit, memory_limit))
+
         result = subprocess.run(
             [
                 sys.executable,
@@ -127,6 +138,8 @@ else: sys.exit(0)
             capture_output=True,
             text=True,
             timeout=20,
+            umask=umask,
+            preexec_fn=limit_memory if memory_limit else None,
         )
         for value in [
             "auth-secret-canary",
@@ -354,6 +367,157 @@ else: sys.exit(0)
         result, _ = self.invoke()
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertFalse(old.exists())
+
+    def test_production_initializer_exposes_only_nonsecret_fixtures_under_private_umask(
+        self,
+    ):
+        self.env["REPORTS_VALID"] = "1"
+        result, _ = self.invoke(umask=0o077)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        for relative in [
+            "fixtures",
+            "fixtures/Auth",
+            "fixtures/Auth/init-db",
+            "fixtures/Items",
+            "fixtures/Items/init-db",
+        ]:
+            with self.subTest(directory=relative):
+                self.assertEqual((self.state / relative).stat().st_mode & 0o777, 0o755)
+        for owner in ["Auth", "Items"]:
+            fixture = self.state / "fixtures" / owner / "init-db/01-schema.sql"
+            self.assertEqual(fixture.read_bytes(), b"CREATE TABLE test (id integer);")
+            self.assertEqual(fixture.stat().st_mode & 0o777, 0o644)
+        self.assertEqual(self.state.stat().st_mode & 0o777, 0o700)
+        self.assertEqual(
+            json.loads((self.directory / "private-modes.json").read_text()),
+            {"run.env": 0o600, "e2e.env": 0o600, "docker-config": 0o700},
+        )
+
+    def test_compressed_pax_bomb_is_refused_without_host_memory_expansion(self):
+        archive = self.directory / "bomb.tar.gz"
+        header = tarfile.TarInfo("pax-metadata")
+        header.type = tarfile.XHDTYPE
+        header.size = 256 * 1024**2
+        with gzip.open(archive, "wb") as stream:
+            stream.write(header.tobuf(format=tarfile.USTAR_FORMAT))
+            for _ in range(256):
+                stream.write(b"0" * 1024**2)
+            stream.write(b"\0" * 1024)
+        self.assertLess(archive.stat().st_size, 300_000)
+        self.env["REPORT_ARCHIVE"] = str(archive)
+        result, _ = self.invoke(memory_limit=192 * 1024**2)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("Runtime failed:", result.stderr)
+        self.assertNotIn("MemoryError", result.stderr)
+        self.assertFalse((self.state / "reports").exists())
+
+    def test_plain_report_archives_refuse_metadata_links_traversal_and_extra_payloads(
+        self,
+    ):
+        for label, name, kind, content in [
+            ("pax", "metadata", tarfile.XHDTYPE, b"18 path=extra.xml\n"),
+            ("global-pax", "metadata", tarfile.XGLTYPE, b"18 path=extra.xml\n"),
+            ("gnu-longname", "metadata", tarfile.GNUTYPE_LONGNAME, b"extra.xml\0"),
+            ("sparse", "surefire-reports/sparse", tarfile.GNUTYPE_SPARSE, b""),
+            ("symlink", "surefire-reports/link", tarfile.SYMTYPE, b""),
+            ("hardlink", "surefire-reports/link", tarfile.LNKTYPE, b""),
+            ("traversal", "surefire-reports/../../escape", tarfile.REGTYPE, b"escape"),
+            ("extra", "surefire-reports/extra.bin", tarfile.REGTYPE, b"payload"),
+            (
+                "duplicate",
+                "surefire-reports/TEST-com.onlineshop.e2e.ItemsE2ETest.xml",
+                tarfile.REGTYPE,
+                b"duplicate",
+            ),
+        ]:
+            with self.subTest(archive=label):
+                path = self.directory / "reports.tar"
+                with tarfile.open(path, "w", format=tarfile.USTAR_FORMAT) as archive:
+                    for suite, count in [
+                        ("ItemsE2ETest", 3),
+                        ("RestAssuredLoggingTest", 1),
+                    ]:
+                        xml = (
+                            f'<testsuite name="com.onlineshop.e2e.{suite}" tests="{count}" '
+                            'failures="0" errors="0" skipped="0">'
+                            + '<testcase name="executed" />' * count
+                            + "</testsuite>"
+                        ).encode()
+                        member = tarfile.TarInfo(
+                            f"surefire-reports/TEST-com.onlineshop.e2e.{suite}.xml"
+                        )
+                        member.size = len(xml)
+                        archive.addfile(member, io.BytesIO(xml))
+                    member = tarfile.TarInfo(name)
+                    member.type = kind
+                    member.size = len(content)
+                    if kind in [tarfile.SYMTYPE, tarfile.LNKTYPE]:
+                        member.linkname = "/etc/passwd"
+                    archive.addfile(member, io.BytesIO(content))
+                self.env["REPORT_ARCHIVE"] = str(path)
+                result, _ = self.invoke(memory_limit=192 * 1024**2)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertNotIn("MemoryError", result.stderr)
+                self.assertFalse((self.state / "reports").exists())
+
+    def test_uncompressed_oversized_pax_header_is_rejected_before_metadata_read(self):
+        header = tarfile.TarInfo("metadata")
+        header.type = tarfile.XHDTYPE
+        header.size = 256 * 1024**2
+        path = self.directory / "reports.tar"
+        path.write_bytes(header.tobuf(format=tarfile.USTAR_FORMAT) + b"\0" * 1024)
+        self.env["REPORT_ARCHIVE"] = str(path)
+        result, _ = self.invoke(memory_limit=192 * 1024**2)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertNotIn("MemoryError", result.stderr)
+        self.assertFalse((self.state / "reports").exists())
+
+    def test_normal_plain_tar_accepts_bounded_text_companions_but_retains_only_sanitized_xml(
+        self,
+    ):
+        path = self.directory / "reports.tar"
+        with tarfile.open(path, "w", format=tarfile.USTAR_FORMAT) as archive:
+            directory = tarfile.TarInfo("surefire-reports/")
+            directory.type = tarfile.DIRTYPE
+            archive.addfile(directory)
+            for suite, count in [("ItemsE2ETest", 3), ("RestAssuredLoggingTest", 1)]:
+                for prefix, suffix in [("TEST-", "xml"), ("", "txt")]:
+                    content = (
+                        (
+                            f'<testsuite name="com.onlineshop.e2e.{suite}" tests="{count}" '
+                            'failures="0" errors="0" skipped="0">'
+                            "<system-out>candidate-output-canary</system-out>"
+                            + '<testcase name="executed" />' * count
+                            + "</testsuite>"
+                        ).encode()
+                        if suffix == "xml"
+                        else b"candidate-output-canary"
+                    )
+                    member = tarfile.TarInfo(
+                        f"surefire-reports/{prefix}com.onlineshop.e2e.{suite}.{suffix}"
+                    )
+                    member.size = len(content)
+                    archive.addfile(member, io.BytesIO(content))
+        self.env["REPORT_ARCHIVE"] = str(path)
+        result, calls = self.invoke()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        reports = list((self.state / "reports" / GENERATION).iterdir())
+        self.assertEqual(len(reports), 2)
+        self.assertTrue(all(path.suffix == ".xml" for path in reports))
+        self.assertNotIn(
+            "candidate-output-canary", "".join(path.read_text() for path in reports)
+        )
+        tar_args = next(call["args"] for call in calls if "tar" in call["args"])
+        self.assertEqual(
+            tar_args[tar_args.index("tar") :],
+            [
+                "tar",
+                "-c",
+                "-C",
+                "/workspace/e2e-tests/.build/target",
+                "surefire-reports",
+            ],
+        )
 
     def test_partial_secret_file_creation_cleans_the_first_file(self):
         (self.state / "e2e.env").write_text("leftover data")

@@ -5,13 +5,13 @@ import copy
 import io
 import json
 import os
-from pathlib import Path
 import subprocess
 import sys
-import tempfile
 import tarfile
+import tempfile
 import unittest
 import zipfile
+from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / "scripts/aws-validation.py"
@@ -117,7 +117,7 @@ else: print(json.dumps(value))
         (self.directory / "routes.json").write_text(json.dumps(self.routes))
         result = subprocess.run(
             [sys.executable, str(SCRIPT), "request", "--pr", "42", "--output", str(self.directory / "request.json")],
-            env=self.env, capture_output=True, text=True, timeout=20)
+            env=self.env, capture_output=True, text=True, timeout=20, check=False)
         self.assertNotIn("secret-token-canary", result.stdout + result.stderr)
         if result.returncode:
             self.assertIn("Request rejected:", result.stderr)
@@ -307,7 +307,7 @@ else: print(json.dumps(value))
         result = subprocess.run([sys.executable, str(SCRIPT), "verify-build", "--request", str(self.directory / "request.json"),
                                  "--manifest", str(self.directory / "build.json"), "--artifacts", str(artifacts),
                                  "--output", str(self.directory / "verified.json")], env=self.env,
-                                capture_output=True, text=True, timeout=20)
+                                capture_output=True, text=True, timeout=20, check=False)
         self.assertNotIn("secret-token-canary", result.stdout + result.stderr)
         self.assertFalse((self.directory / "aws-called").exists())
         if result.returncode:
@@ -382,7 +382,7 @@ else: print(json.dumps(value))
         (self.directory / "routes.json").write_text(json.dumps(self.routes))
         result = subprocess.run([sys.executable, str(SCRIPT), "finalize-failure", "--request",
                                  str(self.directory / "request.json")], env=self.env,
-                                capture_output=True, text=True, timeout=20)
+                                capture_output=True, text=True, timeout=20, check=False)
         self.assertNotIn("secret-token-canary", result.stdout + result.stderr)
         self.assertFalse((self.directory / "aws-called").exists())
         if result.returncode:
@@ -407,11 +407,11 @@ else: print(json.dumps(value))
         self.assertNotEqual(result.returncode, 0)
         self.assertEqual(updates, [])
 
-    def test_completed_check_cannot_be_rewritten_by_failure_finalizer(self):
+    def test_completed_check_is_preserved_by_idempotent_failure_finalizer(self):
         self.packaging_fixture()
         self.routes[f"GET {PREFIX}/check-runs/400"].update(status="completed", conclusion="success")
         result, updates = self.invoke_failure()
-        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(updates, [])
 
     def build_fixture(self):
@@ -456,7 +456,7 @@ else: sys.exit(1)
                                  str(self.directory / "request.json"), "--candidate", str(candidate),
                                  "--artifacts", str(self.directory / "build-artifacts"), "--output",
                                  str(self.directory / "build.json")], env=self.env,
-                                capture_output=True, text=True, timeout=20)
+                                capture_output=True, text=True, timeout=20, check=False)
         self.assertNotIn("secret-token-canary", result.stdout + result.stderr)
         self.assertFalse((self.directory / "aws-called").exists())
         if result.returncode:
@@ -549,7 +549,7 @@ elif args[0] not in ['load','tag','push']: sys.exit(1)
         (self.directory / 'routes.json').write_text(json.dumps(self.routes))
         result = subprocess.run([sys.executable,str(SCRIPT),'publish','--request',str(self.directory/'request.json'),
                                  '--manifest',str(self.directory/'build.json'),'--artifacts',str(artifacts),
-                                 '--output',str(self.directory/'images.json')],env=self.env,capture_output=True,text=True,timeout=20)
+                                 '--output',str(self.directory/'images.json')],env=self.env,capture_output=True,text=True,timeout=20,check=False)
         self.assertNotIn('ecr-secret-canary',result.stdout+result.stderr)
         self.assertNotIn('secret-token-canary',result.stdout+result.stderr)
         if result.returncode:self.assertIn('Request rejected:',result.stderr)

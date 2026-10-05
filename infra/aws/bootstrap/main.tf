@@ -88,6 +88,8 @@ resource "aws_iam_role_policy" "host" {
     { Effect = "Allow", Action = ["ecr:GetAuthorizationToken"], Resource = "*" },
     { Effect = "Allow", Action = ["ecr:BatchGetImage", "ecr:GetDownloadUrlForLayer", "ecr:BatchCheckLayerAvailability"], Resource = local.repositories },
     { Effect = "Allow", Action = ["secretsmanager:GetSecretValue"], Resource = aws_secretsmanager_secret.credentials.arn },
+    { Sid = "ReadFixedRuntimeInputs", Effect = "Allow", Action = ["s3:GetObject"], Resource = "arn:aws:s3:::${var.state_bucket}/operations/runtime-input/*" },
+    { Sid = "WriteFixedRuntimeEvidence", Effect = "Allow", Action = ["s3:PutObject"], Resource = "arn:aws:s3:::${var.state_bucket}/operations/runtime-evidence/*", Condition = { StringEquals = { "s3:if-none-match" = "*" } } },
     { Effect = "Allow", Action = ["ssm:UpdateInstanceInformation", "ssmmessages:CreateControlChannel", "ssmmessages:CreateDataChannel", "ssmmessages:OpenControlChannel", "ssmmessages:OpenDataChannel"], Resource = "*" }
   ] })
 }

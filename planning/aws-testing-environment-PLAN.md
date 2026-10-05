@@ -15,6 +15,7 @@
 - Local AWS profile `dpm-profile`; explicit region `eu-north-1`; verify account before mutation. GitHub uses OIDC.
 - Only `workflow_dispatch` starts validation/disposal; trusted controller `main`; reviewed same-repository PRs targeting `main` only.
 - Require **AWS validation** on the exact merge candidate and existing local CI; require up-to-date branches and enforce protection for administrators.
+- Trust authorized maintainers and reviewed workflow definitions; review workflow changes. Normal Actions App identity/scoped check writes are accepted, without a dedicated App; candidate/manual/latest-attempt/failure rules remain mandatory.
 - Shared concurrency group `aws-testing-environment`, `queue: max`, `cancel-in-progress: false`; one job holds it through reconciliation, deployment, tests, evidence, and outcome.
 - Separate backend/bootstrap/environment Terraform roots and keys; `use_lockfile = true`; no DynamoDB lock table or routine bootstrap-state access.
 - Apply the inspected saved plan; no silent replan, empty-state overwrite, automatic force-unlock, arbitrary target/root, or `-lock=false`.
@@ -23,6 +24,7 @@
 - Fresh dedicated Auth/Items DB, Redis, Kafka, and application data each run; retain secrets/state/bootstrap and the app for unreserved inspection afterward.
 - Initial stage bounds: provision 20 min, reset/deploy 10, readiness 5, E2E 15, diagnostics 5, disposal 20. Evidence retention at least 14 days.
 - Run Maven wrappers at their module roots; update affected service docs independently; follow [script guidelines](../docs/SCRIPT_GUIDELINES.md) and [testing strategy](../docs/TESTING_STRATEGY.md).
+- Batch coherent changes -> local proof -> AWS trial. Use fresh scoped workstream contexts, independent subagent review/preparation when authorized, and a fail-fast CI watcher reporting the first failed step; see [execution feedback](../docs/TESTING_STRATEGY.md#automation-execution-feedback).
 
 ## Review Focus
 
@@ -120,7 +122,7 @@ update operational record with trial findings. No branch protection enabled yet.
 - [ ] Create a new check run per accepted attempt (`external_id` = run/attempt identity), immediately non-success; complete only that check ID. An old run never updates another attempt's check. Re-query candidate identities and newest accepted attempt before final success; detect duplicates without AWS mutation.
 - [x] Re-run focused tests; expected PASS with no AWS invocations for rejection stories.
 - [ ] On a real trial PR, use a trusted `main` test harness with minimum `checks: write` to prove candidate association and latest-attempt selection: newer pending/failing check must defeat older success, including delayed old completion. Record API/UI evidence. If GitHub does not enforce this association, stop and revise the mechanism before implementing the deployment workflow.
-- [x] Commit/integrate tested request controller and hosted proof records via PRs #72/#74; final gate provenance remains separately blocked.
+- [x] Commit/integrate tested request controller and hosted proof records via PRs #72/#74; current-candidate runtime and final live-gate proof remain unfinished.
 
 ### Task 3: Package exact candidate without credentials
 
@@ -174,16 +176,18 @@ update each affected module's AGENTS and operational flows.
 - Owner live evidence: migrated host full-stack readiness/four-test E2E passed;
   seeded Auth/Items DB, Redis and Kafka reset removed markers/topic and four tests
   passed again. Sanitized reports retrieved and test/secret-file absence verified.
-  Routine orchestration and current-candidate gate remain incomplete.
+  These historical-candidate owner proofs do not establish current-candidate gate
+  success or routine workflow recovery.
 - [ ] Block container IMDS access with host firewall rules for IPv4/IPv6 and forwarded/container paths; require IMDSv2. Restrict capabilities/mounts and network modes. Verify Docker restart/reboot retains isolation; host SSM/ECR/secret access must still work.
-- [ ] Persist operation intent before launch, IDs immediately afterward, and terminal outcomes. Name/tag remote operations by generation; discover operations in launch/record crash gaps. Use bounded SSM execution plus a host process lock and termination verification; reconciliation checks Terraform locks/state, EC2 transitions, SSM and detached tests before mutation.
+- [x] Local controller implements immutable intent/launched/terminal events, predecessor-aware lost-ID recovery, conditional generation-pointer CAS, and recovered-aborted refusal until terminal SSM plus fresh host lock/process/test/temporary-credential absence. Tag-only existing-host saved planning; unexpected/missing/disposed state refuses. Full cloud mutation/recovery proof remains pending.
 - Owner setup read-only lost-ID reconciliation is implemented/tested, including
   controlled live authoritative-record gap/discovery/CAS restoration. It never
   authorizes retry or clears unknown runtime state. Routine all-operation
   reconciliation, Terraform/EC2 transitions and detached-test recovery remain pending.
   Host `--reconcile` observation now has an observed RED-to-GREEN positive story
   and lock/foreign-record/detached-test/lookup-failure refusals. It leaves unknown
-  outcomes unchanged and cannot authorize retry; cloud transport remains pending.
+  outcomes unchanged and cannot authorize retry. Local whole-session orchestration
+  now binds host transport; deployment and live cloud recovery remain pending.
   Routine `reconcile-cloud` now has fixed state/EC2/SSM observations, bounded
   snapshot/pagination/output, actual invocation-terminal checks and candidate
   rechecks. It never mutates/authorizes retry and still requires host/operation-
@@ -207,24 +211,29 @@ update each affected module's AGENTS and operational flows.
 
 - [ ] Write failing stories for skipped prerequisites, failed apply/reset/readiness/E2E, corrupt/missing/empty reports, cancelled finalizer, stale candidate at each checkpoint, duplicate request and older completion. Assert success requires every stage and recognized executed tests, not just exit zero.
 - [ ] Run focused controller/runtime tests; confirm new outcome stories fail before wiring.
-- [ ] Implement workflow jobs: request (`contents/pull-requests/actions: read`, `checks: write`, no OIDC) -> build (read-only, no OIDC/write) -> publisher (Environment, publisher OIDC role) -> one validation job (Environment, operator OIDC role, check-write).
-- [ ] Give only the validation job shared `aws-testing-environment` concurrency with `queue: max` and no active cancellation. Keep publication outside lock without pruning images. Set validation timeout 65 minutes (55-minute stage sum plus orchestration); queue waiting is separate. Pin actions by reviewed commit SHA.
-- [ ] Implement locked `validate`: recheck identities -> verify account/state/ownership -> reconcile -> assign/persist generation -> saved plan/apply -> reset/deploy/readiness/E2E -> retrieve reports -> finalize only this attempt's check. Recheck candidate before AWS exchange, after lock and immediately before success.
+- [x] Implement workflow jobs: request (`contents/pull-requests/actions: read`, `checks: write`, no OIDC) -> build (read-only, no OIDC/write) -> publisher (Environment, publisher OIDC role) -> one validation job (Environment, operator OIDC role, check-write). Local workflow/controller contract covered; hosted current-candidate run pending.
+- [x] Give only the validation job shared `aws-testing-environment` concurrency with `queue: max` and no active cancellation. Keep publication outside lock without pruning images. Set validation timeout 65 minutes; queue waiting is separate. Pin actions by reviewed commit SHA. Local parsed workflow contract passes; hosted runtime proof pending.
+- [x] Implement locked `validate`: recheck identities -> verify account/state/ownership -> reconcile -> assign/persist generation -> saved plan/apply -> reset/deploy/readiness/E2E -> retrieve reports -> finalize only this attempt's check. Candidate/latest-attempt checks precede owned success. Implementation has local external-boundary stories only; actual mutation, host transport and current-candidate check remain pending.
   Independent `verify-publication` now authenticates this exact trusted-main
   run/attempt/three successful prerequisites/receipt artifact and digest, binds all
   request fields/five fixed image digests and fixture bytes, and rechecks candidate
-  before create-only evidence. No AWS calls/code execution/success; transport and
-  runtime stages remain pending. Historical real GitHub receipt check passed,
-  explicitly not current-candidate authorization/runtime evidence.
+  before create-only evidence. Runtime stage now consumes authenticated receipt
+  and fixture through fixed host transport; historical real GitHub receipt check
+  is not current-candidate authorization/runtime evidence. Deployed transport and
+  live current-candidate validation remain pending.
 - [ ] Validate reports as bounded inert data: known suite names, expected current test count (`ItemsE2ETest`: three API tests; `RestAssuredLoggingTest`: one logging regression), no failures/errors and no all-skipped outcome; reject unsafe paths/links/XML external entities, malformed results or false zero-test success. Upload only sanitized records/reports/bounded logs with at least 14-day retention; never credentials/state/plans or raw environment dumps.
   Independent `verify-reports` content parser and rejection stories now pass:
   uncompressed flat tar, two known suites/four unique cases, matching zero-failure/
-  error/skip counters, bounded payloads and no entity/link/path acceptance. Candidate
-  recheck precedes create-only sanitized summary. Runtime provenance remains false;
-  transport/stage binding and workflow evidence publication are still pending.
-- [ ] Add always-run outcome/evidence handling for rejected build/publication/deployment stages; failure before locked job still completes accepted request non-success. Cancellation leaving pending must block merge and leave reconciliation evidence. New attempt's check supersedes prior success without old finalization changing it.
+  error/skip counters, bounded payloads and no entity/link/path acceptance. The local
+  validation flow now binds report transport/stages and rechecks candidate/latest
+  attempt; hosted current-candidate execution/evidence proof remains pending.
+- [x] Add always-run outcome/evidence handling for rejected build/publication/deployment stages; failure before locked job completes accepted request non-success. Cancellation leaves pending/non-success and reconciliation evidence. Finalizer preserves owned completed success and cannot update another attempt. Local workflow contract only; hosted proof pending.
 - [ ] Run focused suites, `actionlint` with support for current `queue` syntax, Terraform checks and an actual manual trial. Push/update/CI completion must start no AWS workflow. Trial success/failure must attach to the candidate from Task 2, without a second reviewer click.
 - [ ] Commit workflow/controller/docs: `feat(e2e): add manual AWS validation workflow`.
+  Coherent local batch independently reviewed; five findings observed RED-to-GREEN.
+  Final combined automation: 172 tests passed in 219.656s. Actual production-path
+  Compose/UID/reset/E2E passed in 91.055s; lints, isolated bootstrap mock assertions
+  and documentation links passed. Hosted current-candidate proof remains pending.
 
 ### Task 7: Add generation-safe disposal and automatic recreation
 
@@ -302,11 +311,11 @@ and plan checkboxes/issues with actual evidence. Configure GitHub protection onl
   stack/E2E and sampled capacity proofs pass; sustained-load guarantees remain
   separate. Never reuse the failed initial saved plan or upgrade the account.
 
-- [ ] **Check-writer provenance:** expected-source GitHub Actions App does not
-  identify a trusted workflow; same-repository workflow permission overrides can
-  grant check writes. Resolve/prove the final gate before enabling protection.
-  Dedicated App signing versus workflow-specific enforcement needs an explicit
-  design decision; no App/secret has been added.
+- [x] **Check-writer trust decision (2026-10-05):** Owner accepts normal Actions App
+  identity and scoped check writes, trusting authorized maintainers and reviewed
+  workflows. Workflow changes require review; no dedicated App is required.
+  Exact candidate/manual/latest-attempt/failure enforcement and live final-gate
+  proofs remain mandatory and unfinished; this resolves only the provenance concern.
 
 - [x] Manual opt-in vs mandatory merging resolved: manual dispatch produces a separately required candidate result; existing CI stays automatic.
 - [x] Pending-request replacement resolved in the design: current GitHub documentation supports `queue: max`; both mutation jobs share one fixed group.
