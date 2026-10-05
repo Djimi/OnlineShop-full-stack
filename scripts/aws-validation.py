@@ -19,13 +19,14 @@ import hashlib
 import io
 import json
 import os
-from pathlib import Path
 import re
 import subprocess
 import sys
 import tarfile
 import tempfile
+import xml.etree.ElementTree as ET
 import zipfile
+from pathlib import Path
 
 REPOSITORY = "Djimi/OnlineShop-full-stack"
 API_ROOT = f"repos/{REPOSITORY}"
@@ -42,6 +43,8 @@ BUILD_CONTEXTS = {"auth": "Auth", "items": "", "gateway": "api-gateway", "fronte
 MAX_IMAGE_BYTES = 4 * 1024**3
 MAX_FIXTURE_BYTES = 16 * 1024**2
 REGION = "eu-north-1"
+REPORT_SUITES = {"com.onlineshop.e2e.ItemsE2ETest": 3,
+                 "com.onlineshop.e2e.RestAssuredLoggingTest": 1}
 
 
 class RequestRejected(Exception):
@@ -71,10 +74,28 @@ def main():
     publish.add_argument("--manifest", type=Path, required=True)
     publish.add_argument("--artifacts", type=Path, required=True)
     publish.add_argument("--output", type=Path, required=True)
+    reports = commands.add_parser("verify-reports", help="Verify four executed tests as inert data; never publish success")
+    reports.add_argument("--request", type=Path, required=True)
+    reports.add_argument("--reports", type=Path, required=True)
+    reports.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
     try:
         context = trusted_dispatch()
         authorize_actors(context)
+        if args.command == "verify-reports":
+            record = read_request(args.request, context)
+            summary = verify_test_reports(args.reports)
+            read_request(args.request, context)
+            write_request(args.output, {
+                "candidate_sha": record["candidate_sha"],
+                "validation_run_id": record["validation_run_id"],
+                "validation_run_attempt": record["validation_run_attempt"],
+                "status": "reports-verified", "tests": sum(summary.values()),
+                "suites": summary, "aws_validation_success": False,
+                "runtime_provenance_verified": False,
+            })
+            print("Reports declare four successful test cases; runtime provenance unproved, no AWS success published")
+            return 0
         if args.command == "publish":
             record = read_request(args.request, context)
             manifest = verify_archives(record, args.manifest, args.artifacts)
@@ -134,6 +155,45 @@ def positive_integer(value):
     return int(value)
 
 
+def verify_test_reports(path):
+    # Report identity/transport must still be established by the locked runtime.
+    # This parser proves report content, not that deployment or execution occurred.
+    if path.is_symlink() or not path.is_file() or not 0 < path.stat().st_size <= 8 * 1024**2:
+        raise RequestRejected("unsafe or excessive report archive")
+    filenames = {"TEST-" + suite + ".xml": suite for suite in REPORT_SUITES}
+    verified = {}
+    try:
+        # Uncompressed transport also bounds tar header/PAX metadata before the
+        # parser encounters a file member; compressed size alone cannot do that.
+        with tarfile.open(path, "r|") as archive:
+            for member in safe_tar_members(archive, 1024**2):
+                if not member.isfile() or member.name not in filenames or member.size > 512 * 1024:
+                    raise RequestRejected("unexpected report archive member")
+                data = archive.extractfile(member).read().decode("utf-8-sig")
+                if "<!DOCTYPE" in data.upper() or "<!ENTITY" in data.upper():
+                    raise RequestRejected("report XML declarations are forbidden")
+                suite = ET.fromstring(data)
+                expected_name = filenames[member.name]
+                count = REPORT_SUITES[expected_name]
+                if suite.tag != "testsuite" or suite.get("name") != expected_name:
+                    raise RequestRejected("unrecognized report suite")
+                if any(suite.get(key) != str(value) for key, value in
+                       {"tests": count, "failures": 0, "errors": 0, "skipped": 0}.items()):
+                    raise RequestRejected("reports are not four successful executed tests")
+                cases = suite.findall("testcase")
+                names = [case.get("name", "") for case in cases]
+                if (len(cases) != count or len(set(names)) != count or any(not name for name in names)
+                        or any(case.get("classname") != expected_name for case in cases)
+                        or any(node.tag in {"failure", "error", "skipped"} for node in suite.iter())):
+                    raise RequestRejected("report counters do not match executed cases")
+                verified[expected_name] = count
+    except (tarfile.TarError, ET.ParseError, UnicodeError, EOFError):
+        raise RequestRejected("invalid report archive or XML") from None
+    if set(verified) != set(REPORT_SUITES):
+        raise RequestRejected("required test reports are missing")
+    return verified
+
+
 def require_sha(value):
     if not isinstance(value, str) or not SHA.fullmatch(value):
         raise RequestRejected("invalid revision")
@@ -168,7 +228,7 @@ def github(path, *, method="GET", body=None, binary=False):
         command += ["--input", "-"]
     try:
         result = subprocess.run(command, input=json.dumps(body).encode() if body is not None else None,
-                                capture_output=True, timeout=30)
+                                capture_output=True, timeout=30, check=False)
     except (subprocess.TimeoutExpired, FileNotFoundError):
         raise RequestRejected("GitHub API unavailable") from None
     if result.returncode or len(result.stdout) > 4 * 1024 * 1024:
@@ -362,7 +422,7 @@ def verify_checkout(candidate, revision):
     for command, expected in [(["git", "-C", str(candidate), "rev-parse", "HEAD"], revision),
                               (["git", "-C", str(candidate), "status", "--porcelain", "--untracked-files=all"], "")]:
         try:
-            result = subprocess.run(command, capture_output=True, text=True, timeout=30)
+            result = subprocess.run(command, capture_output=True, text=True, timeout=30, check=False)
         except (subprocess.TimeoutExpired, FileNotFoundError):
             raise RequestRejected("candidate checkout cannot be verified") from None
         if result.returncode or result.stdout.strip() != expected:
@@ -375,7 +435,7 @@ def run_candidate_build(command):
     env = {key: value for key, value in os.environ.items()
            if not key.startswith(("AWS_", "GITHUB_", "ACTIONS_")) and key not in {"GH_TOKEN", "GH_ENTERPRISE_TOKEN"}}
     try:
-        result = subprocess.run(command, env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=1200)
+        result = subprocess.run(command, env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=1200, check=False)
     except (subprocess.TimeoutExpired, FileNotFoundError):
         raise RequestRejected("candidate image packaging timed out or is unavailable") from None
     if result.returncode:
@@ -421,7 +481,7 @@ def verify_build_provenance(record, manifest):
         with path.open("xb") as stream:
             try:
                 result = subprocess.run(["gh", "api", f"{API_ROOT}/actions/artifacts/{positive_integer(artifact['id'])}/zip", "--method", "GET"],
-                                        stdout=stream, stderr=subprocess.DEVNULL, timeout=1500)
+                                        stdout=stream, stderr=subprocess.DEVNULL, timeout=1500, check=False)
             except (subprocess.TimeoutExpired, FileNotFoundError):
                 raise RequestRejected("trusted artifact download failed") from None
         if result.returncode or not 0 < path.stat().st_size <= limit:
@@ -491,7 +551,7 @@ def publish_images(record, manifest, artifacts):
 
 def publication_command(command, *, env=None, data=None):
     try:
-        result = subprocess.run(command, env=env, input=data, capture_output=True, timeout=600)
+        result = subprocess.run(command, env=env, input=data, capture_output=True, timeout=600, check=False)
     except (subprocess.TimeoutExpired, FileNotFoundError):
         raise RequestRejected("publication command timed out or is unavailable") from None
     if result.returncode or len(result.stdout) > 4 * 1024**2:

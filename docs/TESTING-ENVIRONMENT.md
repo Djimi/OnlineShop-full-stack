@@ -518,7 +518,11 @@ The run warned that `allowed-account-ids` was unsupported by the pinned v4.3.1
 credential action. Independent controller STS/account checks remained effective;
 the workflows now pin reviewed v6.3.0 (`e1253824e5c10ff9df46874f81ed3ec929e19cfd`),
 whose exact metadata supports every configured input and uses Node 24. Hosted
-verification of that new pin remains pending; no IAM/trust widening was introduced.
+verification of that new pin passed in trusted-main run
+[37246888048](https://github.com/Djimi/OnlineShop-full-stack/actions/runs/37246888048):
+the sanitized proof again confirms native-lock planning/zero changes/no apply/no
+AWS success. The unsupported-input warning is gone; unrelated Node-20 warnings
+for other actions remain. No IAM/trust widening was introduced.
 
 Runtime recovery now also refuses a detached test container before credentials,
 operation-record replacement or reset—even when the previous local record is
@@ -529,6 +533,28 @@ The next host recovery increment adds `run-stack.py --generation <generation>
 overwriting the prior operation. Unknown remains unknown, with retry and AWS
 success explicitly false. Its 25 focused runtime stories pass; deployment of this
 host command and whole-session cloud reconciliation remain pending.
+PR #88 merged at `1216a41` after all six PR CI jobs passed. Actual local Docker
+absence/host-lock refusal passed with the unknown record unchanged and no cloud
+calls or Docker mutation; this is not live-host recovery evidence.
+
+### Controller report-content verification
+
+`python3 scripts/aws-validation.py verify-reports --request <request.json>
+--reports <reports.tar> --output <verified-reports.json>` authorizes actors,
+rechecks the current owned pending candidate, validates inert report content, then
+rechecks candidate identity before create-only evidence output. The fixed format
+is an **uncompressed** tar with exactly the two flat `TEST-<suite>.xml` files,
+at most 8 MiB archive/1 MiB payload/512 KiB per file. Compression is refused so
+tar metadata cannot expand past the archive bound. Known suite names/counts,
+unique testcase names/classnames and zero failures/errors/skips are mandatory;
+empty/false counters, missing/duplicate/extra files, links/traversal, malformed
+UTF-8/XML and entity/DOCTYPE declarations refuse. Arbitrary properties, case
+names and system output never enter summary evidence.
+
+Positive parsing and compression refusal were observed RED-to-GREEN. This proves
+content, **not execution provenance**: output explicitly leaves
+`runtime_provenance_verified` and `aws_validation_success` false. Runtime transport,
+stage/report binding and genuine current-candidate validation remain unfinished.
 
 ### Open merge-gate provenance issue
 

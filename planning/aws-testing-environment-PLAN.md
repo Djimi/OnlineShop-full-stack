@@ -200,6 +200,11 @@ update each affected module's AGENTS and operational flows.
 - [ ] Give only the validation job shared `aws-testing-environment` concurrency with `queue: max` and no active cancellation. Keep publication outside lock without pruning images. Set validation timeout 65 minutes (55-minute stage sum plus orchestration); queue waiting is separate. Pin actions by reviewed commit SHA.
 - [ ] Implement locked `validate`: recheck identities -> verify account/state/ownership -> reconcile -> assign/persist generation -> saved plan/apply -> reset/deploy/readiness/E2E -> retrieve reports -> finalize only this attempt's check. Recheck candidate before AWS exchange, after lock and immediately before success.
 - [ ] Validate reports as bounded inert data: known suite names, expected current test count (`ItemsE2ETest`: three API tests; `RestAssuredLoggingTest`: one logging regression), no failures/errors and no all-skipped outcome; reject unsafe paths/links/XML external entities, malformed results or false zero-test success. Upload only sanitized records/reports/bounded logs with at least 14-day retention; never credentials/state/plans or raw environment dumps.
+  Independent `verify-reports` content parser and rejection stories now pass:
+  uncompressed flat tar, two known suites/four unique cases, matching zero-failure/
+  error/skip counters, bounded payloads and no entity/link/path acceptance. Candidate
+  recheck precedes create-only sanitized summary. Runtime provenance remains false;
+  transport/stage binding and workflow evidence publication are still pending.
 - [ ] Add always-run outcome/evidence handling for rejected build/publication/deployment stages; failure before locked job still completes accepted request non-success. Cancellation leaving pending must block merge and leave reconciliation evidence. New attempt's check supersedes prior success without old finalization changing it.
 - [ ] Run focused suites, `actionlint` with support for current `queue` syntax, Terraform checks and an actual manual trial. Push/update/CI completion must start no AWS workflow. Trial success/failure must attach to the candidate from Task 2, without a second reviewer click.
 - [ ] Commit workflow/controller/docs: `feat(e2e): add manual AWS validation workflow`.
@@ -263,11 +268,11 @@ and plan checkboxes/issues with actual evidence. Configure GitHub protection onl
   capture fixes that bug; excessive-log refusal and actual credential-free native
   init and hosted retry pass. Routine mutation/recovery boundaries remain separate.
 
-- [ ] **Credential action ignored security input:** successful operator run warned
+- [x] **Credential action ignored security input:** successful operator run warned
   pinned v4.3.1 did not support `allowed-account-ids`. Exact metadata validation
   reproduced this locally. All three AWS workflows now pin reviewed Node-24
   v6.3.0 supporting configured inputs; controller identity checks remain intact.
-  Updated-pin hosted proof is pending, without IAM/trust changes.
+  Updated-pin hosted proof `37246888048` passed without IAM/trust changes.
 
 - [x] **Original host was incompatible with the Free account plan:** initial apply created
   eight network/template resources, then EC2 rejected `c7i.xlarge` as ineligible
