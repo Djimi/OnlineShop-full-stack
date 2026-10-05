@@ -117,6 +117,9 @@ observation: operator account, fixed state/pointer/native-lock, live EC2 identit
 and bounded paginated SSM parent/invocation terminal status. Neither observation
 alone—or simply combining both booleans—authorizes retry: persistent operation
 identity/outcomes and launch gaps must still be reconciled by the locked session.
+Cloud lock absence uses exact-prefix bounded S3 listing, not a missing-object HEAD
+assumption under a prefix-restricted role. Denied/truncated lookups cannot authorize
+retry or establish absence; no IAM widening or automatic unlock is involved.
 An actual owner proof cancelled SSM with a detached isolated test container;
 the next runtime invocation refused mutation until owner removal/absence and
 host-lock release were verified. This does not implement automatic reconciliation.

@@ -195,6 +195,11 @@ state/lock/EC2/SSM reads and rechecks candidate/snapshot identities, never autho
 mutation. It requires both host observation and persistent-ledger reconciliation.
 The guarded operator proof now runs this cloud half before planning; actual updated
 hosted proof is pending. No new IAM permissions or arbitrary state roots are introduced.
+The first cloud increment's live trial failed its lock HEAD lookup. Missing-object
+HEAD can be forbidden under prefix-restricted bucket listing; it is not an absence
+proof. The corrected check lists only the authorized exact lock prefix, at most
+two keys, and refuses denial/truncation. No IAM widening is introduced. Updated
+actual role retry remains pending; never treat HTTP 403 as absence or force-unlock.
 
 ```text
 verify account and absent intended bucket/key

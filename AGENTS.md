@@ -353,6 +353,9 @@ and invocation boundaries under finite snapshot/output/pagination/deadline bound
 The guarded operator proof exercises it before planning; updated live proof is
 pending. It never authorizes mutation and still requires host/persistent-ledger
 reconciliation; no IAM widening or automatic recovery was introduced.
+Live cloud trial failed the missing-lock HEAD lookup under prefix-restricted
+listing. Exact-prefix bounded `ListObjectsV2` now proves absence without widening
+IAM; denied/truncated reads still refuse. Actual corrected-role retry is pending.
 The separate manual `AWS role boundary proof` checks selected allowed/denied
 reads with publisher/operator OIDC; it never mutates AWS or publishes AWS success.
 Final merge protection is additionally blocked on check-writer provenance:

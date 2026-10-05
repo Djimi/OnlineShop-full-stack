@@ -134,6 +134,10 @@ lock lookup not being absence. The operator-plan stories also refuse active
 remote operations before Terraform. Mocked process boundaries and owner schema
 reads do not replace actual operator OIDC proof; passing observations never
 authorize mutation without host and persistent-ledger reconciliation.
+Lock absence stories must model prefix-restricted roles accurately: missing HEAD
+can be 403, not the owner's 404. Use exact-prefix bounded listing and assert that
+denial/truncation cannot become absence. Policy simulation and owner reads remain
+quick diagnostic feedback, not live role proof.
 
 Owner host-setup command stories:
 `python3 -m unittest -v tests/scripts/aws_host_setup_test.py`.

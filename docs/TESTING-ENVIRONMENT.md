@@ -580,6 +580,24 @@ Quick owner read-only production checks accepted the exact state schema and all
 34 retained terminal invocations; largest SSM page was 117,848 bytes. Those owner
 checks do not prove the operator role or detached-test/whole-session recovery.
 
+PR #90 merged at `5df77e8` after all six PR CI jobs passed. Actual updated trial
+[37248840722](https://github.com/Djimi/OnlineShop-full-stack/actions/runs/37248840722)
+failed safely at cloud reconciliation's `s3api/head-object` lock lookup, before
+Terraform/app mutation. Prefix-restricted `ListBucket` does not supply the missing-
+object HEAD assumption: AWS documents that an absent object can return 403 without
+applicable bucket-list permission. Owner read-only simulation confirms no-prefix
+listing is implicitly denied while the exact lock prefix is allowed (simulation
+is not actual-role proof). No IAM widening is needed or authorized by this error.
+
+The corrected absence check uses `ListObjectsV2` with the exact allowed lock prefix,
+`MaxKeys=2`, expected bucket owner and no implicit pagination. Any existing exact
+lock, denied read, truncated/malformed/unbounded response refuses; errors never
+mean absence. The realistic missing-object HEAD/403 story failed first, then passed
+with this scoped listing. Owner read-only listing found zero keys. Updated hosted
+operator retry remains pending; original failure evidence remains retained.
+See [HEAD permissions](https://docs.aws.amazon.com/aws-sdk-php/v3/api/api-s3-2006-03-01.html)
+and [prefix-scoped listing](https://docs.aws.amazon.com/AmazonS3/latest/userguide/amazon-s3-policy-keys.html).
+
 ### Open merge-gate provenance issue
 
 GitHub's expected status-check source binds an **App**, not a workflow. The shared
