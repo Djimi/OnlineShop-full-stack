@@ -339,12 +339,15 @@ Quick reproduction found a global log-size cap also limited provider artifacts;
 independent streamed capture now covers large provider files and bounded logs.
 Actual credential-free init and hosted operator retry passed without IAM widening.
 The hosted run exposed ignored `allowed-account-ids` on the prior credential action;
-reviewed v6.3.0 supports configured inputs, but updated-pin hosted proof is pending.
+reviewed v6.3.0 supports configured inputs and passed hosted proof `37246888048`.
 Runtime now refuses detached tests before credentials/reset even with terminal
 local records; routine cloud recovery/termination remains unfinished.
 Host runtime `--reconcile` now observes lock/identity/test absence without
 credentials/reset or clearing unknown outcomes. Cloud transport and whole-session
 recovery remain unfinished; observation is not retry authorization.
+Controller `verify-reports` now validates bounded inert content for exactly the
+two known suites/four cases, but explicitly leaves runtime provenance/AWS success
+false. Transport/stage binding and genuine candidate validation remain unfinished.
 The separate manual `AWS role boundary proof` checks selected allowed/denied
 reads with publisher/operator OIDC; it never mutates AWS or publishes AWS success.
 Final merge protection is additionally blocked on check-writer provenance:

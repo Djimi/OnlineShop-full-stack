@@ -114,7 +114,17 @@ The positive command story was observed RED-to-GREEN; these process-boundary
 stories are not actual cloud cancellation recovery or retry authorization.
 Workflow action inputs must match metadata at their exact pinned SHA. Live run
 `37245192463` proved operator locked no-change planning with the previous pin;
-the updated v6.3.0 credential action still requires a separate hosted proof.
+the updated v6.3.0 credential action passed separate hosted proof `37246888048`.
+
+Controller report-content stories:
+`python3 -m unittest -v tests/scripts/aws_reports_test.py`. Exercise actual tar/XML
+parsing with GitHub substituted only at its process boundary. Require exactly the
+two recognized suites/four cases with matching counters and no skips/failures;
+reject compressed/linked/traversing/extra/duplicate/excessive/malformed input.
+Verify candidate changes before evidence output refuse and arbitrary testcase
+properties/output never enter evidence. Report content is not execution provenance
+or AWS success; the future locked runtime must establish both stage and transport
+identity before any gate success.
 
 Owner host-setup command stories:
 `python3 -m unittest -v tests/scripts/aws_host_setup_test.py`.

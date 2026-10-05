@@ -92,6 +92,12 @@ properties, environment dumps, system output and candidate-produced failure text
 Failed tests retain sanitized XML where available; zero exit alone cannot pass.
 Missing/invalid reports fail. Unknown test termination is recorded `unknown` and
 blocks the next run. Cloud cancellation/timeout reconciliation is unfinished.
+The controller's `verify-reports` consumer expects an uncompressed flat tar of
+the two `TEST-<suite>.xml` files. It independently validates suite/case counts and
+zero failures/errors/skips, emitting only counts/attempt identity, not arbitrary
+XML content. It cannot prove execution/transport identity; locked cloud runtime
+must establish that separately before success. Do not feed raw Docker tar output
+directly: trusted collection must select the two sanitized files in this format.
 Before any credentials/reset, runtime now verifies the fixed test container is
 absent, regardless of a terminal prior local record. A failed Docker lookup is
 not absence; an existing container requires reconciliation, not automatic removal.

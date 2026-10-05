@@ -98,7 +98,8 @@ and terminates the owned process group on overflow/deadline, without capping
 legitimate provider artifacts. Large-provider/excessive-log stories and actual
 credential-free backend-disabled init pass. The actual hosted retry passed without
 IAM widening. Credential action metadata also exposed an ignored account-allowlist
-input; reviewed v6.3.0 supports it. Hosted verification of the updated pin remains pending.
+input; reviewed v6.3.0 supports it. Hosted verification passed in `37246888048`,
+again with zero resource changes/no apply/no AWS success.
 
 ### Account-plan preflight and partial apply
 
