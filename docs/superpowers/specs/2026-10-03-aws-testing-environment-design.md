@@ -9,6 +9,12 @@ which agents must also read. Actual settings/commands belong in [TESTING-ENVIRON
 
 ## 1. Technical overview
 
+Attempt replacement normally resets owned application data on the existing host.
+Keep launch-template contents and resource tags independent of mutable attempt identity; Terraform
+updates generation tags on existing infrastructure, including its primary
+interface. Host replacement is reserved for inspected real configuration/lifecycle
+changes, not an incidental new launch-template version on each validation.
+
 **Owner constraint correction:** the AWS account MUST remain on the Free plan;
 paid-plan upgrades are prohibited. The original `c7i.xlarge` capacity selection
 is superseded by catalog-verified eligible `m7i-flex.large` in `eu-north-1a`

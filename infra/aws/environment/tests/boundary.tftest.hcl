@@ -1,4 +1,9 @@
 mock_provider "aws" {}
+override_resource {
+  target          = aws_instance.host
+  override_during = plan
+  values          = { primary_network_interface_id = "eni-0123456789abcdef0" }
+}
 variables {
   account_id   = "111111111111"
   host_profile = "onlineshop-test-host"
@@ -10,6 +15,16 @@ run "private_on_demand_host" {
   assert {
     condition     = aws_instance.host.instance_type == "m7i-flex.large"
     error_message = "Use the selected Free-plan-compatible x86_64 host."
+  }
+  assert {
+    condition = alltrue([for specification in aws_launch_template.host.tag_specifications :
+      !contains(keys(specification.tags), "Generation")
+    ])
+    error_message = "Per-attempt generation must not change launch-template body and replace the host."
+  }
+  assert {
+    condition     = !contains(keys(aws_launch_template.host.tags), "Generation")
+    error_message = "Even template resource tag changes make its computed latest version unknown and replace the host."
   }
   assert {
     condition     = length(aws_security_group.host.ingress) == 0
@@ -26,5 +41,9 @@ run "private_on_demand_host" {
   assert {
     condition     = length(aws_instance.host.instance_market_options) == 0
     error_message = "Spot is forbidden."
+  }
+  assert {
+    condition     = aws_ec2_tag.network_generation.key == "Generation" && aws_ec2_tag.network_generation.value == var.generation && aws_ec2_tag.network_generation.resource_id == aws_instance.host.primary_network_interface_id
+    error_message = "Existing owned primary interface must track the attempt without launch-template churn."
   }
 }

@@ -13,12 +13,37 @@ created eight network/template resources but EC2 rejected the original host.
 After reconciliation, an inspected policy-only bootstrap update and host-only
 environment plan launched Free-plan-eligible `m7i-flex.large`. Actual host/disk/
 metadata/profile/no-ingress settings and unchanged Free plan were verified.
-No application is deployed yet; host setup and live proofs remain in progress.
+The migrated host now runs the app after owner full-stack/four-test E2E and seeded
+clean-state reset/retest proofs. Routine orchestration, disposal/recreation and
+current-candidate merge validation remain unfinished.
 Do not treat mock tests as proof of real IAM permissions, locking or isolation.
 See [operational evidence](../../docs/TESTING-ENVIRONMENT.md) and the
 [implementation plan](../../planning/aws-testing-environment-PLAN.md).
 
 ## Fixed inputs and storage
+
+Attempt generation must not alter the launch-template body: a numeric version
+change forces EC2 replacement. Launch-time ownership tags are stable
+`ManagedBy`/`Repository`; Terraform separately manages the primary interface's
+mutable `Generation` tag, alongside instance/disk/network generation tags.
+No lifecycle ignore suppresses template/configuration drift. The initial empty-
+host migration is applied; subsequent tag-only attempts must not replace it.
+Live update-only replanning is verified. The environment root includes
+the interface tag resource as well as its nine original infrastructure resources.
+
+The initial migration is applied: ten resources, same dedicated network, old
+host/disk/interface removal verified and new eligible host bootstrapped. Live
+follow-up exposed a second cause: changing the template **resource** tags makes
+computed `latest_version` unknown, also forcing replacement. Its tags must be
+stable too. The obsolete destructive hypothetical plan must never be applied;
+tag-only owner alignment/fresh-plan proof is complete. No lifecycle ignore is introduced.
+
+PR #82 merged at `7c22ba0` after CI. Owner recovery removed only the obsolete
+template-resource `Generation` tag; launch-template version was read back
+unchanged. The current saved plan/apply had zero resource changes; a fresh
+hypothetical next-generation plan contained updates only, including the primary
+interface tag, with no host/disk/interface replacement. That hypothetical plan
+was not applied. The populated host/app and unchanged Free plan were preserved.
 
 | Root | Remote key | Caller |
 | --- | --- | --- |
@@ -42,9 +67,39 @@ The disposable host is On-Demand Free-plan-eligible `m7i-flex.large`, pinned x86
 `ami-04478a3e21a0d79a7`, 50 GiB encrypted gp3 deleted on termination. No security
 group ingress, SSH key, NAT, load balancer or managed DB exists in its definition.
 Outbound-only public IPv4 is intentional; inspection will use SSM. IMDSv2/hop
-limit alone is not container isolation; runtime firewall/probes are still pending.
+limit alone is not container isolation. Explicit firewall/FORWARD rules and Auth/
+E2E digest-image metadata probes passed after Docker restart and real reboot,
+with host-role ECR/secret access retained on the initial host. Current-host full-
+stack/E2E, clean-state and all-candidate metadata probes also passed. Frontend
+IPv6 has no source address; that is not a routed firewall-denial proof.
 
 ## Verify definitions without AWS mutation
+
+The manual **AWS operator plan proof** workflow is a separate guarded current-
+environment trial, not validation/deployment. It authorizes both dispatch/rerun
+actors before OIDC, takes the shared session concurrency group, verifies the
+operator account/role, reads bounded current state/pointer under version/ETag
+checks and refuses missing/empty/unexpected or mismatched state before init.
+It copies only trusted Terraform inputs to a private runner directory and plans
+with native S3 locking. Expected resource coverage and zero actions are mandatory;
+it never applies, resets data or publishes AWS success. Only sanitized proof JSON
+is an artifact; snapshots/plans/logs are private and must never be uploaded.
+Timeout/failure requires lock reconciliation before retry. Missing-state stories
+do not prove live recovery refusal. Actual operator no-change/native-lock proof
+passed in trusted-main run `37245192463`; its sanitized report confirms no apply
+or AWS validation success, and an owner read-only post-check found no remaining lock.
+The first hosted operator trial passed authorization/OIDC but failed planning.
+Failure evidence now exposes only fixed stages and allowlisted error/action
+labels; raw snapshots/logs are never artifacts. Diagnose/reconcile before retry,
+not by widening IAM permissions speculatively or exposing raw Terraform logs.
+Focused reproduction found that the initial global 16 MiB file-size limit also
+capped provider downloads. Capture now streams bounded stdout/stderr separately
+and terminates the owned process group on overflow/deadline, without capping
+legitimate provider artifacts. Large-provider/excessive-log stories and actual
+credential-free backend-disabled init pass. The actual hosted retry passed without
+IAM widening. Credential action metadata also exposed an ignored account-allowlist
+input; reviewed v6.3.0 supports it. Hosted verification passed in `37246888048`,
+again with zero resource changes/no apply/no AWS success.
 
 ### Account-plan preflight and partial apply
 
@@ -57,9 +112,8 @@ capacity; regional availability alone does not prove account-plan eligibility.
 The replacement selection is `m7i-flex.large` (two x86_64 vCPUs, 8 GiB), verified
 eligible/offered in `eu-north-1a`. Environment validation and operator launch
 policy now pin this selection; both plan assertions were observed RED then GREEN.
-Live policy application and host launch are verified; capacity proofs remain
-pending. Eligibility is
-not unlimited free usage.
+Live policy application/host launch and a sampled full-stack capacity run are
+verified; sustained-load guarantees are not. Eligibility is not unlimited free usage.
 
 Owner-only host setup proof command:
 `python3 scripts/aws-host-setup.py --identifiers infra/aws/.runtime/bootstrap-identifiers.json --output infra/aws/.runtime/host-setup-operation.json`.
@@ -71,10 +125,23 @@ replacing another cloud record. Unknown outcomes require reconciliation, not a
 new output path. This owner proof is not shared-lock routine validation/disposal
 or a successful AWS check; automated launch-gap/cancellation recovery is pending.
 
+Read-only setup recovery:
+`python3 scripts/aws-host-setup.py --reconcile --identifiers infra/aws/.runtime/bootstrap-identifiers.json --output infra/aws/.runtime/setup-command-reconciliation.json`.
+Use a new protected output path: reports are create-only. It reads the exact
+versioned setup record after a size preflight/conditional download. Missing IDs
+are discovered by unique generation/stage comment, then verified against target,
+document, command hash/timeout and actual terminal invocation. Missing/ambiguous/
+active/cancelling commands refuse reconciliation. It never sends/cancels commands,
+rewrites cloud records, clears runtime unknown state, authorizes retry or publishes
+AWS success. A controlled live lost-ID version/discovery/restoration proof passed;
+routine validation/disposal reconciliation must additionally handle Terraform,
+EC2 transitions and detached tests before any mutation.
+
 The first environment apply failed at EC2 `RunInstances` with
 `InvalidParameterCombination: The specified instance type is not eligible for Free Tier`.
-Eight resources remain in versioned `state/environment.tfstate`; the host, root
-disk and ENI are absent, ingress is empty and the state lock is released.
+At that failed attempt, eight resources remained in versioned environment state
+and host/disk/ENI were absent. The later eligible launch/migration has reconciled
+that partial state; the current root has ten resources and a populated host.
 Protected reconciliation receipt: `.runtime/partial-environment-reconciliation.json`.
 Do not rerun the initial-absence checks or reuse the failed saved plan. After the
 account prerequisite is resolved, reconcile recorded ownership/live resources,
@@ -86,26 +153,48 @@ resource/output identities, lineage, serial and tool version explicitly: pull ma
 normalize `check_results` without changing resource state. A whole-JSON mismatch
 alone is not evidence of resource drift. Keep both raw records protected.
 
+Terraform plan JSON may omit `resource_changes` for a no-op/refresh-only plan;
+inspect it as an empty list when absent, and inspect `resource_drift` separately.
+If a proof introduces drift before failing, reconcile/remove only its recorded
+probe through a fresh inspected plan before attempting another proof.
+
 Run from the repository root, separately for each root:
 
 ```bash
 terraform fmt -check -recursive infra/aws
+export TF_DATA_DIR="$(mktemp -d /tmp/opencode/aws-backend-definitions.XXXXXX)"
 terraform -chdir=infra/aws/backend init -backend=false
 terraform -chdir=infra/aws/backend validate
 terraform -chdir=infra/aws/backend test
+export TF_DATA_DIR="$(mktemp -d /tmp/opencode/aws-bootstrap-definitions.XXXXXX)"
 terraform -chdir=infra/aws/bootstrap init -backend=false
 terraform -chdir=infra/aws/bootstrap validate
 terraform -chdir=infra/aws/bootstrap test
+export TF_DATA_DIR="$(mktemp -d /tmp/opencode/aws-environment-definitions.XXXXXX)"
 terraform -chdir=infra/aws/environment init -backend=false
 terraform -chdir=infra/aws/environment validate
 terraform -chdir=infra/aws/environment test
+unset TF_DATA_DIR
 ```
 
 Never initialize a live backend implicitly with an inferred bucket. An already
-migrated working directory retains its backend even with `-backend=false`;
-mock-provider tests use isolated test state and never administer the live stack.
+migrated working directory retains its backend even with `-backend=false`.
+Fresh per-root `TF_DATA_DIR` directories above avoid cached live-backend metadata;
+without them even initialization can require live credentials. Keep these scratch
+directories separate from protected live state; never remove live `.terraform/`
+to run definition checks. Mock-provider tests never administer the live stack.
 
 ## Owner backend creation and migration
+
+Host recovery observations use the trusted runtime's `--reconcile` command under
+its process lock. They can prove test absence but never clear unknown outcomes,
+authorize retry, or replace cloud-side SSM/EC2/state reconciliation. See the
+[runtime contract](runtime/AGENTS.md) for the command and refusal boundaries.
+The controller's separate `reconcile-cloud` observation verifies fixed operator
+state/lock/EC2/SSM reads and rechecks candidate/snapshot identities, never authorizing
+mutation. It requires both host observation and persistent-ledger reconciliation.
+The guarded operator proof now runs this cloud half before planning; actual updated
+hosted proof is pending. No new IAM permissions or arbitrary state roots are introduced.
 
 ```text
 verify account and absent intended bucket/key

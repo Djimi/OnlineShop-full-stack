@@ -148,10 +148,14 @@ update `.gitignore` and operational record.
 - [ ] Pin supported Terraform/provider versions and record compatibility with native S3 locking; run `terraform fmt -check -recursive infra/aws`, root-specific `init -backend=false`/`validate`, and `terraform test` against plan-only assertions. Confirm intentionally unsafe fixtures fail checks.
 - [x] Implement protected backend root; inspected saved plan applied under owner authorization. Native state migration/version/resource verification completed before removing owned temporary local copies.
 - [x] Implement/apply 19-resource bootstrap saved plan with actual immutable-ID Environment subject, separate roles, fixed repositories/retention and secret metadata. Generated values initialized solely through protected API; trust/repositories/state read back. OIDC read-boundary tests passed; mutation boundaries remain pending.
-- [x] Define disposable environment root with dedicated network, no ingress, pinned On-Demand host/encrypted disposable storage and explicit profile; mock boundary test passes. Host provisioning/live proof remains pending.
+- [x] Define/provision disposable environment root with dedicated network, no ingress, pinned Free-plan On-Demand host/encrypted disposable storage and explicit profile. Actual settings, migrated host/old-storage removal and tag-only next-generation planning verified; routine role/recovery boundaries remain pending.
 - [ ] Measure representative full Compose+E2E CPU/memory/disk use locally; include current Auth connection-pool demand. Compare regional On-Demand sizes (including burstable-credit cost if considered), disk, public IPv4, ECR, S3/secrets/log retention costs. Obtain owner approval of host/AMI/disk and live-hourly/live-monthly/disposed estimates before first apply.
 - [ ] Bootstrap and provision using refreshed saved plans with restrictive file permissions. Inspect permitted changes before `terraform apply SAVED_PLAN`; record exact inputs/root/key/tool versions and resource identities. Never publish plan JSON or state as artifacts.
-- [ ] Prove actual role denies, S3 state locking contention, saved-plan staleness, drift detection, missing-state recovery refusal and protected state-version access. Preserve restore/import/verified-force-unlock instructions in `infra/aws/README.md`.
+- [ ] Complete live boundaries/recovery: selected actual role read denies, native S3 locking, saved-plan staleness and tag-drift detection are proved. Routine-role mutations, missing-state recovery refusal and protected version boundaries remain pending. Preserve restore/import/verified-force-unlock instructions in `infra/aws/README.md`.
+- Guarded manual operator no-change plan proof is implemented with missing/empty/
+  unexpected-state refusal and pre-OIDC actor authorization; actual operator OIDC
+  plan/native-lock proof passed in run `37245192463`. It cannot apply or establish EC2 mutation
+  permissions; do not delete live state merely to satisfy its regression stories.
 - [ ] Commit configuration, provider locks and sanitized evidence after checks: `feat(e2e): provision isolated AWS testing infrastructure`.
 
 ### Task 5: Implement reset, bounded remote runtime and recovery ledger
@@ -162,13 +166,29 @@ update each affected module's AGENTS and operational flows.
 **Consumes:** Bootstrap identifiers, fixed runtime definition and five image digests.
 **Produces:** `run-stack.py --generation ID --images FILE` exit code, stage record and reports; controller reconciliation used by validation/disposal.
 
-- [x] Runtime stories cover missing behavior RED->GREEN for generation/process locks, readiness/report failure, scoped reset, sanitized failure evidence and unknown test termination. Actual local Compose test proves both schemas and removal of DB/cache/broker markers; real remote-process/cancellation proof still pending.
+- [x] Runtime stories cover missing behavior RED->GREEN for generation/process locks, readiness/report failure, scoped reset, sanitized failure evidence and unknown test termination. Actual local and AWS owner reset proofs remove DB/cache/broker markers; owner cancellation guards verified. Automatic remote recovery remains pending.
 - [x] Run focused runtime stories after observed failures, with external command-boundary fakes and actual disposable Compose/reset/E2E coverage. Local isolation checks do not imply EC2 isolation proof.
 - [x] Implement AWS-only Compose with four app digests, aligned backing versions, named dedicated volumes, loopback gateway/frontend ports and independent verified service-owned fixtures. No builds/source mounts/admin UIs or shell-sourced SQL.
-- [x] Inject generated DB/application test credentials through restricted files; omit Auth's committed password seed, consume generated E2E registration password with random local fallback. Actual local reset regression proves generated-password login before/after reset. Frontend/gateway loopback URLs/ports are fixed; AWS-host proof remains pending.
+- [x] Inject generated DB/application test credentials through restricted files; omit Auth's committed password seed, consume generated E2E registration password with random local fallback. Local and actual owner AWS reset/E2E prove generated-password login before/after reset and loopback runtime configuration. Current-candidate workflow proof remains pending.
 - [ ] Implement host setup and `run-stack.py` top-down flow: host process lock -> verify project/generation -> stop writers/tests -> remove only project data -> initialize/start -> bounded readiness -> isolated E2E -> bounded sanitized evidence. Preserve app afterward; remove test container and secret temporary files safely.
+- Owner live evidence: migrated host full-stack readiness/four-test E2E passed;
+  seeded Auth/Items DB, Redis and Kafka reset removed markers/topic and four tests
+  passed again. Sanitized reports retrieved and test/secret-file absence verified.
+  Routine orchestration and current-candidate gate remain incomplete.
 - [ ] Block container IMDS access with host firewall rules for IPv4/IPv6 and forwarded/container paths; require IMDSv2. Restrict capabilities/mounts and network modes. Verify Docker restart/reboot retains isolation; host SSM/ECR/secret access must still work.
 - [ ] Persist operation intent before launch, IDs immediately afterward, and terminal outcomes. Name/tag remote operations by generation; discover operations in launch/record crash gaps. Use bounded SSM execution plus a host process lock and termination verification; reconciliation checks Terraform locks/state, EC2 transitions, SSM and detached tests before mutation.
+- Owner setup read-only lost-ID reconciliation is implemented/tested, including
+  controlled live authoritative-record gap/discovery/CAS restoration. It never
+  authorizes retry or clears unknown runtime state. Routine all-operation
+  reconciliation, Terraform/EC2 transitions and detached-test recovery remain pending.
+  Host `--reconcile` observation now has an observed RED-to-GREEN positive story
+  and lock/foreign-record/detached-test/lookup-failure refusals. It leaves unknown
+  outcomes unchanged and cannot authorize retry; cloud transport remains pending.
+  Routine `reconcile-cloud` now has fixed state/EC2/SSM observations, bounded
+  snapshot/pagination/output, actual invocation-terminal checks and candidate
+  rechecks. It never mutates/authorizes retry and still requires host/operation-
+  ledger reconciliation. Guarded operator proof exercises it before planning;
+  actual updated OIDC proof and whole-session recovery remain pending.
 - [ ] Run local runtime tests and real-host metadata/network/credential probes from app and E2E containers. Prove cancellation recovery by interrupting SSM/controller, then verify a subsequent run cannot overlap. Bounds: provision 20/reset-deploy 10/readiness 5/E2E 15/diagnostics 5 minutes.
 - [ ] Run module-root Maven verification for any changed Java/config/fixtures (install `common` before Items), frontend lint/build if affected, E2E and changed-Dockerfile hadolint; commit: `feat(e2e): reset and validate AWS runtime safely`.
 
@@ -185,6 +205,11 @@ update each affected module's AGENTS and operational flows.
 - [ ] Give only the validation job shared `aws-testing-environment` concurrency with `queue: max` and no active cancellation. Keep publication outside lock without pruning images. Set validation timeout 65 minutes (55-minute stage sum plus orchestration); queue waiting is separate. Pin actions by reviewed commit SHA.
 - [ ] Implement locked `validate`: recheck identities -> verify account/state/ownership -> reconcile -> assign/persist generation -> saved plan/apply -> reset/deploy/readiness/E2E -> retrieve reports -> finalize only this attempt's check. Recheck candidate before AWS exchange, after lock and immediately before success.
 - [ ] Validate reports as bounded inert data: known suite names, expected current test count (`ItemsE2ETest`: three API tests; `RestAssuredLoggingTest`: one logging regression), no failures/errors and no all-skipped outcome; reject unsafe paths/links/XML external entities, malformed results or false zero-test success. Upload only sanitized records/reports/bounded logs with at least 14-day retention; never credentials/state/plans or raw environment dumps.
+  Independent `verify-reports` content parser and rejection stories now pass:
+  uncompressed flat tar, two known suites/four unique cases, matching zero-failure/
+  error/skip counters, bounded payloads and no entity/link/path acceptance. Candidate
+  recheck precedes create-only sanitized summary. Runtime provenance remains false;
+  transport/stage binding and workflow evidence publication are still pending.
 - [ ] Add always-run outcome/evidence handling for rejected build/publication/deployment stages; failure before locked job still completes accepted request non-success. Cancellation leaving pending must block merge and leave reconciliation evidence. New attempt's check supersedes prior success without old finalization changing it.
 - [ ] Run focused suites, `actionlint` with support for current `queue` syntax, Terraform checks and an actual manual trial. Push/update/CI completion must start no AWS workflow. Trial success/failure must attach to the candidate from Task 2, without a second reviewer click.
 - [ ] Commit workflow/controller/docs: `feat(e2e): add manual AWS validation workflow`.
@@ -237,15 +262,33 @@ and plan checkboxes/issues with actual evidence. Configure GitHub protection onl
 
 ## Issues and resolutions
 
-- [ ] **Active Free account plan blocks the chosen host:** initial apply created
+- [x] **Operator plan proof recovered:** trial `37243793027` authorized actors/
+  OIDC but failed its protected plan phase, without apply or app mutation. Initial
+  diagnostics could not identify the stage. Sanitized fixed-stage/allowlisted
+  failure evidence is now implemented/tested. PR #86 merged after hosted CI;
+  retry `37245192463` passed actual operator native-lock/no-change planning, and
+  an owner post-check found no lock. No IAM grants were widened.
+  Quick state-schema reproduction passed; a targeted large-provider reproduction
+  found the global log file-size limit also capped downloads. Independent bounded
+  capture fixes that bug; excessive-log refusal and actual credential-free native
+  init and hosted retry pass. Routine mutation/recovery boundaries remain separate.
+
+- [x] **Credential action ignored security input:** successful operator run warned
+  pinned v4.3.1 did not support `allowed-account-ids`. Exact metadata validation
+  reproduced this locally. All three AWS workflows now pin reviewed Node-24
+  v6.3.0 supporting configured inputs; controller identity checks remain intact.
+  Updated-pin hosted proof `37246888048` passed without IAM/trust changes.
+
+- [x] **Original host was incompatible with the Free account plan:** initial apply created
   eight network/template resources, then EC2 rejected `c7i.xlarge` as ineligible
   for Free Tier. `GetAccountPlanState` confirms `FREE`/`ACTIVE`. Partial versioned
-  state reconciled; no host/disk/ENI, ingress empty, lock released. The owner
+  state was reconciled before a refreshed eligible launch. The owner
   rejected a paid-plan upgrade: account MUST remain Free. Select verified
   eligible/offered `m7i-flex.large` (2 vCPU/8 GiB/x86_64). Update Terraform/IAM
   constraints/tests are updated RED-to-GREEN; inspected policy-only and host-only
-  plans applied, host/storage settings verified, Free plan unchanged. Real capacity
-  proof remains pending; never reuse the failed initial saved plan.
+  plans applied, host/storage settings verified, Free plan unchanged. Actual full-
+  stack/E2E and sampled capacity proofs pass; sustained-load guarantees remain
+  separate. Never reuse the failed initial saved plan or upgrade the account.
 
 - [ ] **Check-writer provenance:** expected-source GitHub Actions App does not
   identify a trusted workflow; same-repository workflow permission overrides can
@@ -258,11 +301,11 @@ and plan checkboxes/issues with actual evidence. Configure GitHub protection onl
 - [x] Fresh schema ownership identified: `Auth/init-db/` and `Items/init-db/` independently initialize databases; no cross-service schema dependency needed.
 - [x] Scoped inventory and dependencies rechecked; documented unused SSH/RDS-role/firewall cleanup authorized by the continuation instruction and verified — Task 1.
 - [ ] Exact candidate-check selection/newest-attempt behavior on GitHub needs live proof before deployment/gate enablement — Task 2.
-- [x] Capacity/AMI/disk selection and regional estimates recorded before provisioning; owner delegated execution without further approvals — Task 4. Live capacity proof remains pending.
+- [x] Free-compatible capacity/AMI/disk and current estimates recorded; owner delegated execution without further approvals. Actual full-stack/E2E and sampled memory/disk/timing pass; sustained CPU/capacity acceptance remains separate.
 - [ ] OIDC subject/Environment restrictions and IAM action/resource support require actual verification — Task 4.
 - [ ] Candidate fixture credentials, image-retention protection and container metadata blocking need implementation evidence — Tasks 3, 5, 8.
 - [ ] Cancellation launch/record gaps and state recovery require interruption trials — Tasks 5, 7.
-- [x] Owner authorized inline execution and continuation without further approvals on 2026-10-04. Verified cleanup and protected state-backend creation/migration have occurred; no application host exists yet.
+- [x] Owner authorized inline execution and continuation without further approvals on 2026-10-04. Cleanup/backend/bootstrap and eligible host are verified; app runs after owner full-stack/clean-state proofs. Routine workflow/current-candidate result/disposal/final gate remain unfinished.
 - [x] Existing CI SHA ambiguity identified and addressed with a separate trusted merge-checkout evidence artifact.
 - [x] Hosted merge-checkout packaging proved on PR #72/run 37210137790; artifact identity and digest match live PR metadata. All six CI jobs and three API tests plus one logging regression passed. This does not complete the trusted-main check-selection proof.
 - [x] Foundation PR #72 reached trusted `main`; trial PR #73 proved pending CI rejection and accepted merge-candidate check association without AWS access. Latest-attempt/protection proofs continue.

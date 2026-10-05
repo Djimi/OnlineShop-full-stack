@@ -338,6 +338,248 @@ preserving that package rather than using broad `--allowerasing`/`--skip-broken`
 The failed command is terminal; its operation remains `unknown` pending owner
 reconciliation. No candidate application has started.
 
+Owner reconciliation subsequently verified all preceding transfers successful
+and all recorded SSM commands terminal. Corrected trusted setup from merged
+PR #80 (`60d37d6`) completed successfully under bounded SSM/flock. The original
+failure record remains retained; a separate protected recovery record is
+`Success`. Host prerequisites are installed, not application deployment.
+
+Live owner proofs now detect a temporary managed-VPC tag drift and reject an old
+saved plan after a refresh-only state update (`Saved plan is stale`). Fresh
+inspected tag-only restoration removed the probe; no host was replaced. An
+initial proof parser assumed no-op JSON always contained `resource_changes`;
+its partial drift was reconciled before the corrected proof. Raw logs/plans
+remain protected. These proofs do not prove routine-role mutation or full-session
+workflow locking.
+
+Packaging trial `37237605326` built successfully but publication rejected its
+now-unsupported candidate while trusted main advanced. Failure-only finalization
+ran; no AWS success was published. Trial #73 was refreshed with trusted main
+again; a new exact-CI/manual publication is required, not reuse of that attempt.
+
+Actual Auth and E2E digest-image probes passed on the Free-plan EC2 host: neither
+obtained IPv4/IPv6 IMDS tokens, saw job/cloud credential variables or had the Docker
+socket mounted. Required IPv4/IPv6 firewall/FORWARD rules survived Docker restart.
+Host-role ECR login/pull and named-secret access still succeeded. A real EC2 reboot
+was then verified by changed boot identity; Docker/SSM and firewall hooks returned,
+host ECR/secret access worked and both images still failed metadata-token probes.
+Private auth/probe containers/network were scoped and removed. These are selected
+image-isolation proofs, not full application runtime/E2E, all-image probes, remote
+cancellation recovery or trustworthy merge-gate success.
+
+Actual cancellation proof also passed: a bounded SSM command launched an isolated
+detached test container, then was cancelled. A new trusted runtime invocation was
+blocked by its process lock/unknown-operation record rather than resetting data.
+Owner reconciliation removed the exact test container, verified absence and lock
+release, then wrote a terminal cancellation record. This proves the runtime guard
+and documented owner recovery, not an implemented automatic workflow reconciler.
+
+Current Stockholm Price List compute equivalent for `m7i-flex.large` is
+**USD 0.10175/hour**. Reusing the recorded 730-hour/month, 50 GiB gp3, public IPv4,
+50 GiB ECR/1 GiB S3/secret assumptions gives **USD 87.53/month live equivalent**
+and **USD 5.42/month retained/disposed equivalent**, excluding traffic/requests/
+taxes. On this unchanged Free plan these are pricing/credit-consumption estimates,
+not a paid-account bill or a guarantee of unlimited zero-cost use.
+
+### Generation lifecycle correction: not applied yet
+
+A refreshed generation plan unexpectedly replaces the EC2 host because changing
+launch-time generation tags produces a new launch-template version. That plan was
+not applied. The environment definition now separates stable launch ownership
+from mutable attempt tags; an explicit primary-interface tag tracks generation.
+Assertions observed RED on dynamic launch tags, then GREEN after correction.
+The initial migration requires one reviewed replacement of the empty host;
+subsequent generation-tag changes must not replace it. No lifecycle drift-ignore
+or account-plan upgrade is introduced. Live migration/future-plan proof is pending.
+
+PR #81 merged at `9679efc` after hosted CI. The inspected migration replaced only
+the empty host, preserved network identities and verified removal of old disk/
+interface. Ten environment resources and the new host/disk/metadata/interface
+generation were read back; Free plan unchanged. Trusted setup was reinstalled.
+The subsequent hypothetical generation plan still proposed replacement because
+even template **resource** tag changes make computed `latest_version` unknown.
+That plan was not applied. A second RED-to-GREEN assertion now requires stable
+resource tags too; desired-state tag alignment/live no-churn proof remains pending.
+
+Publication `37238396197` succeeded before that integration; artifact
+`11316557973` (build) and `11316623025` (receipt) checksums, five ECR digests and
+fixture identity were independently verified. Inert bounded SSM fixture transport
+passed. Five incoming images have verified protected active-prefix tags. The
+actual host role denied protected state, EC2 discovery and unrelated-secret reads.
+An owner full-runtime proof using that historical published candidate is now
+running on the migrated Free-plan host. It cannot publish or substitute for a
+current-candidate AWS result: main has since advanced. No successful gate claimed.
+
+That owner runtime proof passed reset/readiness and all four report-backed tests.
+A second actual AWS reset seeded both databases, Redis and Kafka; the reset
+removed the old markers/topic and all four tests passed again. Sanitized XML was
+retrieved independently; test container and temporary secret/auth files were
+verified absent. The app is retained. These historical-candidate owner proofs do
+not satisfy current-candidate identity, full workflow recovery or the final gate.
+
+PR #82 merged at `7c22ba0` after all applicable hosted checks passed. Guarded owner
+recovery removed only the template-resource `Generation` tag; template version
+remained unchanged. Current-generation saved plan/apply had no resource changes.
+A fresh hypothetical next-attempt plan had updates only, no host/disk/interface
+replacement; it was not applied. The running app and Free plan were preserved.
+
+Current-host all-five-candidate metadata transport probes and eight-service
+user/capability/mount/cloud-credential/loopback checks passed. Initial probe
+assertions failed because frontend IPv6 has no source address (`EADDRNOTAVAIL`)
+and Kafka's backing-service root is writable. Those observations are explicit:
+candidate roots remain read-only; IPv6 transport unavailability is not proof of
+a routed firewall rejection. The corrected probe requires known transport errors,
+not arbitrary tooling failure. Protected failure/diagnostic/retry records remain.
+
+An additional actual reset/readiness/E2E capacity run passed in **74.859 seconds**.
+Fourteen periodic samples saw up to **2780.55 MiB** host RAM used, at least
+**5003.09 MiB** available and **45.28 GiB** disk available, with nine simultaneous
+containers during E2E. All eight retained service containers remained running
+without Docker OOM flags; E2E was removed afterward. These are sampled observations,
+not absolute peaks or sustained-load guarantees. Summed Docker CPU samples reached
+284.57%; container sampling intervals are not aligned, so this is not a reliable
+whole-host CPU peak or percentage-of-two-vCPU claim. Protected capacity summary
+and host sample record are retained; sustained CPU/capacity acceptance remains
+distinct from this successful learning-workload runtime proof.
+
+### Owner setup launch-gap reconciliation
+
+`scripts/aws-host-setup.py --reconcile` adds read-only discovery of exact recorded
+setup commands without sending/cancelling operations or rewriting protected cloud
+records. It size-checks the fixed versioned setup key before conditional download,
+rejects duplicate JSON fields, validates generation/host, then discovers a unique
+stage comment and verifies document/target/body hash/timeout/terminal invocation.
+Absent/ambiguous/active/cancelling or mismatched evidence refuses. The create-only
+report explicitly forbids automatic retry and AWS success; reconciliation is not
+proof that every setup stage ran or that detached runtime processes stopped.
+
+Live current-host reconciliation verified all 16 recorded commands. A controlled
+crash-gap trial versioned only the already-terminal setup record with its final
+ID removed; real SSM discovery recovered the exact ID and terminal invocation.
+Original bytes were restored under ETag CAS, preserving original/gap/restore
+versions. No host/app/Terraform state/generation changed. The bounded-read variant
+also passed an actual read-only reconciliation. This is owner setup recovery,
+not implemented routine validation/disposal or a current-candidate AWS result.
+
+### Guarded operator-role plan: live no-change proof passed
+
+The separate manually dispatched `AWS operator plan proof` workflow authorizes
+dispatch/rerun administrators before exchanging OIDC, then holds the shared
+`aws-testing-environment` session group (`queue: max`, no active cancellation).
+It verifies actual account/operator role, reads fixed bounded versioned state and
+generation pointer, rejects absent/empty/unexpected/mismatched snapshots before
+Terraform initialization, and requires a locked no-change plan covering all ten
+expected resources. It never applies, resets the app or publishes AWS success.
+Protected raw state/plans/logs never enter artifacts or the step summary.
+
+Ten command stories pass, including observed RED-to-GREEN missing command,
+false empty-plan acceptance and modified trusted-input rejection. The controller
+checks the exact checkout and a fixed tracked input allowlist before OIDC;
+untracked extra Terraform files are never copied to its protected planning root.
+The initial full automation suite had 106 passing tests; the capture/failure-evidence
+increment has 109. Actual operator OIDC/native-lock/no-change planning passed in
+run `37245192463`; this does not establish EC2 mutation boundaries or missing-state
+recovery under live resource loss. An old local actionlint rejected documented `concurrency.queue`;
+official GitHub documentation confirms `max`/no-cancellation semantics, and a
+new pinned tool revision `011a6d15e749bb3f2d771eed9c7aa0e7e3e10ee7` still lacks
+that schema. All other actionlint diagnostics passed with only its exact
+`unexpected key "queue" for "concurrency" section` diagnostic excluded; parsed
+YAML separately verified the exact shared group/max/no-cancellation and dispatch-
+only/read+OIDC contract. This is a documented narrow tooling limitation, not a
+claim of full schema support. The hosted manual workflow accepted the syntax.
+
+PR #85 merged at `a55d0f0` after hosted CI. Manual trial `37243793027` accepted the
+workflow, authorized both actors and exchanged operator OIDC, but the protected
+plan phase failed. No apply/app mutation or AWS success occurred. The original
+diagnostic was intentionally private but too coarse to identify the failed stage;
+raw runner logs/state were not uploaded. The command now retains create-only
+failed proof JSON containing only a fixed stage/reason and allowlisted error/action
+labels, never raw exception text, resource IDs, state or credentials. Its failure
+story was observed RED-to-GREEN; the failed original attempt remains historical
+evidence, not a success.
+
+Following the owner-requested quick-feedback approach, a read-only owner check
+confirmed the exact state/pointer validation accepts current production data;
+permission simulation allows the state/pointer reads (not actual-role proof).
+A focused reproduction then found a concrete capture bug: `RLIMIT_FSIZE` capped
+every child file at 16 MiB, including Terraform provider downloads. A 20 MiB
+provider-file story failed at init, then passed with independent bounded streamed
+stdout/stderr capture. A separate excessive-log story still stops the command at
+16 MiB and retains only sanitized failure. No IAM permissions were widened.
+Credential-free actual `terraform init -backend=false` passed with the pinned AWS
+provider larger than 16 MiB and bounded private logs. Trusted GitHub account/
+bucket/operator-role metadata matches the independently recorded identifiers.
+PR #86 merged at `a45d8f7` after all six PR CI jobs passed. Trusted-main retry
+[37245192463](https://github.com/Djimi/OnlineShop-full-stack/actions/runs/37245192463)
+passed with sanitized proof: existing state verified, native-lock plan completed,
+zero resource changes, no apply, no AWS validation success and no mutation-permission
+claim. A read-only owner post-check verified the native lock absent afterward.
+The run warned that `allowed-account-ids` was unsupported by the pinned v4.3.1
+credential action. Independent controller STS/account checks remained effective;
+the workflows now pin reviewed v6.3.0 (`e1253824e5c10ff9df46874f81ed3ec929e19cfd`),
+whose exact metadata supports every configured input and uses Node 24. Hosted
+verification of that new pin passed in trusted-main run
+[37246888048](https://github.com/Djimi/OnlineShop-full-stack/actions/runs/37246888048):
+the sanitized proof again confirms native-lock planning/zero changes/no apply/no
+AWS success. The unsupported-input warning is gone; unrelated Node-20 warnings
+for other actions remain. No IAM/trust widening was introduced.
+
+Runtime recovery now also refuses a detached test container before credentials,
+operation-record replacement or reset—even when the previous local record is
+terminal. Docker lookup failure is not absence. The focused detached-test story
+was observed RED-to-GREEN; cloud-side reconciliation/termination remains unfinished.
+The next host recovery increment adds `run-stack.py --generation <generation>
+--reconcile`: lock/identity/absence observation only, without credentials/reset or
+overwriting the prior operation. Unknown remains unknown, with retry and AWS
+success explicitly false. Its 25 focused runtime stories pass; deployment of this
+host command and whole-session cloud reconciliation remain pending.
+PR #88 merged at `1216a41` after all six PR CI jobs passed. Actual local Docker
+absence/host-lock refusal passed with the unknown record unchanged and no cloud
+calls or Docker mutation; this is not live-host recovery evidence.
+
+### Controller report-content verification
+
+`python3 scripts/aws-validation.py verify-reports --request <request.json>
+--reports <reports.tar> --output <verified-reports.json>` authorizes actors,
+rechecks the current owned pending candidate, validates inert report content, then
+rechecks candidate identity before create-only evidence output. The fixed format
+is an **uncompressed** tar with exactly the two flat `TEST-<suite>.xml` files,
+at most 8 MiB archive/1 MiB payload/512 KiB per file. Compression is refused so
+tar metadata cannot expand past the archive bound. Known suite names/counts,
+unique testcase names/classnames and zero failures/errors/skips are mandatory;
+empty/false counters, missing/duplicate/extra files, links/traversal, malformed
+UTF-8/XML and entity/DOCTYPE declarations refuse. Arbitrary properties, case
+names and system output never enter summary evidence.
+
+Positive parsing and compression refusal were observed RED-to-GREEN. This proves
+content, **not execution provenance**: output explicitly leaves
+`runtime_provenance_verified` and `aws_validation_success` false. Runtime transport,
+stage/report binding and genuine current-candidate validation remain unfinished.
+
+### Routine cloud-reconciliation observations
+
+`aws-validation.py reconcile-cloud --request <request.json> --output <observation.json>`
+authorizes/rechecks the current owned candidate, then observes only fixed operator
+reads: account/role -> state-lock absence -> bounded version/ETag state/pointer ->
+exact ten-resource/current-host identity -> running owned EC2 host -> paginated
+SSM commands **and actual invocations** terminal -> unchanged state/pointer ->
+candidate recheck -> create-only observation. Access denial is not lock absence;
+missing/empty/foreign state, host transitions, active/cancelling/unknown commands,
+malformed pagination or excessive private output refuse. Discovery has one
+five-minute deadline, at most twenty 50-command pages, and independent 1 MiB
+stdout/stderr bounds; snapshots are private and capped at 16 MiB before download.
+
+The independently readable `scripts/aws_cloud_reconciliation.py` owns this cloud
+boundary and allowlists read operations only. It sends no SSM commands, performs
+no mutation, and explicitly requires host observation/persistent-ledger recovery;
+`mutation_authorized` and `aws_validation_success` remain false. The guarded
+operator proof now exercises it before planning, with the helper included in the
+trusted-input check. Positive CLI, nonterminal invocation and operator-preplan
+refusal stories were observed RED-to-GREEN; actual updated hosted proof is pending.
+Quick owner read-only production checks accepted the exact state schema and all
+34 retained terminal invocations; largest SSM page was 117,848 bytes. Those owner
+checks do not prove the operator role or detached-test/whole-session recovery.
+
 ### Open merge-gate provenance issue
 
 GitHub's expected status-check source binds an **App**, not a workflow. The shared
@@ -399,9 +641,9 @@ AWS candidate check proof -> Run workflow** on `main`, entering a reviewed PR
 whose exact candidate has passed the new CI. The harness creates a pending
 **AWS validation** check against that candidate and completes it as **failure**
 because it has not deployed or run AWS E2E. It has no OIDC/AWS permissions.
-This first harness proves only pending/failure association; newest-attempt,
-delayed-old-completion, positive-result selection, and real merge enforcement
-remain unproved. Do not enable the required AWS gate yet.
+The first harness proved pending/failure association; later synthetic latest-
+attempt/delayed-old-completion tests also passed. Actual successful AWS-result
+selection and real merge enforcement remain unproved. Do not enable the gate yet.
 
 ## Incremental delivery checklist
 
@@ -411,8 +653,8 @@ remain unproved. Do not enable the required AWS gate yet.
 - [x] Owner requests implementation planning from the revised spec.
 - [x] Write the implementation plan with requirement coverage and issues.
 - [x] Owner authorizes implementation and selects inline execution (2026-10-04).
-- [ ] Inventory AWS and review suspicious resources before cleanup.
-- [ ] Clean previous playground resources and record the remaining baseline.
+- [x] Scope inventory and review cleanup targets; explicit MSK subscription gaps remain.
+- [x] Clean authorized playground resources and record the preserved baseline.
 - [ ] Document managed resources, bootstrap prerequisites, settings, and costs here.
 - [ ] Provision environment and verify reset, isolation, and recreation.
 - [ ] Automate authorized manual request, publication, deployment, locking, E2E, and evidence.

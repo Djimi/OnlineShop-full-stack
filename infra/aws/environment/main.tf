@@ -46,12 +46,13 @@ resource "aws_security_group" "host" {
 }
 resource "aws_launch_template" "host" {
   name = "onlineshop-test-host"
-  tags = local.tags
+  tags = { ManagedBy = local.tags.ManagedBy, Repository = local.tags.Repository }
   dynamic "tag_specifications" {
     for_each = toset(["instance", "volume", "network-interface"])
     content {
       resource_type = tag_specifications.value
-      tags          = local.tags
+      # Stable launch-time ownership avoids a new version for every attempt.
+      tags = { ManagedBy = local.tags.ManagedBy, Repository = local.tags.Repository }
     }
   }
 }
@@ -82,4 +83,9 @@ resource "aws_instance" "host" {
   tags        = local.tags
   volume_tags = local.tags
   depends_on  = [aws_route.outbound, aws_route_table_association.host]
+}
+resource "aws_ec2_tag" "network_generation" {
+  resource_id = aws_instance.host.primary_network_interface_id
+  key         = "Generation"
+  value       = var.generation
 }

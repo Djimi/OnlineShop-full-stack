@@ -79,11 +79,72 @@ during packaging; never bypass Maven `clean` failures by silently skipping it.
 
 ## GitHub Actions Checks
 
+Guarded operator-plan proof stories:
+`python3 -m unittest -v tests/scripts/aws_operator_plan_test.py`.
+Run actionlint on `.github/workflows/aws-operator-plan-proof.yml`; resolve a
+provisioned binary when it is not on `PATH`. Current reviewed upstream lacks
+GitHub's documented `concurrency.queue` schema: only its exact diagnostic may be
+excluded with `-ignore '^unexpected key "queue" for "concurrency" section\.'`,
+provided parsed YAML independently verifies the shared group, `queue: max` and
+`cancel-in-progress: false`. Do not ignore other diagnostics or claim full schema
+support; hosted manual syntax proof remains required.
+These stories prove authorization before AWS,
+wrong-role refusal, missing/empty/mismatched-state refusal before Terraform,
+locked no-change planning, nonempty expected plan coverage and no apply/raw
+publication. Real operator OIDC/native-lock/plan permissions require a separate
+trusted-main manual run. A no-change plan does not prove EC2 mutation permissions.
+Modified trusted controller/config inputs refuse before AWS; only six fixed
+Terraform inputs, never arbitrary extra files, enter the private planning root.
+Process doubles must preserve actual empty-output semantics: a no-change
+`git diff` emits zero bytes, not a blank line. Otherwise an honest clean-checkout
+guard is tested against a fictitious difference and positive stories fail.
+Failed proof attempts must retain sanitized, actionable evidence: fixed stage/
+reason and allowlisted API error/action labels only. Raw process output, resource
+identifiers and credentials remain private. A red proof must not be described as
+passing merely because authorization/OIDC succeeded.
+Capture regressions exercise both a legitimate 20 MiB provider file (must
+succeed) and excessive private logs (must stop, stay bounded and emit no raw
+content). Global child file-size limits are not selective log limits. Start with
+these focused stories before the full automation/hosted verification.
+Detached-test runtime stories additionally require absence before credentials or
+reset even when the local record is terminal; failed lookup must not mean absence.
+Host recovery-observation stories additionally exercise current-generation/prior
+identity, active lock and detached-test refusal, and unchanged unknown outcomes.
+The positive command story was observed RED-to-GREEN; these process-boundary
+stories are not actual cloud cancellation recovery or retry authorization.
+Workflow action inputs must match metadata at their exact pinned SHA. Live run
+`37245192463` proved operator locked no-change planning with the previous pin;
+the updated v6.3.0 credential action passed separate hosted proof `37246888048`.
+
+Controller report-content stories:
+`python3 -m unittest -v tests/scripts/aws_reports_test.py`. Exercise actual tar/XML
+parsing with GitHub substituted only at its process boundary. Require exactly the
+two recognized suites/four cases with matching counters and no skips/failures;
+reject compressed/linked/traversing/extra/duplicate/excessive/malformed input.
+Verify candidate changes before evidence output refuse and arbitrary testcase
+properties/output never enter evidence. Report content is not execution provenance
+or AWS success; the future locked runtime must establish both stage and transport
+identity before any gate success.
+
+Cloud-observation stories:
+`python3 -m unittest -v tests/scripts/aws_cloud_reconciliation_test.py`. Cover
+fixed read-only operations, wrong-role/state/lock/transition refusal, active later
+SSM pages and nonterminal actual invocations, private output bounds and denied
+lock lookup not being absence. The operator-plan stories also refuse active
+remote operations before Terraform. Mocked process boundaries and owner schema
+reads do not replace actual operator OIDC proof; passing observations never
+authorize mutation without host and persistent-ledger reconciliation.
+
 Owner host-setup command stories:
 `python3 -m unittest -v tests/scripts/aws_host_setup_test.py`.
 These substitute only the AWS process boundary and verify no mutation for foreign
 generation/active remote operation, finite checksummed transfer, no raw output,
-visibility-delay polling and conditional persistent intent. They do not prove
+visibility-delay polling, conditional persistent intent, and read-only lost-ID
+discovery against document/target/body/timeout/terminal invocation. Missing,
+ambiguous, active/cancelling, duplicate-field, excessive or foreign records refuse
+reconciliation; failed terminal commands remain failed, not setup success.
+Positive discovery and pre-download size bounds were observed RED-to-GREEN;
+the remaining boundaries are explicit regression stories. They do not prove
 host installation/isolation or routine OIDC orchestration; record those separately.
 
 Every push and pull request runs independent Java, frontend, and image/PR-E2E

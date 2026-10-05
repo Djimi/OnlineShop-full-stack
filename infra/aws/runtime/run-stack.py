@@ -51,8 +51,17 @@ class TerminationUnknown(RuntimeFailed):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--generation", required=True)
-    parser.add_argument("--images", type=Path, required=True)
+    parser.add_argument("--images", type=Path)
+    parser.add_argument(
+        "--reconcile",
+        action="store_true",
+        help="Observe host lock/test absence and prior outcome; never authorize retry",
+    )
     args = parser.parse_args()
+    if (args.images is None) != args.reconcile:
+        parser.error(
+            "choose --images for runtime execution or --reconcile for observation"
+        )
     operation = None
     try:
         if not re.fullmatch(r"run-[1-9][0-9]*-attempt-[1-9][0-9]*", args.generation):
@@ -72,8 +81,12 @@ def main():
                 fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
             except BlockingIOError:
                 raise RuntimeFailed("another host operation is active") from None
+            if args.reconcile:
+                observe_recovery(args.generation)
+                return 0
             bootstrap, images = verify_generation(args.generation, args.images)
             verify_metadata_blocks()
+            verify_no_detached_test()
             operation = {
                 "generation": args.generation,
                 "status": "running",
@@ -170,6 +183,37 @@ def read_json(path):
         return result
 
     return json.loads(path.read_bytes(), object_pairs_hook=fields)
+
+
+def observe_recovery(generation):
+    if read_json(STATE / "current-generation.json") != {"generation": generation}:
+        raise RuntimeFailed("selected generation is not current")
+    previous = STATE / "operation.json"
+    status = "absent"
+    if previous.exists():
+        record = read_json(previous)
+        if record.get("generation") != generation or record.get("status") not in {
+            "running",
+            "unknown",
+            "passed",
+            "failed",
+            "cancelled",
+        }:
+            raise RuntimeFailed("previous operation identity is not recognized")
+        status = record["status"]
+    verify_no_detached_test()
+    print(
+        json.dumps(
+            {
+                "generation": generation,
+                "previous_status": status,
+                "host_lock_acquired": True,
+                "test_container_absent": True,
+                "automatic_retry_authorized": False,
+                "aws_validation_success": False,
+            }
+        )
+    )
 
 
 def verify_generation(generation, path):
@@ -621,6 +665,20 @@ def collect_reports(env, credentials, generation):
         raise RuntimeFailed(
             "required tests failed or were not executed; sanitized reports retained"
         )
+
+
+def verify_no_detached_test():
+    # A terminal controller record is not proof that a detached container ended.
+    # Fail before credentials/reset; only reconciled recovery may remove it.
+    try:
+        names = command(
+            ["docker", "ps", "-aq", "--filter", "name=^" + PROJECT + "-e2e$"],
+            timeout=10,
+        )
+    except RuntimeFailed:
+        raise TerminationUnknown("detached test absence cannot be verified") from None
+    if names.strip():
+        raise TerminationUnknown("detached test requires reconciliation")
 
 
 def remove_test_container(env, generation):

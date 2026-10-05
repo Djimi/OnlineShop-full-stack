@@ -7,6 +7,33 @@ minimizing line count or demonstrating abstraction.
 
 ## Required reading order
 
+Use the shortest trustworthy feedback loop first: reproduce a small automation
+failure with a focused story or bounded read-only command before launching broad
+suites or hosted pipelines. Diagnose one boundary at a time. After the fix is
+established, run the full affected-task verification before committing/integrating.
+Do not bypass role trust, logging safeguards or state protections to obtain quick
+feedback; owner read-only checks do not substitute for actual routine-role proof.
+
+Bound captured stdout/stderr independently from legitimate command artifacts.
+`RLIMIT_FSIZE` limits every file a process writes, not just its logs; applying a
+small log cap to installers/build tools can break provider downloads or build
+outputs. Use bounded streaming capture and terminate the owned process group on
+overflow/deadline. Test both large legitimate output files and excessive logs.
+
+Before verification, resolve the actual linter binary and its supported schema;
+absence from `PATH` is not proof that no installation exists. When GitHub adds a
+documented workflow property before a linter supports it, verify the official
+contract and check a reviewed pinned tool revision rather than removing the safety
+property. If upstream still lacks support, validate that exact field separately,
+exclude only its exact diagnostic and record the limitation; never suppress
+unrelated errors or claim full schema support. Discover a tool repository's default
+branch before resolving a revision; do not guess `main`/`master`.
+
+Validate action inputs against `action.yml` at the exact pinned commit, not the
+latest README. Unsupported security inputs can be ignored with only a runner
+warning. Keep independent controller identity checks; hosted action warnings are
+verification findings even when the job passes.
+
 Every non-trivial script must make these layers easy to find, in this order:
 
 1. A brief contract: what the command changes, what it deliberately does not
