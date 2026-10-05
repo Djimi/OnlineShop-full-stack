@@ -56,14 +56,36 @@ root-specific init/validate/test commands from [infra/aws/README.md](../infra/aw
 Mock tests and read-only IAM simulations are not actual OIDC/role/isolation proof.
 Publisher stories additionally substitute the AWS/Docker process boundaries,
 reject source-artifact/candidate/account mismatches and compare pushed digests.
-The manual validation workflow is currently packaging-only and always concludes
-its candidate check as failure; actual runtime validation remains unfinished.
+The manual validation workflow now has a locked 65-minute operator session,
+7200-second credentials, immutable operation ledger/CAS pointer, existing-host
+tag-only saved planning, fixed host transport and stage-bound evidence, and
+candidate/latest-attempt rechecks before owned success. Runtime success is pending
+until uploaded artifact identity, content and retention are verified inside the
+locked job. Regressions cover repeated generation gaps, admission interruptions,
+conflicting history, compressed metadata bombs, failed artifact upload, pre-upload
+cancellation and summary-write failure. Test the full local story suite with
+`python3 -m unittest discover -s tests/scripts -p '*_test.py'` under the
+AWS-trapping runtime batch PATH documented in the handoff. Local doubles do not
+prove deployed host grants, hosted transport, live AWS recovery or current-candidate
+GitHub check selection. The nonsensitive `AWS_TESTING_SECRET_ARN` Environment
+variable was verified against protected bootstrap identity; reviewed host-role
+transport policy apply remains pending. Task 7 disposal/recreation and the final
+merge gate remain unfinished.
 
 Runtime stories: `python3 -m unittest -v tests/scripts/aws_runtime_test.py`.
 Opt-in actual local reset:
 `AWS_IMAGE_RECEIPT=<protected-images-receipt> python3 -m unittest -v tests/integration/aws_compose_reset_test.py`.
 See [runtime contract](../infra/aws/runtime/AGENTS.md) for prerequisites/scope.
 This verifies clean DB/cache/broker state and E2E, not EC2 metadata/reboot isolation.
+Run the opt-in story with a restrictive `umask 077`. Explicitly set nonsecret
+fixture directories/SQL readable by the database container UID (0755/0644), while
+generated credential/config files stay 0600. Never rely on the invoking shell's
+umask for cross-container fixture accessibility. The actual fixture-access failure
+was observed before the corrected reset/E2E story passed.
+The integration story must consume the production initializer's receipt-verified
+sibling `fixtures.tar`, not assemble a separately corrected copy of checkout SQL.
+Verify mounted fixture access from the real PostgreSQL UID; a test-only chmod can
+hide a production umask bug. The private runtime/config ancestors stay 0700.
 
 Read-only role proof stories:
 `python3 -m unittest -v tests/scripts/aws_boundary_proof_test.py`.
@@ -76,6 +98,19 @@ helper, including offline Maven, writable bounded build-parent tmpfs and report
 copy before container termination. A passing writable `docker run` does not prove
 the read-only configuration. Cache dynamically selected test providers explicitly
 during packaging; never bypass Maven `clean` failures by silently skipping it.
+
+## Automation execution feedback
+
+Batch coherent changes -> focused local proof -> full affected local checks ->
+hosted CI -> AWS trial when required. Prove changes locally before spending an AWS
+trial; local tests still do not replace actual role/runtime/live-gate evidence.
+Use fresh, scoped contexts for workstreams and authorized subagents for independent
+review/preparation.
+
+Watch hosted CI fail-fast: report the first failed step and its bounded, sanitized
+diagnostics as soon as it fails, then diagnose without waiting for every job.
+Independent jobs and required cleanup may continue; a passing claim still requires
+all applicable checks to pass. A pending run is not task completion.
 
 ## GitHub Actions Checks
 
@@ -134,6 +169,21 @@ lock lookup not being absence. The operator-plan stories also refuse active
 remote operations before Terraform. Mocked process boundaries and owner schema
 reads do not replace actual operator OIDC proof; passing observations never
 authorize mutation without host and persistent-ledger reconciliation.
+Lock absence stories must model prefix-restricted roles accurately: missing HEAD
+can be 403, not the owner's 404. Use exact-prefix bounded listing and assert that
+denial/truncation cannot become absence. Policy simulation and owner reads remain
+quick diagnostic feedback, not live role proof.
+The corrected actual operator cloud/native-plan proof passed `37275392787`; host
+and persistent operation recovery still remain separate required evidence.
+
+Publication-input stories:
+`python3 -m unittest -v tests/scripts/aws_publication_evidence_test.py`. Authenticate
+the exact trusted-main publishing run/attempt/prerequisite jobs and artifact
+digest, verify a bounded inert receipt/fixture, and recheck candidate before output.
+Reject missing/duplicate/expired/corrupt artifacts, skipped publisher, forged run,
+wrong candidate/mutable target, unsafe ZIP and fixture mismatch. Historical owner
+GitHub reads can verify schema/provenance quickly but do not replace the command's
+current pending-attempt authorization or current-candidate runtime evidence.
 
 Owner host-setup command stories:
 `python3 -m unittest -v tests/scripts/aws_host_setup_test.py`.

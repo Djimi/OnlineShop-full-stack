@@ -14,11 +14,25 @@ After reconciliation, an inspected policy-only bootstrap update and host-only
 environment plan launched Free-plan-eligible `m7i-flex.large`. Actual host/disk/
 metadata/profile/no-ingress settings and unchanged Free plan were verified.
 The migrated host now runs the app after owner full-stack/four-test E2E and seeded
-clean-state reset/retest proofs. Routine orchestration, disposal/recreation and
-current-candidate merge validation remain unfinished.
+clean-state reset/retest proofs. Local Tasks 5–6 implement the locked validation
+orchestrator and trusted host envelope; deployed transport/recovery, hosted
+current-candidate validation, disposal/recreation and final merge validation remain
+unfinished. Host runtime-input/evidence S3 grants are defined narrowly, pending an
+inspected bootstrap apply.
 Do not treat mock tests as proof of real IAM permissions, locking or isolation.
 See [operational evidence](../../docs/TESTING-ENVIRONMENT.md) and the
 [implementation plan](../../planning/aws-testing-environment-PLAN.md).
+
+The owner accepts normal Actions App identity/scoped check writes, trusting
+authorized repository maintainers and reviewed workflows; workflow changes require
+review. No dedicated App is required. Exact candidate/manual authorization,
+latest-attempt/failure enforcement and live gate proofs remain mandatory; this
+decision does not complete runtime, disposal or merge protection.
+
+Execution follows coherent batches -> local proof -> AWS trial, with fresh scoped
+workstreams and independent subagent review/preparation when authorized. Observe CI
+fail-fast at the first failed step; see
+[automation execution feedback](../../docs/TESTING_STRATEGY.md#automation-execution-feedback).
 
 ## Fixed inputs and storage
 
@@ -194,7 +208,18 @@ The controller's separate `reconcile-cloud` observation verifies fixed operator
 state/lock/EC2/SSM reads and rechecks candidate/snapshot identities, never authorizing
 mutation. It requires both host observation and persistent-ledger reconciliation.
 The guarded operator proof now runs this cloud half before planning; actual updated
-hosted proof is pending. No new IAM permissions or arbitrary state roots are introduced.
+hosted proof passed `37275392787`. No new IAM permissions or arbitrary state roots are introduced.
+The first cloud increment's live trial failed its lock HEAD lookup. Missing-object
+HEAD can be forbidden under prefix-restricted bucket listing; it is not an absence
+proof. The corrected check lists only the authorized exact lock prefix, at most
+two keys, and refuses denial/truncation. No IAM widening is introduced. Updated
+actual role retry passed; never treat HTTP 403 as absence or force-unlock.
+Corrected actual operator trial `37275392787` passed scoped absence and bounded
+state/EC2/SSM observations plus a no-change native-lock plan. It still requires
+host/persistent-ledger reconciliation and cannot authorize mutation or AWS success.
+Controller `verify-publication` independently authenticates the exact trusted
+publisher receipt artifact and fixture bytes without AWS or code execution;
+historical input verification is not current-candidate deployment evidence.
 
 ```text
 verify account and absent intended bucket/key
@@ -239,7 +264,8 @@ ECR candidate tags are immutable; only `active-*` retention pointers are mutable
 A highest-priority active-tag rule protects a bounded previous/incoming/current
 set from lower-priority candidate/untagged expiration. Moving and releasing
 those pointers belongs to the locked runtime controller, not publisher jobs.
-That controller and live retention proof are not yet implemented.
+The local controller implements routine pointer protection/release; actual hosted
+retention proof remains pending.
 
 Read-only Access Analyzer validation found no policy errors. Its GitHub-specific
 recommendation currently does not recognize the observed immutable-ID subject;
@@ -248,8 +274,29 @@ simulations passed launch-resource and isolation scenarios. These are not actual
 OIDC assumed-role deny proofs; live role tests still precede routine deployment.
 
 The [trusted runtime](runtime/AGENTS.md) has process-boundary coverage and an
-actual local Compose reset proof. Host setup/hooks are defined, not applied on
-EC2. SSM orchestration, host isolation and final merge gate remain unfinished.
+actual local Compose reset proof. The routine controller only admits inspected
+tag-only generation changes on the existing host; missing, disposed or partial
+unexpected state fails closed (Task 7 recreation is not implemented). Immutable
+intent/launched/terminal ledger events, predecessor-aware crash gaps and a CAS
+generation pointer prevent lost-ID ambiguity from becoming an automatic retry.
+Recovered-aborted requires terminal SSM invocation and fresh host lock/process/test/
+temporary-credential absence; there is no automatic unlock. Host inputs use
+create-only `operations/runtime-input/` objects and evidence uses the host-only
+`operations/runtime-evidence/` boundary through a fixed hash-verified SSM bootstrap.
+The exact nonsensitive `AWS_TESTING_SECRET_ARN` Environment variable is configured
+and matches the protected bootstrap identity by read-only verification. See the
+runtime module contract for bounds and refusal details.
+Verified host predecessor identity survives repeated cloud tag-apply/admission
+gaps. Durable exact admission transitions reconcile local write/launch
+interruptions without overwriting predecessor history. Runtime produces
+pending-success only; owned success follows independent uploaded-artifact/retention
+verification and current/latest candidate recheck inside the same locked job.
+The shared operator job holds `aws-testing-environment` with `queue: max`, no
+cancellation, a 65-minute job bound and 7200-second credentials. Hosted
+current-candidate success, deployed transport/recovery and final merge gate remain
+unproved; sanitized evidence retention is at least 14 days. Prior/incoming image
+retention is protected across failure; unknown owner tags remain, and failed history
+is capped at 20 predecessors pending reviewed recovery.
 The `AWS role boundary proof` workflow separately verifies selected
 publisher/operator allowed and denied reads using actual OIDC credentials.
 It never mutates AWS or reads data into retained artifacts; only operation labels

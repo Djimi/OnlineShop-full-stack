@@ -6,7 +6,8 @@ are prerequisites. A host process lock spans reset through evidence collection.
 Secrets exist only in restricted temporary configuration; no cloud credentials
 reach candidate containers. Missing reports, unknown operations or stale identity
 fail closed. The app remains for inspection; this command never publishes GitHub
-success. Cloud-side reconciliation/transport is a separate unfinished controller.
+success. The separate locked controller owns cloud reconciliation/transport;
+local orchestration stories do not substitute for hosted AWS proof.
 """
 
 import argparse
@@ -53,6 +54,11 @@ def main():
     parser.add_argument("--generation", required=True)
     parser.add_argument("--images", type=Path)
     parser.add_argument(
+        "--host-lock-fd",
+        type=int,
+        help="Inherited trusted host-session lock; descriptor must match host.lock",
+    )
+    parser.add_argument(
         "--reconcile",
         action="store_true",
         help="Observe host lock/test absence and prior outcome; never authorize retry",
@@ -73,9 +79,20 @@ def main():
         ):
             raise RuntimeFailed("unsafe runtime directory")
         STATE.chmod(0o700)
-        descriptor = os.open(
-            STATE / "host.lock", os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600
-        )
+        if args.host_lock_fd is None:
+            descriptor = os.open(
+                STATE / "host.lock", os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600
+            )
+        else:
+            inherited = os.fstat(args.host_lock_fd)
+            actual = (STATE / "host.lock").lstat()
+            if (
+                inherited.st_dev != actual.st_dev
+                or inherited.st_ino != actual.st_ino
+                or (STATE / "host.lock").is_symlink()
+            ):
+                raise RuntimeFailed("inherited host lock does not match trusted lock")
+            descriptor = os.dup(args.host_lock_fd)
         with os.fdopen(descriptor, "w") as lock:
             try:
                 fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -198,6 +215,7 @@ def observe_recovery(generation):
             "passed",
             "failed",
             "cancelled",
+            "recovered-aborted",
         }:
             raise RuntimeFailed("previous operation identity is not recognized")
         status = record["status"]
@@ -225,6 +243,7 @@ def verify_generation(generation, path):
         "passed",
         "failed",
         "cancelled",
+        "recovered-aborted",
     ]:
         raise RuntimeFailed("previous operation requires reconciliation")
     bootstrap = read_json(ROOT / "bootstrap.json")
@@ -332,9 +351,15 @@ def initialize_fixtures():
         ):
             raise RuntimeFailed("unsafe owned fixture directory")
         shutil.rmtree(destination)
+    destination.mkdir(mode=0o755)
+    destination.chmod(0o755)
     for name, content in files.items():
-        target = STATE / "fixtures" / name
+        target = destination / name
         target.parent.mkdir(parents=True, exist_ok=True, mode=0o755)
+        # mkdir's mode is masked by the bootstrap's umask 077. Only this
+        # nonsecret tree is traversable; STATE and credential directories stay private.
+        target.parent.parent.chmod(0o755)
+        target.parent.chmod(0o755)
         if target.is_symlink():
             raise RuntimeFailed("unsafe fixture destination")
         with target.open("wb") as stream:
@@ -576,9 +601,10 @@ def collect_reports(env, credentials, generation):
     )
     if not data:
         raise RuntimeFailed("required reports are missing")
+    verify_report_archive(data)
     suites = {}
     unsuccessful = False
-    with tarfile.open(fileobj=io.BytesIO(data), mode="r:*") as archive:
+    with tarfile.open(fileobj=io.BytesIO(data), mode="r|") as archive:
         seen, total = set(), 0
         for member in archive:
             path = Path(member.name)
@@ -665,6 +691,49 @@ def collect_reports(env, credentials, generation):
         raise RuntimeFailed(
             "required tests failed or were not executed; sanitized reports retained"
         )
+
+
+def verify_report_archive(data):
+    """Reject non-plain headers before tarfile can expand candidate metadata."""
+    if len(data) > MAX_DATA or len(data) % tarfile.BLOCKSIZE:
+        raise RuntimeFailed("unsafe report archive")
+    allowed = {
+        f"surefire-reports/{prefix}{name}.{suffix}"
+        for name in SUITES
+        for prefix, suffix in [("TEST-", "xml"), ("", "txt")]
+    }
+    offset, seen = 0, set()
+    while offset + tarfile.BLOCKSIZE <= len(data):
+        block = data[offset : offset + tarfile.BLOCKSIZE]
+        if block == b"\0" * tarfile.BLOCKSIZE:
+            if len(data) - offset < 1024 or any(data[offset:]):
+                raise RuntimeFailed("unsafe report archive terminator")
+            return
+        # frombuf parses one fixed 512-byte header only. Extended/PAX/GNU/sparse
+        # headers must never reach tarfile's recursive metadata processing.
+        member = tarfile.TarInfo.frombuf(block, "utf-8", "strict")
+        if (
+            member.type not in {tarfile.REGTYPE, tarfile.AREGTYPE, tarfile.DIRTYPE}
+            or member.size < 0
+            or member.size > 1024**2
+            or member.name in seen
+            or len(seen) >= 5
+            or (
+                member.isdir()
+                and (member.name.rstrip("/") != "surefire-reports" or member.size)
+            )
+            or (member.isfile() and member.name not in allowed)
+        ):
+            raise RuntimeFailed("unsafe report archive")
+        seen.add(member.name)
+        offset += (
+            tarfile.BLOCKSIZE
+            + ((member.size + tarfile.BLOCKSIZE - 1) // tarfile.BLOCKSIZE)
+            * tarfile.BLOCKSIZE
+        )
+        if offset > len(data):
+            raise RuntimeFailed("truncated report archive")
+    raise RuntimeFailed("missing report archive terminator")
 
 
 def verify_no_detached_test():

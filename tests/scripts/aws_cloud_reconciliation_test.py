@@ -74,11 +74,15 @@ with (root/'aws-calls.jsonl').open('a') as output:output.write(json.dumps(args)+
 if fixture.get('flood'):sys.stdout.write('raw-secret-canary'*100000);sys.exit(0)
 if fixture.get('lock_read_denied') and 'state/environment.tfstate.tflock' in args:print('AccessDenied: raw-secret-canary',file=sys.stderr);sys.exit(254)
 if args[:2]==['sts','get-caller-identity']:print(json.dumps({'Account':fixture['account'],'Arn':'arn:aws:sts::'+fixture['account']+':assumed-role/'+fixture['role']+'/session'}))
+elif args[:2]==['s3api','list-objects-v2']:
+ if args[args.index('--prefix')+1]!='state/environment.tfstate.tflock' or args[args.index('--max-keys')+1]!='2':sys.exit(99)
+ contents=[{'Key':'state/environment.tfstate.tflock'}] if fixture['lock_exists'] else []
+ print(json.dumps({'Contents':contents,'KeyCount':len(contents),'IsTruncated':fixture.get('lock_listing_truncated',False)}))
 elif args[:2]==['s3api','head-object']:
  key=args[args.index('--key')+1]
  if key.endswith('.tflock'):
   if fixture['lock_exists']:print(json.dumps({'ContentLength':10,'ETag':'"lock"','VersionId':'v1'}))
-  else:print('An error occurred (404) when calling the HeadObject operation: Not Found',file=sys.stderr);sys.exit(254)
+  else:print('An error occurred (403) when calling the HeadObject operation: Forbidden',file=sys.stderr);sys.exit(254)
  else:
   data=fixture['pointer'] if key.startswith('operations/') else fixture['state'];print(json.dumps({'ContentLength':len(json.dumps(data).encode()),'ETag':'"snapshot"','VersionId':'v1'}))
 elif args[:2]==['s3api','get-object']:
@@ -141,6 +145,7 @@ else:print('raw-secret-canary',file=sys.stderr);sys.exit(99)
                 in {
                     "get-caller-identity",
                     "head-object",
+                    "list-objects-v2",
                     "get-object",
                     "describe-instances",
                     "list-commands",
@@ -197,3 +202,27 @@ else:print('raw-secret-canary',file=sys.stderr);sys.exit(99)
                 self.assertNotEqual(result.returncode, 0)
                 self.assertFalse((self.directory / "cloud-observation.json").exists())
                 self.aws.pop(key)
+
+    def test_prefix_scoped_lock_absence_uses_listing_not_forbidden_missing_object_head(
+        self,
+    ):
+        result, calls = self.invoke_cloud()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        listings = [call for call in calls if call[:2] == ["s3api", "list-objects-v2"]]
+        self.assertEqual(len(listings), 1)
+        self.assertIn("state/environment.tfstate.tflock", listings[0])
+        self.assertIn("--max-keys", listings[0])
+        self.assertFalse(
+            any(
+                call[:2] == ["s3api", "head-object"]
+                and "state/environment.tfstate.tflock" in call
+                for call in calls
+            )
+        )
+
+    def test_truncated_lock_listing_cannot_establish_absence(self):
+        self.aws["lock_listing_truncated"] = True
+        result, calls = self.invoke_cloud()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertFalse((self.directory / "cloud-observation.json").exists())
+        self.assertFalse(any(call[0] in {"ec2", "ssm"} for call in calls))

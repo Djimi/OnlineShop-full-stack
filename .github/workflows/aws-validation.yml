@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       pr:
-        description: Reviewed same-repository PR number (packaging trial; runtime not yet enabled)
+        description: Reviewed same-repository PR number for exact-candidate AWS validation
         required: true
         type: string
 
@@ -44,7 +44,7 @@ jobs:
           with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
               output.write('candidate=' + record['candidate_sha'] + '\n')
           with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as output:
-              output.write(f"PR #{record['pr']}; head `{record['head_sha']}`; base `{record['base_sha']}`; candidate `{record['candidate_sha']}`; actor `{record['actor']}`; triggering actor `{record['triggering_actor']}`; run/attempt `{record['validation_run_id']}/{record['validation_run_attempt']}`. Packaging trial only; no runtime success can be published.\n")
+               output.write(f"PR #{record['pr']}; head `{record['head_sha']}`; base `{record['base_sha']}`; candidate `{record['candidate_sha']}`; actor `{record['actor']}`; triggering actor `{record['triggering_actor']}`; run/attempt `{record['validation_run_id']}/{record['validation_run_attempt']}`. AWS success requires the locked runtime and bound reports.\n")
           PY
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
@@ -154,9 +154,113 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
-  outcome:
-    name: Packaging-only non-success outcome
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: aws-runtime-fixtures-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/build-artifacts/fixtures.tar
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 0
+
+  validate:
+    name: Validate current candidate in AWS
     needs: [request, build, publish]
+    if: github.ref == 'refs/heads/main'
+    environment: aws-testing
+    runs-on: ubuntu-latest
+    timeout-minutes: 65
+    concurrency:
+      group: aws-testing-environment
+      queue: max
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      pull-requests: read
+      actions: read
+      checks: write
+      id-token: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      AWS_TESTING_ACCOUNT_ID: ${{ vars.AWS_TESTING_ACCOUNT_ID }}
+      AWS_TESTING_STATE_BUCKET: ${{ vars.AWS_TESTING_STATE_BUCKET }}
+      AWS_TESTING_SECRET_ARN: ${{ vars.AWS_TESTING_SECRET_ARN }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Initialize sanitized session evidence
+        run: |
+          install -d -m 0700 "$RUNNER_TEMP/runtime-evidence"
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          (Path(os.environ['RUNNER_TEMP']) / 'runtime-evidence' / 'admission.json').write_text(json.dumps({'status':'pending','aws_validation_success':False}))
+          PY
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: aws-request-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/request
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: aws-images-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/publication
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: aws-runtime-fixtures-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/fixtures
+      - name: Authorize actors and current candidate publication before OIDC
+        run: >-
+          python3 scripts/aws-validation.py validate-preflight
+          --request "$RUNNER_TEMP/request/request.json"
+          --images "$RUNNER_TEMP/publication/images.json"
+          --fixtures "$RUNNER_TEMP/fixtures/fixtures.tar"
+          --output "$RUNNER_TEMP/runtime-evidence"
+      - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3
+        with:
+          terraform_version: 1.16.5
+          terraform_wrapper: false
+      - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: ${{ vars.AWS_TESTING_OPERATOR_ROLE }}
+          aws-region: eu-north-1
+          allowed-account-ids: ${{ vars.AWS_TESTING_ACCOUNT_ID }}
+          role-session-name: validate-${{ github.run_id }}-${{ github.run_attempt }}
+          role-duration-seconds: 7200
+          mask-aws-account-id: true
+      - name: Reconcile provision reset test and finalize exact candidate
+        run: >-
+          python3 scripts/aws-validation.py validate
+          --request "$RUNNER_TEMP/request/request.json"
+          --images "$RUNNER_TEMP/publication/images.json"
+          --fixtures "$RUNNER_TEMP/fixtures/fixtures.tar"
+          --output "$RUNNER_TEMP/runtime-evidence"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        id: runtime_evidence
+        name: Retain sanitized runtime evidence
+        if: always()
+        with:
+          name: aws-runtime-evidence-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/runtime-evidence/
+          if-no-files-found: error
+          retention-days: 14
+      - name: Verify retained runtime evidence and publish owned success
+        if: success()
+        env:
+          RUNTIME_ARTIFACT_ID: ${{ steps.runtime_evidence.outputs.artifact-id }}
+          RUNTIME_ARTIFACT_DIGEST: ${{ steps.runtime_evidence.outputs.artifact-digest }}
+        run: >-
+          python3 scripts/aws-validation.py finalize-success
+          --request "$RUNNER_TEMP/request/request.json"
+          --artifact-id "$RUNTIME_ARTIFACT_ID"
+          --artifact-digest "$RUNTIME_ARTIFACT_DIGEST"
+      - name: Finalize unsuccessful owned attempt inside session lock
+        if: failure() || cancelled()
+        run: python3 scripts/aws-validation.py finalize-failure --request "$RUNNER_TEMP/request/request.json"
+
+  outcome:
+    name: Prerequisite failure outcome
+    needs: [request, build, publish, validate]
     if: always() && github.ref == 'refs/heads/main' && needs.request.result == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -173,9 +277,9 @@ jobs:
         with:
           name: aws-request-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/request
-      - name: Never infer AWS success from packaging
+      - name: Preserve completed success or finalize incomplete owned attempt
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           python3 scripts/aws-validation.py finalize-failure --request "$RUNNER_TEMP/request/request.json"
-          echo 'Packaging-only trial: runtime validation remains unfinished; AWS validation is unsuccessful.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'Owned failure finalizer preserves already completed runtime outcomes; missing runtime success remains non-success.' >> "$GITHUB_STEP_SUMMARY"

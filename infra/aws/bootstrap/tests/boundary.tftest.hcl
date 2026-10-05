@@ -27,6 +27,21 @@ variables {
 run "retained_bootstrap" {
   command = plan
   assert {
+    condition = alltrue([for pair in [
+      { action = "s3:GetObject", resource = "arn:aws:s3:::test-protected-state/operations/runtime-input/*" },
+      { action = "s3:PutObject", resource = "arn:aws:s3:::test-protected-state/operations/runtime-evidence/*" }
+      ] : anytrue([for statement in jsondecode(aws_iam_role_policy.host.policy).Statement :
+        flatten([statement.Action]) == [pair.action] && flatten([statement.Resource]) == [pair.resource]
+    ])])
+    error_message = "Host transport must grant only exact input reads and evidence writes; no state/list/delete permission."
+  }
+  assert {
+    condition = length([for statement in jsondecode(aws_iam_role_policy.host.policy).Statement : statement
+      if anytrue([for action in flatten([statement.Action]) : startswith(action, "s3:")])
+    ]) == 2
+    error_message = "Host must have exactly two narrow S3 transport statements."
+  }
+  assert {
     condition = anytrue([for statement in jsondecode(aws_iam_role_policy.operator.policy).Statement :
       statement.Sid == "LaunchTaggedHost" &&
       try(statement.Condition.StringEquals["ec2:InstanceType"], "") == "m7i-flex.large"

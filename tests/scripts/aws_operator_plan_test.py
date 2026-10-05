@@ -83,8 +83,9 @@ class OperatorPlanStories(unittest.TestCase):
             "aws": """
 if args[:2]==['sts','get-caller-identity']:
  print(json.dumps({'Account':'111111111111','Arn':'arn:aws:sts::111111111111:assumed-role/onlineshop-test-'+('publisher' if os.environ.get('WRONG_ROLE') else 'operator')+'/proof'}))
+elif args[:2]==['s3api','list-objects-v2']:print(json.dumps({'KeyCount':0,'IsTruncated':False}))
 elif args[:2]==['s3api','head-object']:
- if 'state/environment.tfstate.tflock' in args:print('An error occurred (404) when calling the HeadObject operation: Not Found',file=sys.stderr);sys.exit(254)
+ if 'state/environment.tfstate.tflock' in args:print('An error occurred (403) when calling the HeadObject operation: Forbidden',file=sys.stderr);sys.exit(254)
  if os.environ.get('MISSING_STATE') and 'state/environment.tfstate' in args:sys.exit(1)
  file=root/('state.json' if 'state/environment.tfstate' in args else 'pointer.json');print(json.dumps({'ETag':'"snapshot"','VersionId':'v1','ContentLength':file.stat().st_size}))
 elif args[:2]==['s3api','get-object']:

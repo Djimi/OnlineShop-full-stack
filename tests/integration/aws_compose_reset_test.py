@@ -11,6 +11,7 @@ import json
 import os
 import re
 import secrets
+import shutil
 import subprocess
 import tempfile
 import unittest
@@ -58,6 +59,20 @@ class ActualComposeResetStory(unittest.TestCase):
         ) as directory:
             path = Path(directory)
             project = "aws-reset-" + path.name.rsplit("-", 1)[-1]
+            spec = importlib.util.spec_from_file_location(
+                "trusted_runtime", ROOT / "infra/aws/runtime/run-stack.py"
+            )
+            self.runtime = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(self.runtime)
+            self.runtime.PROJECT = project
+            self.runtime.STATE = path / ".runtime"
+            self.runtime.STATE.mkdir(mode=0o700)
+            self.runtime.STATE.chmod(0o700)
+            shutil.copyfile(
+                receipt.parent / "fixtures.tar", self.runtime.STATE / "fixtures.tar"
+            )
+            self.runtime.verify_fixture_transport(record["fixtures"])
+            self.initialize_fixtures()
             env = {
                 key: value
                 for key, value in os.environ.items()
@@ -76,21 +91,21 @@ class ActualComposeResetStory(unittest.TestCase):
                 + "-attempt-"
                 + str(record["validation_run_attempt"])
             )
-            env.update(GENERATION=generation, DOCKER_CONFIG=str(path / "docker-config"))
-            (path / "docker-config").mkdir(mode=0o700)
+            env.update(
+                GENERATION=generation,
+                DOCKER_CONFIG=str(self.runtime.STATE / "docker-config"),
+            )
+            (self.runtime.STATE / "docker-config").mkdir(mode=0o700)
             passwords = {
                 key: secrets.token_urlsafe(32)
                 for key in ["auth_db_password", "items_db_password", "e2e_password"]
             }
-            secret_file = path / "run.env"
-            secret_file.write_text(
-                "AUTH_DB_PASSWORD="
-                + passwords["auth_db_password"]
-                + "\nITEMS_DB_PASSWORD="
-                + passwords["items_db_password"]
-                + "\n"
-            )
-            secret_file.chmod(0o600)
+            self.runtime.write_secret_files(passwords)
+            secret_file = self.runtime.STATE / "run.env"
+            for filename in ["run.env", "e2e.env"]:
+                self.assertEqual(
+                    (self.runtime.STATE / filename).stat().st_mode & 0o777, 0o600
+                )
             self.run_command(
                 [
                     "docker",
@@ -129,12 +144,9 @@ class ActualComposeResetStory(unittest.TestCase):
                 for mount in service.get("volumes", []):
                     if mount["type"] == "bind":
                         owner = "Auth" if "Auth/init-db" in mount["source"] else "Items"
-                        destination = path / "fixtures" / owner
-                        destination.mkdir(parents=True, exist_ok=True)
-                        for source in (ROOT / owner / "init-db").glob("*.sql"):
-                            if owner == "Auth" and source.name == "02-seed-data.sql":
-                                continue
-                            (destination / source.name).write_bytes(source.read_bytes())
+                        destination = (
+                            self.runtime.STATE / "fixtures" / owner / "init-db"
+                        )
                         mount["source"] = str(destination)
                 for port in service.get("ports", []):
                     port["published"] = "0"
@@ -164,6 +176,29 @@ class ActualComposeResetStory(unittest.TestCase):
                     env,
                     timeout=360,
                 )
+                for service in ["auth-postgres", "items-postgres"]:
+                    # Exercise the real database UID, not root's ability to read
+                    # bind mounts or an independently chmod'ed test fixture.
+                    output = self.run_command(
+                        [
+                            *compose,
+                            "exec",
+                            "-T",
+                            "--user",
+                            "70:70",
+                            service,
+                            "sh",
+                            "-ec",
+                            (
+                                'test "$(id -u)" = 70; '
+                                "test -r /docker-entrypoint-initdb.d/01-schema.sql; "
+                                "for file in /docker-entrypoint-initdb.d/*.sql; do "
+                                "cat \"$file\" >/dev/null; done; printf 'fixtures-readable\\n'"
+                            ),
+                        ],
+                        env,
+                    )
+                    self.assertEqual(output.strip(), b"fixtures-readable")
                 for service, port, endpoint in [
                     ("api-gateway", "10000", "/actuator/health"),
                     ("frontend", "5173", "/"),
@@ -254,6 +289,7 @@ class ActualComposeResetStory(unittest.TestCase):
                     env,
                     timeout=120,
                 )
+                self.initialize_fixtures()
                 self.run_command(
                     [
                         *compose,
@@ -363,21 +399,15 @@ class ActualComposeResetStory(unittest.TestCase):
                     check=True,
                 )
 
+    def initialize_fixtures(self):
+        previous = os.umask(0o077)
+        try:
+            self.runtime.initialize_fixtures()
+        finally:
+            os.umask(previous)
+
     def run_e2e(self, record, env, project, container, generation, passwords, path):
-        secret_file = path / "e2e.env"
-        secret_file.write_text(
-            "E2E_BASE_URL=http://api-gateway:10000\nE2E_TEST_PASSWORD="
-            + passwords["e2e_password"]
-            + "\n"
-        )
-        secret_file.chmod(0o600)
-        spec = importlib.util.spec_from_file_location(
-            "trusted_runtime", ROOT / "infra/aws/runtime/run-stack.py"
-        )
-        runtime = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(runtime)
-        runtime.PROJECT = project
-        runtime.STATE = path
+        runtime = self.runtime
         runtime.execute_e2e(
             getattr(self, "local_e2e", record["images"]["e2e"]), env, generation
         )
@@ -431,8 +461,6 @@ class ActualComposeResetStory(unittest.TestCase):
             self.fail(
                 "E2E registration did not consume the generated test password; response omitted"
             )
-        runtime.STATE = path / "evidence"
-        runtime.STATE.mkdir(mode=0o700, exist_ok=True)
         runtime.collect_reports(env, passwords, generation)
         self.assertEqual(
             len(list((runtime.STATE / "reports" / generation).glob("*.xml"))), 2

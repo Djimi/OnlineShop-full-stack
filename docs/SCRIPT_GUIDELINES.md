@@ -21,13 +21,17 @@ outputs. Use bounded streaming capture and terminate the owned process group on
 overflow/deadline. Test both large legitimate output files and excessive logs.
 
 Before verification, resolve the actual linter binary and its supported schema;
-absence from `PATH` is not proof that no installation exists. When GitHub adds a
-documented workflow property before a linter supports it, verify the official
+absence from `PATH` is not proof that no installation exists.
+Temporary tool paths from an earlier session may no longer exist; verify them and
+reprovision the reviewed pinned revision when necessary.
+When GitHub adds a documented workflow property before a linter supports it, verify the official
 contract and check a reviewed pinned tool revision rather than removing the safety
 property. If upstream still lacks support, validate that exact field separately,
 exclude only its exact diagnostic and record the limitation; never suppress
 unrelated errors or claim full schema support. Discover a tool repository's default
 branch before resolving a revision; do not guess `main`/`master`.
+For versioned upstream source evidence, resolve paths from that revision's
+repository tree; generated files may have different names than expected.
 
 Validate action inputs against `action.yml` at the exact pinned commit, not the
 latest README. Unsupported security inputs can be ignored with only a runner
