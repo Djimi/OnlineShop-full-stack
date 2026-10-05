@@ -234,6 +234,10 @@ update each affected module's AGENTS and operational flows.
   Final combined automation: 172 tests passed in 219.656s. Actual production-path
   Compose/UID/reset/E2E passed in 91.055s; lints, isolated bootstrap mock assertions
   and documentation links passed. Hosted current-candidate proof remains pending.
+  PR #93 integrated at `e0fa8db` after all six PR CI jobs passed. An inspected
+  exact saved bootstrap plan applied only the two narrow host S3 transport grants;
+  actual policy readback matched and Free/Active plan remained unchanged. The
+  disposable trial PR is refreshed; current-candidate runtime proof is next.
 
 ### Task 7: Add generation-safe disposal and automatic recreation
 
@@ -248,6 +252,23 @@ extend controller tests and operational disposal/recovery instructions.
 - [ ] Implement locked disposal: reconcile -> compare generation -> verify ownership/state -> inspect saved destroy plan -> apply exact plan -> wait and verify recorded resource IDs absent -> record leftovers or successful no-op. Preserve generation/history after destroy; no account-wide sweep.
 - [ ] Prove live disposal waiting behind E2E, stale queued disposal rejection, repeated verified no-op, partial-delete recovery and next manual validation's recreation with clean state. Active inspection tunnel cannot veto disposal.
 - [ ] Run focused suites, workflow/Terraform checks and recreation E2E; commit: `feat(e2e): add generation-safe AWS disposal`.
+
+  Local workstream implemented disposal and verified disposed-to-recreation with
+  68 affected tests passing; independent review and combined verification are in
+  progress. Independent review requires fixes for refreshed secondary-ID/ownership
+  admission, actual route IDs/creation outputs, repeated lifecycle intent handling,
+  unknown destroy outcome/recorded-host reconciliation and partial-failure evidence.
+  All seven findings are addressed in one consolidated local pass reporting 109
+  affected stories passing. After the provider ENI tag-ID shape correction, the
+  fresh coordinator suite passed 214 tests in 317.056s; changed lint/format, both
+  workflow/queue checks, three isolated Terraform mock suites and documentation
+  checks passed. Ready for integration; real disposal/recreation and required-check
+  proofs remain pending.
+  The first runtime trial's exact owner migration pointer shape is now
+  covered, with unknown purpose/fields/status still rejected. The provider-proven
+  ENI `Generation` tag deletion grant passed bootstrap mock assertions RED-to-GREEN;
+  live inspected policy apply and Task 7 hosted proofs remain pending. These local
+  results do not complete the task's live contract.
 
 ### Task 8: Run acceptance trials and enable required merge protection
 

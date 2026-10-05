@@ -26,8 +26,21 @@ FILES = {"host-session.py", "run-stack.py", "compose.yml", "host-setup.sh"}
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--generation", required=True)
+    mode = parser.add_mutually_exclusive_group(required=True)
+    mode.add_argument("--generation")
+    mode.add_argument("--initialize-disposed-predecessor")
     args = parser.parse_args()
+    if args.initialize_disposed_predecessor:
+        try:
+            initialize_disposed_predecessor(args.initialize_disposed_predecessor)
+            print("Verified disposed predecessor initialized on fresh host.")
+            return 0
+        except (OSError, ValueError, KeyError, TypeError, subprocess.SubprocessError):
+            print(
+                "Disposed predecessor initialization refused; protected details omitted.",
+                file=sys.stderr,
+            )
+            return 1
     lock = None
     try:
         binding = verify_inputs(args.generation)
@@ -66,6 +79,27 @@ def main():
     finally:
         if lock is not None:
             lock.close()
+
+
+def initialize_disposed_predecessor(generation):
+    """Create the exact terminal local predecessor record on a newly installed host."""
+    if not re.fullmatch(r"run-[1-9][0-9]*-attempt-[1-9][0-9]*", generation):
+        raise ValueError("invalid disposed predecessor")
+    if STATE.is_symlink() or not STATE.is_dir() or STATE.stat().st_uid != os.geteuid():
+        raise ValueError("unsafe runtime state")
+    descriptor = os.open(
+        STATE / "host.lock", os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600
+    )
+    with os.fdopen(descriptor, "w") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        allowed = {"host.lock", "current-generation.json", "operation.json"}
+        if any(path.name not in allowed for path in STATE.iterdir()):
+            raise ValueError("new host runtime contains unexpected state")
+        write_identical(STATE / "current-generation.json", {"generation": generation})
+        write_identical(
+            STATE / "operation.json",
+            {"generation": generation, "status": "disposed"},
+        )
 
 
 def read_json(path):
@@ -208,6 +242,7 @@ def admission_operation(generation):
         "failed",
         "cancelled",
         "recovered-aborted",
+        "disposed",
     }
     if prior is not None and prior.get("status") not in statuses:
         raise ValueError("unrecognized predecessor outcome")

@@ -77,21 +77,34 @@ def validate_session(request, receipt, fixtures, output, *, recheck, verify_repo
                     "duplicate generation requires a new authorized attempt"
                 )
             summary["stage"] = "reconciliation"
-            previous, _state_generation = admit_state(context, state, pointer)
-            observe_ssm(pointer["host_id"], time.monotonic() + 300)
-            reconcile_operations(context, pointer, directory)
-            # This recovery probe belongs to the existing generation. It cannot reset,
-            # remove tests, read secrets or turn a failed attempt into success.
-            host_predecessor = pointer.get("host_predecessor", {}).get("generation")
-            probe = host_probe(pointer["generation"], host_predecessor)
-            observed = remote(
-                context, pointer, "recovery-" + generation, probe, 60, directory
-            )
-            verify_idle(
-                observed,
-                pointer["generation"],
-                host_predecessor,
-            )
+            recreate = pointer.get("status") == "disposed"
+            if recreate:
+                from aws_disposal_orchestration import verify_disposed_generation
+
+                disposal = verify_disposed_generation(
+                    context, state, pointer, directory
+                )
+                previous = {
+                    "generation": pointer["generation"],
+                    "host_id": pointer["host_id"],
+                }
+                observed = {"host_generation": pointer["generation"]}
+            else:
+                previous, _state_generation = admit_state(context, state, pointer)
+                observe_ssm(pointer["host_id"], time.monotonic() + 300)
+                reconcile_operations(context, pointer, directory)
+                # This recovery probe belongs to the existing generation. It cannot reset,
+                # remove tests, read secrets or turn a failed attempt into success.
+                host_predecessor = pointer.get("host_predecessor", {}).get("generation")
+                probe = host_probe(pointer["generation"], host_predecessor)
+                observed = remote(
+                    context, pointer, "recovery-" + generation, probe, 60, directory
+                )
+                verify_idle(
+                    observed,
+                    pointer["generation"],
+                    host_predecessor,
+                )
             if pointer.get("schema") == 1 and pointer["status"] in {
                 "running",
                 "failed",
@@ -114,10 +127,10 @@ def validate_session(request, receipt, fixtures, output, *, recheck, verify_repo
                 )
             recheck()
             current = {
-                "schema": 1,
+                "schema": 2 if recreate else 1,
                 "generation": generation,
                 "host_id": pointer["host_id"],
-                "status": "running",
+                "status": "provisioning" if recreate else "running",
                 "predecessor": previous,
                 "host_predecessor": {
                     "generation": observed["host_generation"],
@@ -127,7 +140,35 @@ def validate_session(request, receipt, fixtures, output, *, recheck, verify_repo
                 "images": receipt["images"],
                 "retained": retained_predecessors(pointer),
             }
-            event(context, generation, "intent", current, directory)
+            if recreate:
+                current["recreation"] = {
+                    "generation": pointer["generation"],
+                    "host_id": pointer["host_id"],
+                    "state_lineage": disposal["state_lineage"],
+                    "state_serial": disposal["state_serial"],
+                    "resource_ids_sha256": hashlib.sha256(
+                        json.dumps(disposal["resource_ids"], sort_keys=True).encode()
+                    ).hexdigest(),
+                }
+            if recreate:
+                event(
+                    context,
+                    generation,
+                    "recreation-intent",
+                    {
+                        key: current[key]
+                        for key in [
+                            "generation",
+                            "host_id",
+                            "recreation",
+                            "request",
+                            "images",
+                        ]
+                    },
+                    directory,
+                )
+            else:
+                event(context, generation, "intent", current, directory)
             etag = put_json(context, POINTER, current, directory, etag=etag)
             summary.update(generation=generation, stage="image-retention")
             protect_images(context, receipt["images"], generation, directory)
@@ -139,20 +180,42 @@ def validate_session(request, receipt, fixtures, output, *, recheck, verify_repo
                 {"generation": generation, "status": "launching"},
                 directory,
             )
-            plan_and_apply(context, generation, directory)
-            event(
-                context,
-                generation,
-                "terraform-terminal",
-                {"generation": generation, "status": "passed"},
-                directory,
-            )
-            # Native state lock must be released and actual tags/state must agree.
-            applied, latest, latest_etag = snapshots(context, directory)
-            if latest != current or latest_etag != etag:
-                raise ReconciliationBlocked("generation changed during provisioning")
+            if recreate:
+                applied, current, etag = create_after_disposal(
+                    context, generation, current, etag, directory
+                )
+            else:
+                plan_and_apply(context, generation, directory)
+                event(
+                    context,
+                    generation,
+                    "terraform-terminal",
+                    {"generation": generation, "status": "passed"},
+                    directory,
+                )
+                # Native state lock must be released and actual tags/state must agree.
+                applied, latest, latest_etag = snapshots(context, directory)
+                if latest != current or latest_etag != etag:
+                    raise ReconciliationBlocked(
+                        "generation changed during provisioning"
+                    )
             verify_state(applied, {**current, "status": "provisioned"})
             verify_host(current["host_id"], generation, time.monotonic() + 300)
+            if recreate:
+                wait_for_ssm(current["host_id"], time.monotonic() + 300)
+                install_recreated_host(
+                    context, current, previous["generation"], directory
+                )
+                probe = remote(
+                    context,
+                    current,
+                    "recreation-probe",
+                    host_probe(generation, previous["generation"]),
+                    60,
+                    directory,
+                )
+                verify_idle(probe, generation, previous["generation"])
+                observed = {"host_generation": previous["generation"]}
             recheck()
             summary["stage"] = "runtime"
             binding, bundle = runtime_bundle(
@@ -323,8 +386,15 @@ def admit_state(context, state, pointer):
             "disposed-state recreation requires Task 7; no mutation authorized"
         )
     if pointer.get("schema") is None:
-        if set(pointer) != {"generation", "host_id", "status"}:
+        legacy = {"generation", "host_id", "status"}
+        migration = legacy | {"purpose"}
+        if set(pointer) == migration:
+            if pointer.get("purpose") != "owner-empty-host-generation-migration":
+                raise ReconciliationBlocked("unsupported initial generation purpose")
+        elif set(pointer) != legacy:
             raise ReconciliationBlocked("unsupported initial generation schema")
+        if pointer.get("status") != "provisioned":
+            raise ReconciliationBlocked("unsupported initial generation status")
         generation, _ = verify_state(state, pointer)
     else:
         if (
@@ -596,6 +666,10 @@ def reconcile_operations(context, pointer, directory):
             directory / "reconcile-entry.json",
             time.monotonic() + 60,
         )
+        if entry.get("comment") is None:
+            # Durable controller-side operation intents (Terraform/disposal) do not
+            # represent SSM commands and must never be sent through discovery.
+            continue
         if (
             entry.get("host_id") != pointer["host_id"]
             or entry.get("generation") != pointer["generation"]
@@ -989,6 +1063,521 @@ def plan_and_apply(context, generation, directory):
     run(
         ["apply", "-input=false", "-no-color", "-lock-timeout=30s", "current.tfplan"],
         "apply.log",
+    )
+
+
+def create_after_disposal(context, generation, current, etag, directory):
+    if current.get("status") != "provisioning" or current.get("schema") != 2:
+        raise ReconciliationBlocked("recreation pointer is not durably admitted")
+    work = directory / "terraform-create"
+    work.mkdir(mode=0o700)
+    root = ROOT / "infra/aws/environment"
+    for name in INPUTS:
+        path = root / name
+        if path.is_symlink() or not path.is_file():
+            raise ReconciliationBlocked("unsafe trusted Terraform creation input")
+        shutil.copyfile(path, work / name)
+    plan_path = work / "create.tfplan"
+    env = {
+        **os.environ,
+        "TF_VAR_account_id": context["account"],
+        "TF_VAR_host_profile": "onlineshop-test-host",
+        "TF_VAR_generation": generation,
+        "TF_IN_AUTOMATION": "1",
+        "TF_LOG": "",
+        "AWS_REGION": REGION,
+        "AWS_DEFAULT_REGION": REGION,
+    }
+    deadline = time.monotonic() + 1200
+
+    def run(arguments, label):
+        return private_tools().run_private(
+            ["terraform", *arguments],
+            work,
+            label,
+            env=env,
+            timeout=max(0.01, deadline - time.monotonic()),
+        )
+
+    run(
+        [
+            "init",
+            "-input=false",
+            "-no-color",
+            "-lockfile=readonly",
+            "-backend-config=bucket=" + context["bucket"],
+        ],
+        "create-init.log",
+    )
+    run(
+        [
+            "plan",
+            "-input=false",
+            "-no-color",
+            "-lock-timeout=30s",
+            "-out=create.tfplan",
+        ],
+        "create-plan.log",
+    )
+    if (
+        plan_path.is_symlink()
+        or not plan_path.is_file()
+        or not 0 < plan_path.stat().st_size <= 16 * 1024**2
+    ):
+        raise ReconciliationBlocked("saved creation plan is missing or excessive")
+    plan_path.chmod(0o600)
+    plan = private_tools().read_json(
+        run(["show", "-json", "create.tfplan"], "create-plan.json")
+    )
+    resources = (
+        plan.get("planned_values", {}).get("root_module", {}).get("resources", [])
+    )
+    changes = plan.get("resource_changes", [])
+    if (
+        plan.get("errored")
+        or {item.get("address") for item in resources} != ADDRESSES
+        or len(resources) != len(ADDRESSES)
+        or {item.get("address") for item in changes} != ADDRESSES
+        or len(changes) != len(ADDRESSES)
+    ):
+        raise ReconciliationBlocked(
+            "creation plan is outside the fixed environment address set"
+        )
+    planned = {item["address"]: item.get("values", {}) for item in resources}
+    for item in changes:
+        change = item.get("change", {})
+        if change.get("actions") != ["create"] or change.get("before") is not None:
+            raise ReconciliationBlocked(
+                "creation plan contains an update, deletion or replacement"
+            )
+    verify_creation_configuration(planned, generation)
+    digest = hashlib.sha256(plan_path.read_bytes()).hexdigest()
+    event(
+        context,
+        generation,
+        "terraform-plan-inspected",
+        {
+            "generation": generation,
+            "status": "create-only-inspected",
+            "sha256": digest,
+            "addresses": sorted(ADDRESSES),
+            "predecessor_generation": current["recreation"]["generation"],
+        },
+        directory,
+    )
+    event(
+        context,
+        generation,
+        "terraform-apply-intent",
+        {
+            "generation": generation,
+            "status": "creating",
+            "sha256": digest,
+            "addresses": sorted(ADDRESSES),
+        },
+        directory,
+    )
+    latest_state, latest_pointer, latest_etag = snapshots(context, directory)
+    if (
+        latest_pointer != current
+        or latest_etag != etag
+        or latest_state.get("lineage") != current["recreation"]["state_lineage"]
+        or latest_state.get("serial") != current["recreation"]["state_serial"]
+        or latest_state.get("resources") != []
+        or latest_state.get("outputs", {}) != {}
+    ):
+        raise ReconciliationBlocked(
+            "retained empty state changed before exact creation apply"
+        )
+    private_tools().run_private(
+        [
+            "terraform",
+            "apply",
+            "-input=false",
+            "-no-color",
+            "-lock-timeout=30s",
+            "create.tfplan",
+        ],
+        work,
+        "create-apply.log",
+        env=env,
+        timeout=max(0.01, deadline - time.monotonic()),
+    )
+    state, pointer, latest_etag = snapshots(context, directory)
+    if pointer != current or latest_etag != etag:
+        raise ReconciliationBlocked(
+            "generation changed during exact saved creation apply"
+        )
+    if (
+        state.get("lineage") != current["recreation"]["state_lineage"]
+        or not isinstance(state.get("resources"), list)
+        or {r["type"] + "." + r["name"] for r in state["resources"]} != ADDRESSES
+        or len(state["resources"]) != len(ADDRESSES)
+        or state.get("serial", 0) <= current["recreation"]["state_serial"]
+    ):
+        raise ReconciliationBlocked(
+            "creation state is partial or has foreign resources"
+        )
+    instance = next(
+        r["instances"][0]["attributes"]
+        for r in state["resources"]
+        if r["type"] == "aws_instance" and r["name"] == "host"
+    )
+    host_id = instance.get("id", "")
+    if not re.fullmatch(r"i-[a-f0-9]{17}", host_id):
+        raise ReconciliationBlocked("created host identity is invalid")
+    updated = {
+        "schema": 1,
+        "generation": generation,
+        "host_id": host_id,
+        "status": "provisioned",
+        "predecessor": {
+            "generation": current["recreation"]["generation"],
+            "host_id": host_id,
+        },
+        "host_predecessor": {
+            "generation": current["recreation"]["generation"],
+            "host_id": host_id,
+        },
+        "request": current["request"],
+        "images": current["images"],
+        "retained": current["retained"],
+    }
+    verify_state(state, updated)
+    from aws_disposal_orchestration import owned_inventory
+
+    _, _, inventory = owned_inventory(state, updated)
+    verify_creation_outputs(state, generation, inventory)
+    if (
+        instance.get("instance_type") != "m7i-flex.large"
+        or instance.get("ami") != "ami-04478a3e21a0d79a7"
+    ):
+        raise ReconciliationBlocked(
+            "created host differs from the fixed Free-plan configuration"
+        )
+    event(
+        context,
+        generation,
+        "terraform-terminal",
+        {
+            "generation": generation,
+            "status": "passed",
+            "host_id": host_id,
+            "state_lineage": state["lineage"],
+            "state_serial": state["serial"],
+            "plan_sha256": digest,
+        },
+        directory,
+    )
+    event(
+        context,
+        generation,
+        "provisioned",
+        {
+            "generation": generation,
+            "host_id": host_id,
+            "state_lineage": state["lineage"],
+            "state_serial": state["serial"],
+            "addresses": sorted(ADDRESSES),
+        },
+        directory,
+    )
+    event(context, generation, "intent", updated, directory)
+    new_etag = put_json(context, POINTER, updated, directory, etag=etag)
+    return state, updated, new_etag
+
+
+def verify_creation_outputs(state, generation, inventory):
+    expected = {
+        "instance_id": inventory["aws_instance.host"],
+        "vpc_id": inventory["aws_vpc.main"],
+        "security_group_id": inventory["aws_security_group.host"],
+        "generation": generation,
+        "root_volume_id": inventory["instance_root_volume"],
+    }
+    outputs = state.get("outputs")
+    if not isinstance(outputs, dict) or set(outputs) != set(expected):
+        raise ReconciliationBlocked("creation state outputs are incomplete or unknown")
+    for name, value in expected.items():
+        record = outputs.get(name)
+        if (
+            not isinstance(record, dict)
+            or set(record) != {"value", "type", "sensitive"}
+            or record.get("value") != value
+            or record.get("type") != "string"
+            or record.get("sensitive") is not False
+        ):
+            raise ReconciliationBlocked("creation state output identity mismatch")
+
+
+def verify_creation_configuration(resources, generation):
+    tags = {
+        "ManagedBy": "onlineshop-test",
+        "Repository": "Djimi/OnlineShop-full-stack",
+        "Generation": generation,
+    }
+    stable_tags = {"ManagedBy": tags["ManagedBy"], "Repository": tags["Repository"]}
+    expected = {
+        "aws_vpc.main": {
+            "cidr_block": "10.83.0.0/16",
+            "enable_dns_support": True,
+            "enable_dns_hostnames": True,
+            "tags": tags,
+        },
+        "aws_subnet.host": {
+            "cidr_block": "10.83.1.0/24",
+            "availability_zone": "eu-north-1a",
+            "map_public_ip_on_launch": True,
+            "tags": tags,
+        },
+        "aws_internet_gateway.main": {"tags": tags},
+        "aws_route_table.host": {"tags": tags},
+        "aws_route.outbound": {"destination_cidr_block": "0.0.0.0/0"},
+        "aws_route_table_association.host": {},
+        "aws_security_group.host": {
+            "name": "onlineshop-test-host",
+            "description": "SSM-only testing host; no incoming connectivity",
+            "ingress": [],
+            "egress": [
+                {
+                    "from_port": 0,
+                    "to_port": 0,
+                    "protocol": "-1",
+                    "cidr_blocks": ["0.0.0.0/0"],
+                }
+            ],
+            "tags": tags,
+        },
+        "aws_launch_template.host": {
+            "name": "onlineshop-test-host",
+            "tags": stable_tags,
+        },
+        "aws_instance.host": {
+            "ami": "ami-04478a3e21a0d79a7",
+            "instance_type": "m7i-flex.large",
+            "associate_public_ip_address": True,
+            "iam_instance_profile": "onlineshop-test-host",
+            "root_block_device": [
+                {
+                    "volume_size": 50,
+                    "volume_type": "gp3",
+                    "encrypted": True,
+                    "delete_on_termination": True,
+                }
+            ],
+            "metadata_options": [
+                {
+                    "http_endpoint": "enabled",
+                    "http_tokens": "required",
+                    "http_put_response_hop_limit": 1,
+                    "http_protocol_ipv6": "disabled",
+                    "instance_metadata_tags": "disabled",
+                }
+            ],
+            "tags": tags,
+            "volume_tags": tags,
+        },
+        "aws_ec2_tag.network_generation": {"key": "Generation", "value": generation},
+    }
+    for address, required in expected.items():
+        values = resources.get(address)
+        if not isinstance(values, dict) or any(
+            not creation_value_matches(values.get(key), value)
+            for key, value in required.items()
+        ):
+            raise ReconciliationBlocked(
+                "creation plan differs from the fixed environment configuration"
+            )
+    for address in [
+        "aws_vpc.main",
+        "aws_subnet.host",
+        "aws_internet_gateway.main",
+        "aws_route_table.host",
+        "aws_security_group.host",
+        "aws_instance.host",
+    ]:
+        if resources[address].get("tags") != tags:
+            raise ReconciliationBlocked(
+                "creation plan has unexpected environment ownership tags"
+            )
+    if (
+        resources["aws_instance.host"].get("volume_tags") != tags
+        or resources["aws_launch_template.host"].get("tags") != stable_tags
+    ):
+        raise ReconciliationBlocked(
+            "creation plan has unexpected stable launch/volume tags"
+        )
+    specifications = resources["aws_launch_template.host"].get("tag_specifications")
+    if (
+        not isinstance(specifications, list)
+        or len(specifications) != 3
+        or {item.get("resource_type") for item in specifications}
+        != {"instance", "volume", "network-interface"}
+        or any(item.get("tags") != stable_tags for item in specifications)
+    ):
+        raise ReconciliationBlocked(
+            "creation plan launch-template tag specifications changed"
+        )
+    egress = resources["aws_security_group.host"].get("egress")
+    if (
+        not isinstance(egress, list)
+        or len(egress) != 1
+        or any(
+            egress[0].get(key) != value
+            for key, value in {
+                "from_port": 0,
+                "to_port": 0,
+                "protocol": "-1",
+                "cidr_blocks": ["0.0.0.0/0"],
+            }.items()
+        )
+        or bool(egress[0].get("ipv6_cidr_blocks"))
+        or bool(egress[0].get("prefix_list_ids"))
+        or bool(egress[0].get("security_groups"))
+        or egress[0].get("self") is True
+    ):
+        raise ReconciliationBlocked(
+            "creation plan egress differs from the fixed host boundary"
+        )
+
+
+def creation_value_matches(actual, expected):
+    if isinstance(expected, dict):
+        return isinstance(actual, dict) and all(
+            key in actual and creation_value_matches(actual[key], value)
+            for key, value in expected.items()
+        )
+    if isinstance(expected, list):
+        return (
+            isinstance(actual, list)
+            and len(actual) == len(expected)
+            and all(
+                creation_value_matches(value, expected[index])
+                for index, value in enumerate(actual)
+            )
+        )
+    return actual == expected
+
+
+def wait_for_ssm(host_id, deadline):
+    while time.monotonic() < deadline:
+        response = read_aws(
+            [
+                "ssm",
+                "describe-instance-information",
+                "--filters",
+                json.dumps([{"Key": "InstanceIds", "Values": [host_id]}]),
+            ],
+            deadline=deadline,
+        )
+        entries = response.get("InstanceInformationList")
+        if (
+            isinstance(entries, list)
+            and len(entries) == 1
+            and entries[0].get("InstanceId") == host_id
+            and entries[0].get("PingStatus") == "Online"
+        ):
+            return
+        time.sleep(5)
+    raise ReconciliationBlocked(
+        "new trusted host did not become SSM-online before the bound"
+    )
+
+
+def install_recreated_host(context, pointer, predecessor_generation, directory):
+    content = {}
+    for name in FILES:
+        path = ROOT / "infra/aws/runtime" / name
+        if (
+            path.is_symlink()
+            or not path.is_file()
+            or path.stat().st_size > 16 * 1024**2
+        ):
+            raise ReconciliationBlocked("unsafe trusted host setup input")
+        content[name] = path.read_bytes()
+    content["bootstrap.json"] = json.dumps(
+        {
+            "account_id": context["account"],
+            "region": REGION,
+            "secret_arn": context["secret"],
+        },
+        sort_keys=True,
+    ).encode()
+    bundle = directory / "host-setup.tar"
+    with tarfile.open(bundle, "w", format=tarfile.USTAR_FORMAT) as archive:
+        for name, data in sorted(content.items()):
+            member = tarfile.TarInfo(name)
+            member.size = len(data)
+            member.mode = 0o700 if name == "host-setup.sh" else 0o600
+            archive.addfile(member, io.BytesIO(data))
+    if not 0 < bundle.stat().st_size <= 16 * 1024**2:
+        raise ReconciliationBlocked("trusted host setup bundle exceeds its bound")
+    key = "operations/runtime-input/" + pointer["generation"] + "/host-setup.tar"
+    put_file(context, key, bundle, directory)
+    body = host_setup_bootstrap(
+        context, pointer, predecessor_generation, key, bundle, content
+    )
+    outcome = remote(context, pointer, "host-setup", body, 1000, directory)
+    expected = {
+        "generation": pointer["generation"],
+        "host_id": pointer["host_id"],
+        "predecessor_generation": predecessor_generation,
+        "setup_verified": True,
+    }
+    if outcome != expected:
+        raise ReconciliationBlocked(
+            "new host setup did not report its exact trusted identity"
+        )
+
+
+def host_setup_bootstrap(
+    context, pointer, predecessor_generation, key, bundle, content
+):
+    names = sorted(content)
+    digests = {name: hashlib.sha256(data).hexdigest() for name, data in content.items()}
+    code = r"""import hashlib,json,os,pathlib,subprocess,tarfile,tempfile
+root=pathlib.Path('/opt/onlineshop-test')
+if root.exists():
+ assert root.is_dir() and not root.is_symlink() and root.stat().st_uid==0 and not list(root.iterdir())
+root.mkdir(mode=0o755,parents=True,exist_ok=True)
+with tempfile.TemporaryDirectory(prefix='trusted-host-setup-') as tmp:
+ bundle=pathlib.Path(tmp)/'host-setup.tar'
+ subprocess.run(['aws','s3api','get-object','--bucket',BUCKET,'--key',KEY,'--expected-bucket-owner',ACCOUNT,'--region','eu-north-1',str(bundle)],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,timeout=60,check=True)
+ assert bundle.stat().st_size==SIZE and hashlib.sha256(bundle.read_bytes()).hexdigest()==DIGEST
+ with tarfile.open(bundle,'r|') as archive:
+  seen=set()
+  for member in archive:
+   assert member.isfile() and member.pax_headers=={} and member.name in NAMES and member.name not in seen and member.size<=16777216
+   data=archive.extractfile(member).read();assert hashlib.sha256(data).hexdigest()==HASHES[member.name]
+   target=root/member.name
+   if target.exists():assert target.is_file() and not target.is_symlink() and target.stat().st_uid==0 and target.read_bytes()==data
+   else:
+    fd=os.open(target,os.O_WRONLY|os.O_CREAT|os.O_EXCL|os.O_NOFOLLOW,0o700 if member.name=='host-setup.sh' else 0o600)
+    with os.fdopen(fd,'wb') as output:output.write(data);output.flush();os.fsync(output.fileno())
+   seen.add(member.name)
+  assert seen==set(NAMES)
+ subprocess.run(['bash',str(root/'host-setup.sh'),'--setup'],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,timeout=900,check=True)
+ subprocess.run(['python3',str(root/'host-session.py'),'--initialize-disposed-predecessor',PREDECESSOR],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,timeout=60,check=True)
+ print(json.dumps({'generation':GENERATION,'host_id':HOST_ID,'predecessor_generation':PREDECESSOR,'setup_verified':True},sort_keys=True))
+"""
+    values = {
+        "BUCKET": context["bucket"],
+        "KEY": key,
+        "ACCOUNT": context["account"],
+        "SIZE": bundle.stat().st_size,
+        "DIGEST": hashlib.sha256(bundle.read_bytes()).hexdigest(),
+        "NAMES": names,
+        "HASHES": digests,
+        "GENERATION": pointer["generation"],
+        "HOST_ID": pointer["host_id"],
+        "PREDECESSOR": predecessor_generation,
+    }
+    for name, value in values.items():
+        code = code.replace(name, repr(value))
+    return (
+        "set -eu; umask 077; timeout --signal=TERM --kill-after=30 960 python3 - <<'PY'\n"
+        + code
+        + "\nPY"
     )
 
 

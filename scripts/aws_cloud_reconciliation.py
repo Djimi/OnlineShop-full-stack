@@ -23,8 +23,17 @@ READ_OPERATIONS = {
     ("s3api", "get-object"),
     ("s3api", "list-objects-v2"),
     ("ec2", "describe-instances"),
+    ("ec2", "describe-volumes"),
+    ("ec2", "describe-network-interfaces"),
+    ("ec2", "describe-vpcs"),
+    ("ec2", "describe-subnets"),
+    ("ec2", "describe-internet-gateways"),
+    ("ec2", "describe-route-tables"),
+    ("ec2", "describe-security-groups"),
+    ("ec2", "describe-launch-templates"),
     ("ssm", "list-commands"),
     ("ssm", "get-command-invocation"),
+    ("ssm", "describe-instance-information"),
 }
 ADDRESSES = {
     "aws_vpc.main",
@@ -101,7 +110,7 @@ def observe_cloud():
     }
 
 
-def read_aws(arguments, *, deadline):
+def read_aws(arguments, *, deadline, absent_error=None):
     operation = tuple(arguments[:2])
     if operation not in READ_OPERATIONS:
         raise ReconciliationBlocked("unsupported cloud read operation")
@@ -158,6 +167,10 @@ def read_aws(arguments, *, deadline):
             for stream in [process.stdout, process.stderr]:
                 stream.close()
     if process.returncode:
+        if absent_error and re.search(
+            rb"\(" + re.escape(absent_error.encode()) + rb"\)", buffers["stderr"]
+        ):
+            return {"absent": True}
         if (
             operation == ("ssm", "get-command-invocation")
             and b"(InvocationDoesNotExist)" in buffers["stderr"]

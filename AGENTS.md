@@ -289,8 +289,8 @@ See [docs/TESTING_STRATEGY.md](./docs/TESTING_STRATEGY.md) for:
 See [docs/TESTING-ENVIRONMENT.md](./docs/TESTING-ENVIRONMENT.md) for agreed future
 AWS account cleanup, manually started PR deployment, required E2E validation,
 shared-environment locking, clean test state, and optional manual disposal.
-Deployment/disposal and merge protection are not yet implemented; candidate-request
-foundations are in progress. Keep that document updated as
+Validation/disposal/recreation are locally implemented; their hosted acceptance
+and merge protection remain unfinished. Keep that document updated as
 resources and automation are configured; distinguish dated inventory coverage
 from verified live deployment settings.
 The [AWS testing environment design spec](./docs/superpowers/specs/2026-10-03-aws-testing-environment-design.md)
@@ -319,9 +319,12 @@ DB/Redis/Kafka reset/retest proofs. Current-host candidate metadata/security
 probes and tag-only next-generation planning passed. Local Tasks 5–6 now include
 the locked validation controller/workflow, immutable runtime ledger, conditional
 generation pointer, host transport/envelope and owned-success finalization. The
-normal existing-host path permits inspected tag-only generation changes; missing,
-disposed or partial unexpected state refuses rather than recreating infrastructure.
-Host S3 runtime-input/evidence grants are defined narrowly but not yet applied.
+normal existing-host path permits inspected tag-only generation changes.
+Local Task 7 adds inspected saved-plan disposal and recreation only from matching
+immutable disposal evidence, retained empty state and verified recorded-resource
+absence. Missing/corrupt or unexpected partial state still refuses automatic creation.
+Host S3 runtime-input/evidence grants were applied from an inspected exact saved
+bootstrap plan and verified by actual IAM readback; Free plan remains unchanged.
 Actual cloud recovery/transport, current-candidate success, disposal/recreation and
 final gate proofs remain unfinished. See [infrastructure boundaries/recovery](./infra/aws/README.md)
 and the operational runbook. Local stories do not constitute live proof.
@@ -340,8 +343,9 @@ attempt and publishes owned success. Repeated pre-admission crashes preserve the
 verified host predecessor separately from cloud generation; durable admission
 transitions reconcile exact interrupted phases without overwriting history.
 The exact nonsensitive `AWS_TESTING_SECRET_ARN` Environment variable is configured
-and its protected bootstrap identity was verified read-only. Runtime input/evidence host-role S3 grants still require
-reviewed bootstrap apply. Hosted current-candidate AWS proof and gate remain pending.
+and its protected bootstrap identity was verified read-only. The narrowly scoped
+host transport policy apply/readback passed. Hosted current-candidate AWS proof
+and gate remain pending.
 Known previous/incoming image history is protected; routine tags release after
 recorded replacement, unknown owner tags remain, and failed history is bounded to
 20 predecessors before reviewed recovery is required. Do not equate owner

@@ -16,10 +16,37 @@ metadata/profile/no-ingress settings and unchanged Free plan were verified.
 The migrated host now runs the app after owner full-stack/four-test E2E and seeded
 clean-state reset/retest proofs. Local Tasks 5–6 implement the locked validation
 orchestrator and trusted host envelope; deployed transport/recovery, hosted
-current-candidate validation, disposal/recreation and final merge validation remain
-unfinished. Host runtime-input/evidence S3 grants are defined narrowly, pending an
-inspected bootstrap apply.
+current-candidate validation, live disposal/recreation and final merge validation
+remain unfinished. Local Task 7 adds verified generation-safe disposal and fresh
+recreation; independent findings are addressed and combined verification passed
+(214 automation tests in 317.056s). Hosted trials remain pending.
+The two narrow host runtime-input/evidence S3 grants were applied from
+the inspected exact saved bootstrap plan; actual IAM readback and unchanged
+Free/Active plan were verified. No operator-policy widening or host replacement.
 Do not treat mock tests as proof of real IAM permissions, locking or isolation.
+
+```text
+manual dispose (generation + confirmation)
+  -> shared validation queue -> verify current generation and operation ownership
+  -> inspect saved destroy plan -> exact apply -> retained empty state + ID absence
+  -> immutable disposed receipt + generation pointer
+next manual validation
+  -> verify disposed receipt/state/absence -> inspected create-only plan -> exact apply
+  -> new host setup -> clean reset/E2E -> retained evidence -> current-candidate result
+```
+
+Local retries retain original disposable IDs and bound partial-destroy attempts;
+absence/no-op requires matching immutable disposal records, never missing state.
+Disposal preserves backend/bootstrap, version history, roles, secrets and images.
+Refreshed destroy plans bind recorded secondary IDs, ownership and relationships.
+Unknown prior applies need immutable exact-operation recovery evidence before retry;
+partial state cannot substitute for recorded-host absence/idle proof. Recreation
+validates populated trusted outputs and preserves production intent bytes across
+repeated lifecycles. Sanitized partial-failure evidence reports bounded leftovers
+and observation uncertainty, never raw provider output or resource identifiers.
+The pinned provider deletes the explicit ENI `Generation` tag during destroy.
+Its local operator grant is ENI-only, owned-resource-conditioned, `Generation`-only
+and requires present `aws:TagKeys`; inspected live apply remains pending.
 See [operational evidence](../../docs/TESTING-ENVIRONMENT.md) and the
 [implementation plan](../../planning/aws-testing-environment-PLAN.md).
 

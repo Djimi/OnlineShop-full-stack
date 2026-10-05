@@ -1,0 +1,80 @@
+name: Dispose testing environment
+
+on:
+  workflow_dispatch:
+    inputs:
+      generation:
+        description: Exact current environment generation to dispose
+        required: true
+        type: string
+      confirmation:
+        description: Enter dispose to confirm removal of the disposable environment
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  dispose:
+    name: Dispose current testing environment
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: aws-testing
+    concurrency:
+      group: aws-testing-environment
+      queue: max
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      actions: read
+      id-token: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      AWS_TESTING_ACCOUNT_ID: ${{ vars.AWS_TESTING_ACCOUNT_ID }}
+      AWS_TESTING_OPERATOR_ROLE: ${{ vars.AWS_TESTING_OPERATOR_ROLE }}
+      AWS_TESTING_STATE_BUCKET: ${{ vars.AWS_TESTING_STATE_BUCKET }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Authorize trusted actor and fixed disposal scope before OIDC
+        env:
+          EXPECTED_GENERATION: ${{ inputs.generation }}
+          CONFIRMATION: ${{ inputs.confirmation }}
+        run: >-
+          python3 scripts/aws-validation.py dispose-preflight
+          --generation "$EXPECTED_GENERATION"
+          --confirmation "$CONFIRMATION"
+      - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3
+        with:
+          terraform_version: 1.16.5
+          terraform_wrapper: false
+      - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: ${{ vars.AWS_TESTING_OPERATOR_ROLE }}
+          aws-region: eu-north-1
+          allowed-account-ids: ${{ vars.AWS_TESTING_ACCOUNT_ID }}
+          role-session-name: dispose-${{ github.run_id }}-${{ github.run_attempt }}
+          role-duration-seconds: 3600
+          mask-aws-account-id: true
+      - name: Reconcile and dispose the confirmed generation
+        env:
+          EXPECTED_GENERATION: ${{ inputs.generation }}
+          CONFIRMATION: ${{ inputs.confirmation }}
+        run: |
+          install -d -m 0700 "$RUNNER_TEMP/disposal-evidence"
+          python3 scripts/aws-validation.py dispose \
+            --generation "$EXPECTED_GENERATION" \
+            --confirmation "$CONFIRMATION" \
+            --output "$RUNNER_TEMP/disposal-evidence"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        name: Retain sanitized disposal evidence
+        if: always()
+        with:
+          name: aws-disposal-evidence-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/disposal-evidence/
+          if-no-files-found: warn
+          retention-days: 14
