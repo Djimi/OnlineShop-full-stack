@@ -20,6 +20,8 @@ import sys
 import time
 from pathlib import Path
 
+from aws_cloud_reconciliation import ReconciliationBlocked, observe_cloud
+
 ROOT = Path(__file__).resolve().parents[1]
 REPOSITORY = "Djimi/OnlineShop-full-stack"
 WORKFLOW = f"{REPOSITORY}/.github/workflows/aws-operator-plan-proof.yml@refs/heads/main"
@@ -81,6 +83,10 @@ def main():
             )
             stage = "state-validation"
             generation = verify_existing_state(state, pointer)
+            stage = "cloud-reconciliation"
+            observation = observe_cloud()
+            if observation["generation"] != generation:
+                raise ProofFailed("Environment generation changed")
             stage = "terraform-planning"
             make_current_plan(context, generation, directory)
             report = {
@@ -91,6 +97,7 @@ def main():
                 "apply_performed": False,
                 "aws_validation_success": False,
                 "mutation_permissions_proved": False,
+                "cloud_observation": observation,
             }
         write_report(args.output, report)
         print(
@@ -99,11 +106,14 @@ def main():
         return 0
     except (
         ProofFailed,
+        ReconciliationBlocked,
         OSError,
         ValueError,
         KeyError,
         TypeError,
         IndexError,
+        AttributeError,
+        StopIteration,
         subprocess.TimeoutExpired,
     ) as error:
         failure = {
@@ -116,7 +126,7 @@ def main():
             if isinstance(error, ProofFailed)
             else [],
             "reason": str(error)
-            if isinstance(error, ProofFailed)
+            if isinstance(error, (ProofFailed, ReconciliationBlocked))
             else "invalid input or process outcome",
         }
         try:
@@ -178,6 +188,7 @@ def trusted_context():
         raise ProofFailed("Wrong checkout")
     trusted_paths = [
         "scripts/aws-operator-plan-proof.py",
+        "scripts/aws_cloud_reconciliation.py",
         ".github/workflows/aws-operator-plan-proof.yml",
         *["infra/aws/environment/" + name for name in INPUTS],
     ]

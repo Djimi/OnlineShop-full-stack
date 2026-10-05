@@ -126,6 +126,15 @@ properties/output never enter evidence. Report content is not execution provenan
 or AWS success; the future locked runtime must establish both stage and transport
 identity before any gate success.
 
+Cloud-observation stories:
+`python3 -m unittest -v tests/scripts/aws_cloud_reconciliation_test.py`. Cover
+fixed read-only operations, wrong-role/state/lock/transition refusal, active later
+SSM pages and nonterminal actual invocations, private output bounds and denied
+lock lookup not being absence. The operator-plan stories also refuse active
+remote operations before Terraform. Mocked process boundaries and owner schema
+reads do not replace actual operator OIDC proof; passing observations never
+authorize mutation without host and persistent-ledger reconciliation.
+
 Owner host-setup command stories:
 `python3 -m unittest -v tests/scripts/aws_host_setup_test.py`.
 These substitute only the AWS process boundary and verify no mutation for foreign

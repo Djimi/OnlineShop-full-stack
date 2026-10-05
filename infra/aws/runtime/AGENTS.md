@@ -112,6 +112,11 @@ The observation leaves the prior outcome unchanged, even when `unknown`; it
 cannot authorize retry or publish success. Routine cloud orchestration must still
 reconcile SSM/EC2/Terraform and persist a reviewed recovery decision. This command
 does not clear a running/unknown operation just because its process ended.
+The controller's `reconcile-cloud` command supplies a separate read-only cloud
+observation: operator account, fixed state/pointer/native-lock, live EC2 identity,
+and bounded paginated SSM parent/invocation terminal status. Neither observation
+alone—or simply combining both booleans—authorizes retry: persistent operation
+identity/outcomes and launch gaps must still be reconciled by the locked session.
 An actual owner proof cancelled SSM with a detached isolated test container;
 the next runtime invocation refused mutation until owner removal/absence and
 host-lock release were verified. This does not implement automatic reconciliation.

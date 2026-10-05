@@ -56,7 +56,9 @@ class OperatorPlanStories(unittest.TestCase):
                     "instances": [
                         {
                             "attributes": {
-                                "id": "owned-id",
+                                "id": "i-11111111111111111"
+                                if kind == "aws_instance"
+                                else "owned-id",
                                 "tags": {"Generation": "run-100-attempt-1"},
                             }
                         }
@@ -71,7 +73,7 @@ class OperatorPlanStories(unittest.TestCase):
                 {
                     "generation": "run-100-attempt-1",
                     "status": "provisioned",
-                    "host_id": "owned-id",
+                    "host_id": "i-11111111111111111",
                 }
             )
         )
@@ -82,10 +84,15 @@ class OperatorPlanStories(unittest.TestCase):
 if args[:2]==['sts','get-caller-identity']:
  print(json.dumps({'Account':'111111111111','Arn':'arn:aws:sts::111111111111:assumed-role/onlineshop-test-'+('publisher' if os.environ.get('WRONG_ROLE') else 'operator')+'/proof'}))
 elif args[:2]==['s3api','head-object']:
+ if 'state/environment.tfstate.tflock' in args:print('An error occurred (404) when calling the HeadObject operation: Not Found',file=sys.stderr);sys.exit(254)
  if os.environ.get('MISSING_STATE') and 'state/environment.tfstate' in args:sys.exit(1)
  file=root/('state.json' if 'state/environment.tfstate' in args else 'pointer.json');print(json.dumps({'ETag':'"snapshot"','VersionId':'v1','ContentLength':file.stat().st_size}))
 elif args[:2]==['s3api','get-object']:
- file=root/('state.json' if 'state/environment.tfstate' in args else 'pointer.json');pathlib.Path(args[-1]).write_bytes(file.read_bytes());print(json.dumps({'ETag':'"snapshot"','VersionId':'v1'}))
+ file=root/('state.json' if 'state/environment.tfstate' in args else 'pointer.json');pathlib.Path(args[args.index('--if-match')+2]).write_bytes(file.read_bytes());print(json.dumps({'ETag':'"snapshot"','VersionId':'v1'}))
+elif args[:2]==['ec2','describe-instances']:
+ print(json.dumps({'Reservations':[{'Instances':[{'InstanceId':'i-11111111111111111','State':{'Name':'running'},'Tags':[{'Key':k,'Value':v} for k,v in {'ManagedBy':'onlineshop-test','Repository':'Djimi/OnlineShop-full-stack','Generation':'run-100-attempt-1'}.items()]}]}]}))
+elif args[:2]==['ssm','list-commands']:print(json.dumps({'Commands':[{'CommandId':'00000000-0000-0000-0000-000000000001','Status':'InProgress' if os.environ.get('ACTIVE_REMOTE') else 'Success'}]}))
+elif args[:2]==['ssm','get-command-invocation']:print(json.dumps({'Status':'Success','ResponseCode':0}))
 else:sys.exit(1)
 """,
             "terraform": """
@@ -235,6 +242,16 @@ else:sys.exit(1)
             result.stdout + result.stderr + json.dumps(report),
         )
         self.assertNotIn("raw-plan-secret-canary", json.dumps(report))
+
+    def test_operator_proof_refuses_nonterminal_cloud_operation_before_planning(self):
+        self.env["ACTIVE_REMOTE"] = "1"
+        result, calls = self.invoke()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertFalse(any(call[0] == "terraform" for call in calls))
+        self.assertEqual(
+            json.loads((self.path / "proof.json").read_text())["stage"],
+            "cloud-reconciliation",
+        )
 
     def test_provider_download_is_not_subject_to_the_private_log_file_limit(self):
         self.env["PROVIDER_FILE"] = "1"
