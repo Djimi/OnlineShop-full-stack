@@ -24,7 +24,9 @@ finalization. The narrow host S3 transport grants are applied and read back. Hos
 current-candidate validation, actual transport/recovery, live disposal/recreation
 and final merge protection remain unfinished; local tests are not live proof.
 Task 7's local disposal/recreation flow and strict initial-migration admission fix
-are under independent review and combined verification.
+passed independent review fixes and combined verification (214 tests). PR #94 is
+integrated; the narrow operator tag-deletion grant is applied and read back. Actual
+current-candidate runtime and disposal/recreation proof remain pending.
 
 GitHub plan is Free; repository visibility was verified as public on 2026-10-02.
 The agreed AWS trigger is **Run workflow** with a PR number, not automatic
@@ -808,7 +810,11 @@ Backend/bootstrap, state versions, roles, images, secrets and evidence are retai
 The pinned Terraform provider's ENI generation-tag resource requires `DeleteTags`;
 the added local statement allows only `Generation` deletion on owned ENIs with
 present `aws:TagKeys`. Bootstrap mock assertions were observed RED-to-GREEN;
-inspected live policy apply/readback and actual disposal/recreation are pending.
+The exact saved bootstrap plan from reviewed commit `c6276b4` was applied after
+PR #94's six CI jobs passed and guarded integration at `f452665`. It changed only
+the existing operator inline policy by adding that one scoped statement; all prior
+grants were preserved. Actual IAM readback matched, and account/Free-Active checks
+passed before and after. Actual disposal/recreation proof remains pending.
 Read-only IAM simulation of the proposed single statement allowed owned ENI
 Generation deletion and denied five cases: foreign owner, ownership-tag deletion,
 mixed keys, absent tag keys and another resource kind. This is neither a deployed
@@ -817,6 +823,33 @@ backend/bootstrap versions/hashes, three role identities/policies, five reposito
 identities, secret version metadata and unchanged Free/Active plan; no secret
 values were read. Post-trial comparisons must account for the exact reviewed
 bootstrap policy addition and distinguish it from unintended protected changes.
+The read-only post-policy comparison passed: backend state unchanged; bootstrap
+lineage/resource count and original state versions retained; role identities/trust,
+publisher/host policies, five repository identities and secret version metadata
+unchanged. Only the reviewed operator policy differs. A private post-policy
+baseline is retained for subsequent lifecycle comparisons; Free/Active remains
+verified. This is preservation evidence, not actual disposal/recreation proof.
+
+Trial `37382173568` advanced the existing host through tag-only planning/apply,
+transport, reset/readiness, three API E2E journeys plus the logging regression,
+bound report verification and cleanup. The retained sanitized summary reports four
+tests, remote `Success`, verified cleanup/provenance and pending-success. Read-only
+actual pointer/state checks confirmed its completed runtime generation on the same
+host. The required **AWS validation** check correctly remains completed **failure**:
+the retained-artifact finalizer rejected the upload action's bare hex digest before
+success publication. This is runtime-stage evidence, not a successful AWS check.
+
+Pinned upload-action source and the actual job output confirm bare hexadecimal
+`artifact-digest`, while the REST API uses `sha256:`. The workflow adapter now adds
+that prefix, preserving strict metadata/download checksum verification. Actual
+14-day artifact metadata also expired one second short of the consumer's minimum:
+expiration begins before upload creation completes. Runtime evidence now requests
+15 days while the consumer still requires at least 14 actual days. Both failures
+were observed locally RED-to-GREEN with actual output/timestamp shapes; the new
+coherent revision's combined suite passed 215 tests in 321.545s, with changed lint,
+format, workflow lint and whitespace checks passing. CI and another manual trial
+remain required before successful validation can be claimed.
+No disposal, recreation or successful required check is claimed from this run.
 Do not force-unlock, clear unknown outcomes or recreate from missing state.
 
 After this foundation is reviewed and reaches trusted `main`, use **Actions ->

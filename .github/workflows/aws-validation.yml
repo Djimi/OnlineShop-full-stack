@@ -243,12 +243,12 @@ jobs:
           name: aws-runtime-evidence-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/runtime-evidence/
           if-no-files-found: error
-          retention-days: 14
+          retention-days: 15
       - name: Verify retained runtime evidence and publish owned success
         if: success()
         env:
           RUNTIME_ARTIFACT_ID: ${{ steps.runtime_evidence.outputs.artifact-id }}
-          RUNTIME_ARTIFACT_DIGEST: ${{ steps.runtime_evidence.outputs.artifact-digest }}
+          RUNTIME_ARTIFACT_DIGEST: sha256:${{ steps.runtime_evidence.outputs.artifact-digest }}
         run: >-
           python3 scripts/aws-validation.py finalize-success
           --request "$RUNNER_TEMP/request/request.json"

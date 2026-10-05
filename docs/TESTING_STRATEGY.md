@@ -70,10 +70,10 @@ prove deployed host grants, hosted transport, live AWS recovery or current-candi
 GitHub check selection. The nonsensitive `AWS_TESTING_SECRET_ARN` Environment
 variable was verified against protected bootstrap identity; exact saved host-role
 transport policy apply and actual IAM readback passed. Task 7 disposal/recreation
-is locally implemented with all seven independent findings addressed; combined
-verification, its narrow
-operator tag-deletion policy apply and actual hosted proofs remain pending. The
-final merge gate remains unfinished.
+is locally implemented with all seven independent findings addressed. Combined
+verification and its narrow operator tag-deletion policy exact saved apply/readback
+passed after integration; actual hosted lifecycle proofs and the final merge gate
+remain pending.
 
 Initial-generation admission stories must include the actual owner migration
 pointer's `purpose: owner-empty-host-generation-migration` and `status: provisioned`,
@@ -111,6 +111,12 @@ Routine cloud helpers intentionally discard local profile configuration and expe
 their workflow's temporary credential context. Owner-profile snapshot probes must
 use pure validators or a separately authenticated read-only boundary; do not relax
 the credential allowlist to make a local probe work.
+Finalizer stories must consume the workflow adapter using the pinned upload action's
+bare hex digest output and the REST API's prefixed digest. Model expiration starting
+before artifact creation completes, rather than inventing an exact 14-day interval.
+Runtime uploads request 15 days to satisfy the unchanged minimum of 14 actual days;
+short/expired/mismatched uploads still refuse. Trial `37382173568` proved the cloud
+runtime's four tests/cleanup but failed finalization; it is not an AWS check success.
 
 Runtime stories: `python3 -m unittest -v tests/scripts/aws_runtime_test.py`.
 Opt-in actual local reset:
