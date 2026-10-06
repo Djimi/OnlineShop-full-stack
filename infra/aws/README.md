@@ -13,13 +13,17 @@ created eight network/template resources but EC2 rejected the original host.
 After reconciliation, an inspected policy-only bootstrap update and host-only
 environment plan launched Free-plan-eligible `m7i-flex.large`. Actual host/disk/
 metadata/profile/no-ingress settings and unchanged Free plan were verified.
-The migrated host now runs the app after owner full-stack/four-test E2E and seeded
+The prior migrated host ran the app after owner full-stack/four-test E2E and seeded
 clean-state reset/retest proofs. Local Tasks 5–6 implement the locked validation
-orchestrator and trusted host envelope; deployed transport/recovery, hosted
-current-candidate validation, live disposal/recreation and final merge validation
-remain unfinished. Local Task 7 adds verified generation-safe disposal and fresh
+orchestrator and trusted host envelope. Deployed transport and existing-host
+current-candidate validation passed `37385125026` with exact owned success and
+retained evidence independently verified. Live interruption recovery,
+completed fresh-host recreation and final merge validation remain unfinished.
+Live disposal/no-op passed; the subsequent created host is stranded before setup
+on a raw-output parser refusal, with reviewed recovery pending. Local Task 7 adds
+verified generation-safe disposal and fresh
 recreation; independent findings are addressed and combined verification passed
-(214 automation tests in 317.056s). Hosted trials remain pending.
+(214 automation tests in 317.056s). Remaining hosted recovery trials are pending.
 The two narrow host runtime-input/evidence S3 grants were applied from
 the inspected exact saved bootstrap plan; actual IAM readback and unchanged
 Free/Active plan were verified. No operator-policy widening or host replacement.
@@ -48,7 +52,13 @@ The pinned provider deletes the explicit ENI `Generation` tag during destroy.
 Its local operator grant is ENI-only, owned-resource-conditioned, `Generation`-only
 and requires present `aws:TagKeys`. The exact inspected saved policy plan was applied
 after PR #94 integration; actual IAM readback matched and Free/Active plan remained
-unchanged. Actual disposal/recreation and current-candidate success remain pending.
+unchanged. Actual disposal `37386672473` and verified no-op `37425374077` passed;
+existing-host candidate success passed `37385125026`. Fresh recreation
+`37425471560` created resources but refused raw nonsensitive output records that
+omit `sensitive`. The local parser correction accepts omission or literal `false`
+only. Its schema-2 provisioning pointer requires explicit reviewed recovery;
+ordinary validation/disposal still refuse. Complete state or a parser fix alone
+does not authorize retry, pointer/state edits or historical AWS success.
 See [operational evidence](../../docs/TESTING-ENVIRONMENT.md) and the
 [implementation plan](../../planning/aws-testing-environment-PLAN.md).
 
@@ -305,7 +315,8 @@ OIDC assumed-role deny proofs; live role tests still precede routine deployment.
 The [trusted runtime](runtime/AGENTS.md) has process-boundary coverage and an
 actual local Compose reset proof. The routine controller only admits inspected
 tag-only generation changes on the existing host; missing, disposed or partial
-unexpected state fails closed (Task 7 recreation is not implemented). Immutable
+unexpected state fails closed; Task 7 admits recreation only from verified
+disposal evidence and matching retained empty state. Immutable
 intent/launched/terminal ledger events, predecessor-aware crash gaps and a CAS
 generation pointer prevent lost-ID ambiguity from becoming an automatic retry.
 Recovered-aborted requires terminal SSM invocation and fresh host lock/process/test/

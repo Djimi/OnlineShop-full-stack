@@ -851,27 +851,22 @@ class ValidationSessionStories(unittest.TestCase):
                     "instance_id": {
                         "value": identifiers["aws_instance.host"],
                         "type": "string",
-                        "sensitive": False,
                     },
                     "vpc_id": {
                         "value": identifiers["aws_vpc.main"],
                         "type": "string",
-                        "sensitive": False,
                     },
                     "security_group_id": {
                         "value": identifiers["aws_security_group.host"],
                         "type": "string",
-                        "sensitive": False,
                     },
                     "generation": {
                         "value": generation,
                         "type": "string",
-                        "sensitive": False,
                     },
                     "root_volume_id": {
                         "value": "vol-" + suffix,
                         "type": "string",
-                        "sensitive": False,
                     },
                 },
             },
@@ -954,7 +949,16 @@ class ValidationSessionStories(unittest.TestCase):
         self.assertTrue((self.directory / "evidence" / "reports.tar").is_file())
 
     def test_recreation_rejects_foreign_or_inconsistent_terraform_outputs(self):
-        cases = ["unknown", "sensitive", "wrong-type", "wrong-root-volume"]
+        cases = [
+            "unknown",
+            "sensitive",
+            "wrong-type",
+            "wrong-root-volume",
+            "null-sensitive",
+            "numeric-sensitive",
+            "string-sensitive",
+            "extra-field",
+        ]
         baseline = copy.deepcopy(self.cloud)
         for case in cases:
             with self.subTest(case=case):
@@ -973,8 +977,16 @@ class ValidationSessionStories(unittest.TestCase):
                     outputs["instance_id"]["sensitive"] = True
                 elif case == "wrong-type":
                     outputs["generation"]["type"] = "number"
-                else:
+                elif case == "wrong-root-volume":
                     outputs["root_volume_id"]["value"] = "vol-99999999999999999"
+                elif case == "extra-field":
+                    outputs["instance_id"]["unexpected"] = False
+                else:
+                    outputs["instance_id"]["sensitive"] = {
+                        "null-sensitive": None,
+                        "numeric-sensitive": 0,
+                        "string-sensitive": "false",
+                    }[case]
                 self.save_cloud()
 
                 result = self.invoke(retain=False)
@@ -984,6 +996,20 @@ class ValidationSessionStories(unittest.TestCase):
                 self.assertEqual(cloud["pointer"]["status"], "provisioning")
                 self.assertFalse(cloud["host_setup"])
                 self.assertFalse(self.success_patches())
+
+    def test_recreation_accepts_explicitly_nonsensitive_output_records(self):
+        self.prepare_verified_disposed_environment()
+        self.new_attempt(attempt=2)
+        self.prepare_recreation_fixture("run-200-attempt-2")
+        for output in self.cloud["create_state"]["outputs"].values():
+            output["sensitive"] = False
+        self.save_cloud()
+
+        result = self.invoke()
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.load_cloud()["pointer"]["status"], "completed")
+        self.assertEqual(len(self.success_patches()), 1)
 
     def test_production_recreation_record_survives_disposal_noop_and_second_recreation(
         self,

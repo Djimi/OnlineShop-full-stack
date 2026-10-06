@@ -314,9 +314,10 @@ tested configuration/IAM updates, a refreshed host-only plan launched the eligib
 The account MUST remain on the Free plan; never upgrade it. Host setup and selected
 Auth/E2E isolation probes passed across Docker restart/real reboot on the initial
 host; current-host evidence must be checked independently after replacement.
-The migrated host now passed owner full-stack/four-test E2E and seeded
-DB/Redis/Kafka reset/retest proofs. Current-host candidate metadata/security
-probes and tag-only next-generation planning passed. Local Tasks 5–6 now include
+The prior migrated host passed owner full-stack/four-test E2E and seeded
+DB/Redis/Kafka reset/retest proofs. Its historical candidate metadata/security
+probes and tag-only next-generation planning passed; those proofs do not cover
+the newly created host. Local Tasks 5–6 now include
 the locked validation controller/workflow, immutable runtime ledger, conditional
 generation pointer, host transport/envelope and owned-success finalization. The
 normal existing-host path permits inspected tag-only generation changes.
@@ -327,17 +328,26 @@ PR #94 integrated the reviewed local lifecycle batch after all six CI jobs passe
 214 automation tests passed. Its one scoped owned-ENI Generation-only DeleteTags
 statement was applied from the exact inspected saved bootstrap plan and verified
 by actual IAM readback, preserving prior grants and Free/Active plan. Actual
-disposal/recreation, current-candidate success and final gate proofs remain pending.
+completed fresh-host recreation, interruption/queue and final gate proofs remain
+pending; actual disposal/no-op evidence is recorded below.
 Hosted trial `37382173568` passed existing-host runtime/transport/four tests/cleanup
 but failed retained-evidence finalization on a bare action digest. The local adapter
 adds REST `sha256:` and requests 15-day artifact retention, preserving strict hash
 and 14-actual-day verification. Its RED-to-GREEN regression is locally green; the
-new revision's full suite passed 215 tests; CI/hosted proof remains pending, and
-the prior AWS check stays failure.
+new revision's full suite passed 215 tests and PR #95 integrated after CI. Run
+`37385125026` then passed current-candidate AWS validation: the exact owned check,
+four tests/cleanup, trusted artifact checksum/lifetime and current generation were
+verified. Prior failed checks remain failure; Free/Active plan remains unchanged.
 Host S3 runtime-input/evidence grants were applied from an inspected exact saved
 bootstrap plan and verified by actual IAM readback; Free plan remains unchanged.
-Actual cloud recovery/transport, current-candidate success, disposal/recreation and
-final gate proofs remain unfinished. See [infrastructure boundaries/recovery](./infra/aws/README.md)
+Actual disposal `37386672473` and repeat no-op `37425374077` passed independent
+state/receipt/resource-absence and preservation checks. Fresh recreation
+`37425471560` created the managed resources but failed on raw state omitting
+`sensitive` for nonsensitive outputs. The local parser regression is green;
+its schema-2 provisioning pointer remains stranded and ordinary validation/
+disposal refuse it. No blind retry or pointer/state rewrite is authorized by
+the parser fix. Explicit reviewed recovery, interruption and final gate proofs
+remain unfinished. See [infrastructure boundaries/recovery](./infra/aws/README.md)
 and the operational runbook. Local stories do not constitute live proof.
 The manual `AWS validation` workflow now includes request, credential-free build,
 isolated publication, and one shared-queue 65-minute operator session with 7200-second
@@ -356,7 +366,7 @@ transitions reconcile exact interrupted phases without overwriting history.
 The exact nonsensitive `AWS_TESTING_SECRET_ARN` Environment variable is configured
 and its protected bootstrap identity was verified read-only. The narrowly scoped
 host transport policy apply/readback passed. Hosted current-candidate AWS proof
-and gate remain pending.
+passed `37385125026`; final gate and remaining lifecycle proofs are pending.
 Known previous/incoming image history is protected; routine tags release after
 recorded replacement, unknown owner tags remain, and failed history is bounded to
 20 predecessors before reviewed recovery is required. Do not equate owner
@@ -381,11 +391,13 @@ reviewed v6.3.0 supports configured inputs and passed hosted proof `37246888048`
 Runtime now refuses detached tests before credentials/reset even with terminal
 local records; routine cloud recovery/termination remains unfinished.
 Host runtime `--reconcile` now observes lock/identity/test absence without
-credentials/reset or clearing unknown outcomes. Cloud transport and whole-session
-recovery remain unfinished; observation is not retry authorization.
+credentials/reset or clearing unknown outcomes. Cloud transport passed in the
+current-candidate trial; interrupted whole-session recovery remains unfinished.
+Observation is not retry authorization.
 Controller `verify-reports` now validates bounded inert content for exactly the
 two known suites/four cases, but explicitly leaves runtime provenance/AWS success
-false. Transport/stage binding and genuine candidate validation remain unfinished.
+false. The locked workflow separately established transport/stage binding and
+current-candidate success in `37385125026`; standalone reports still cannot do so.
 Routine `reconcile-cloud` now observes fixed operator state/lock/EC2/SSM parent
 and invocation boundaries under finite snapshot/output/pagination/deadline bounds.
 The guarded operator proof exercises it before planning; corrected live proof
@@ -404,7 +416,7 @@ reads with publisher/operator OIDC; it never mutates AWS or publishes AWS succes
 The owner accepts normal GitHub Actions identity under trust in authorized
 repository maintainers and reviewed workflows; a dedicated App is not required.
 Exact candidate binding, manual authorization, latest-attempt/failure enforcement
-and live gate proofs remain mandatory. Runtime/disposal and final merge protection
+and live gate proofs remain mandatory. Interrupted recovery/disposal and final merge protection
 remain unfinished; see the runbook's accepted trust model.
 
 ## Debug Info

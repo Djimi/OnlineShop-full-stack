@@ -1302,10 +1302,14 @@ def verify_creation_outputs(state, generation, inventory):
         record = outputs.get(name)
         if (
             not isinstance(record, dict)
-            or set(record) != {"value", "type", "sensitive"}
+            or set(record)
+            not in (
+                {"value", "type"},
+                {"value", "type", "sensitive"},
+            )
             or record.get("value") != value
             or record.get("type") != "string"
-            or record.get("sensitive") is not False
+            or record.get("sensitive", False) is not False
         ):
             raise ReconciliationBlocked("creation state output identity mismatch")
 
