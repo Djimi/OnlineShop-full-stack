@@ -9,7 +9,7 @@ is the owner-facing architecture/decision record; its
 is the source of truth for exact requirements. This file is the operational record,
 not a duplicate specification.
 
-**Current status (2026-10-05):** Owner authorized inline execution of the
+**Current status (2026-10-06):** Owner authorized inline execution of the
 [implementation plan](../planning/aws-testing-environment-PLAN.md). Read-only AWS
 inventory and local candidate-request foundations are implemented on
 `feat/aws-testing-environment` (foundation PR #72 is merged). The owner explicitly
@@ -21,12 +21,16 @@ proofs passed. Local Tasks 5–6 now implement locked validation orchestration,
 immutable intent/launched/terminal records, a CAS generation pointer, tag-only
 existing-host planning, trusted host transport/evidence and owned success/failure
 finalization. The narrow host S3 transport grants are applied and read back. Hosted
-current-candidate validation, actual transport/recovery, live disposal/recreation
+first current-candidate validation and transport passed run `37385125026` with
+independently verified owned success/artifact/four tests/cleanup/current generation.
+Actual disposal and repeat no-op passed; fresh recreation failed after resource
+creation on the nonsensitive raw-output shape and requires explicit reviewed
+recovery. The new host has not passed setup or E2E. Actual interruption recovery
 and final merge protection remain unfinished; local tests are not live proof.
 Task 7's local disposal/recreation flow and strict initial-migration admission fix
 passed independent review fixes and combined verification (214 tests). PR #94 is
 integrated; the narrow operator tag-deletion grant is applied and read back. Actual
-current-candidate runtime and disposal/recreation proof remain pending.
+interruption/queue and completed fresh-host recreation proof remain pending.
 
 GitHub plan is Free; repository visibility was verified as public on 2026-10-02.
 The agreed AWS trigger is **Run workflow** with a PR number, not automatic
@@ -850,6 +854,42 @@ coherent revision's combined suite passed 215 tests in 321.545s, with changed li
 format, workflow lint and whitespace checks passing. CI and another manual trial
 remain required before successful validation can be claimed.
 No disposal, recreation or successful required check is claimed from this run.
+
+The corrected trusted-main trial [37385125026](https://github.com/Djimi/OnlineShop-full-stack/actions/runs/37385125026)
+passed after refreshed exact-candidate CI `37384864672`. Independent checks matched
+the exact owned **AWS validation** check to the still-current PR merge candidate,
+confirmed completed/success, authenticated the retained artifact ZIP checksum and
+at least 14 actual days, verified all four tests and cleanup, and read back the
+completed generation on the same host. Free/Active remained unchanged. The two
+earlier failed checks were not rewritten. This proves existing-host candidate
+validation; disposal/recreation, queue/interruption and final protection still need
+their own acceptance evidence. Generation-specific disposal is verified below.
+
+Generation-specific [disposal 37386672473](https://github.com/Djimi/OnlineShop-full-stack/actions/runs/37386672473)
+passed. Independent owner reads verified the `disposed` pointer, matching immutable
+terminal receipt with recorded-resource absence, retained empty environment state
+and exact lineage/serial, and termination of the recorded host. Post-disposal
+backend/bootstrap state versions/hashes, all role identities/trust/policies, five
+repository identities and secret version metadata exactly matched the post-policy
+baseline; Free/Active remained unchanged.
+
+Repeat [disposal 37425374077](https://github.com/Djimi/OnlineShop-full-stack/actions/runs/37425374077)
+passed as verified no-op; its retained pointer/state were unchanged before the
+next dispatch. [Fresh recreation 37425471560](https://github.com/Djimi/OnlineShop-full-stack/actions/runs/37425471560)
+failed during provision after creating the ten managed resources. All five raw
+state outputs matched the inventory, but Terraform omitted the nonsensitive
+`sensitive` field that the validator incorrectly required. The corrected local
+regression accepts omission or explicit `false` and preserves malformed/sensitive
+output refusals. No host setup or E2E success is claimed for this run.
+
+Read-only reconciliation verified matching immutable creation intents, retained
+lineage/serial advancement, exact owned inventory, corrected outputs, a running
+new host, absent native lock and unchanged Free/Active plan. The pointer remains
+schema 2 / `provisioning`, naming the disposed predecessor until reviewed recovery.
+Both ordinary validation and disposal refuse it. These observations do not
+authorize retry, pointer edits, or historical check success. Explicit stranded-
+creation recovery is required before the next AWS mutation; queue/stale-request
+and partial-destroy/recovery proofs remain separate.
 Do not force-unlock, clear unknown outcomes or recreate from missing state.
 
 After this foundation is reviewed and reaches trusted `main`, use **Actions ->
@@ -860,6 +900,50 @@ because it has not deployed or run AWS E2E. It has no OIDC/AWS permissions.
 The first harness proved pending/failure association; later synthetic latest-
 attempt/delayed-old-completion tests also passed. Actual successful AWS-result
 selection and real merge enforcement remain unproved. Do not enable the gate yet.
+
+## Owner inspection through SSM
+
+Install AWS CLI and the [Session Manager plugin](https://docs.aws.amazon.com/systems-manager/latest/userguide/session-manager-working-with-install-plugin.html)
+on the owner's machine, then verify `session-manager-plugin --version`.
+The coordinator's temporary local plugin was `1.2.835.0`; two real forwarding
+sessions verified gateway health `UP` and frontend HTML, then were terminated.
+This proves technical connectivity, not the owner's application UX walkthrough.
+
+```text
+verified completed generation + owned success -> current host ID -> two local SSM forwards
+  -> browser localhost:5173 + gateway localhost:10000/actuator/health
+replacement or tunnel loss -> reread current generation/host -> reconnect
+```
+
+Read the current record privately from `operations/current-generation.json` in
+the protected state bucket using `dpm-profile` / `eu-north-1`. Compare its generation
+with the trusted run summary and take `host_id` from that record, rather than an
+old command or historical receipt. Require schema 1 / `completed` and the exact
+generation's independently verified owned validation success before forwarding.
+Stop for `disposed`, schema-2 `provisioning`, or any incomplete/recovery state.
+In particular, the current stranded provisioning pointer still names the
+terminated predecessor; it is not an inspection target. Resume these commands
+only after reviewed recovery and a new completed validation bind the fresh host.
+Substitute the verified host ID below; keep
+the identifier and raw record private. Run each forward in a separate terminal:
+
+```bash
+aws ssm start-session --profile dpm-profile --region eu-north-1 \
+  --target "<current-pointer-host-id>" \
+  --document-name AWS-StartPortForwardingSession \
+  --parameters '{"portNumber":["10000"],"localPortNumber":["10000"]}'
+
+aws ssm start-session --profile dpm-profile --region eu-north-1 \
+  --target "<current-pointer-host-id>" \
+  --document-name AWS-StartPortForwardingSession \
+  --parameters '{"portNumber":["5173"],"localPortNumber":["5173"]}'
+```
+
+The local ports must be available. End each session with Ctrl+C when finished.
+After a replacement or connection failure, reread the current record and reconnect
+to its host. A generation change can reset the application on the same host;
+inspection is not reserved and active tunnels cannot veto validation or disposal.
+There is no public application endpoint and no incoming SSH/app/database port.
 
 ## Incremental delivery checklist
 

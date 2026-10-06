@@ -13,18 +13,21 @@ Trusted generation/bootstrap/digests/fixtures -> host lock
  -> terminal operation; app retained for inspection
 ```
 
-**Local batch implemented; hosted proof pending:** routine locked existing-host
+**Existing-host hosted proof passed; lifecycle acceptance pending:** routine locked existing-host
 validation now joins cloud/immutable-operation reconciliation, idle-host admission,
 tag-only saved-plan/apply, protected S3 input transport and bound report outcome.
 Local disposal/recreation is implemented with the independent review's seven
 findings addressed in a consolidated local pass and combined verification passed;
-its hosted
-proof, owner intervention for stranded locks/detached tests, and the live final
-AWS gate remain unfinished. The eligible Free-plan host
-now runs the app after owner full-stack/E2E and clean-state reset proofs.
+completed hosted recreation proof, owner intervention for stranded locks/detached
+tests, and the live final AWS gate remain unfinished. The prior eligible Free-plan
+host ran the app after owner full-stack/E2E and clean-state reset proofs, then
+verified disposal terminated it. Its newly created successor remains stranded
+before setup and cannot reuse those historical proofs.
 Owner setup and selected Auth/E2E isolation probes now pass, including Docker
 restart and actual reboot/firewall retention with host ECR/secret access. Actual
-routine workflow/current-candidate validation and recovery need hosted AWS proof.
+routine workflow/current-candidate validation passed `37385125026` with the owned
+check and retained artifact independently verified. Interruption recovery,
+completed fresh-host recreation and final protection proofs remain pending.
 
 `scripts/aws-host-setup.py` owns the initial owner-only SSM setup proof. It transfers
 only trusted-main host files with chunk bounds/checksums and persists command
@@ -147,19 +150,20 @@ host-lock release were verified. This does not implement automatic reconciliatio
 Owner proof evidence remains bound to its specific host and historical published
 candidate. Replacing the host requires fresh setup and current-host runtime
 verification; old host's successful probes cannot publish a new candidate's check.
-The migrated host now passed full-stack readiness/four E2E tests and a second
+The prior migrated host passed full-stack readiness/four E2E tests and a second
 seeded DB/Redis/Kafka clean-state reset/four-test retest. Sanitized XML and removal
 of the test container/temporary secret files were verified. These are owner
 historical-candidate proofs, not routine workflow or current-candidate success.
 
-Current-host probes also reject IPv4/IPv6 metadata transport from all five
+Historical probes on that disposed host also rejected IPv4/IPv6 metadata transport from all five
 candidate images and verify running services are nonroot, nonprivileged, without
 cloud/job credentials or the Docker socket. Candidate roots are read-only; Kafka's
 backing-service root remains writable. Frontend IPv6 reports `EADDRNOTAVAIL` (no
 source address), not a routed firewall-denial proof. Probe tooling failures must
 not be interpreted as metadata rejection; distinguish transport errors explicitly.
+The created successor needs fresh setup and isolation proofs after reviewed recovery.
 
-## Routine session: local implementation, awaiting AWS proof
+## Routine session: existing-host proof verified
 
 ```text
 validate-preflight: actors -> current/latest candidate -> authentic publisher receipt
@@ -263,13 +267,21 @@ recovery decision from fresh lock/state/resource/SSM/host observations before re
 Partial failures expose only fixed diagnostics, bounded leftover address/count and
 complete-vs-unknown observation status; raw provider output and IDs stay private.
 Recreation checks the five real Terraform output records against verified resources.
+Raw state may omit `sensitive` for nonsensitive outputs; only omission or literal
+`false` is accepted. Hosted recreation `37425471560` exposed this serialization
+boundary after creating resources and before host setup. Its schema-2 provisioning
+pointer remains stranded: ordinary validation/disposal reject it. A corrected
+parser is not recovery authorization; reconcile through an explicit reviewed
+procedure without pointer/state rewrites, blind apply retry or historical success.
 Connected local lifecycle coverage consumes production-generated immutable records
 through disposal/no-op and a second recreation; unknown statuses/shapes still refuse.
 The provider's explicit ENI generation-tag resource requires `ec2:DeleteTags`;
 the local policy limits this to `Generation` on owned ENIs with present tag keys.
 Its exact inspected saved policy apply and actual IAM readback passed after PR #94
-integration; Free/Active plan remained unchanged. Hosted disposal/recreation proofs
-remain pending.
+integration; Free/Active plan remained unchanged. Hosted disposal `37386672473`
+passed independent retained-state/receipt/resource-absence and protected-resource
+preservation checks. Repeat `37425374077` passed verified no-op with unchanged
+pointer/state. Fresh recreation, interruption and final gate proofs remain pending.
 The fresh coordinator automation suite passed 214 tests in 317.056s after the
 provider tag-ID shape regression; local checks do not establish hosted success.
 

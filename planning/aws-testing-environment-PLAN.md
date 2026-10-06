@@ -209,35 +209,36 @@ update each affected module's AGENTS and operational flows.
 **Consumes:** Task 2 request, Task 3 verified archives/digests, Task 4 roots and Task 5 runtime/ledger.
 **Produces:** Manually requested AWS result plus 14-day evidence independent of host lifetime.
 
-- [ ] Write failing stories for skipped prerequisites, failed apply/reset/readiness/E2E, corrupt/missing/empty reports, cancelled finalizer, stale candidate at each checkpoint, duplicate request and older completion. Assert success requires every stage and recognized executed tests, not just exit zero.
-- [ ] Run focused controller/runtime tests; confirm new outcome stories fail before wiring.
-- [x] Implement workflow jobs: request (`contents/pull-requests/actions: read`, `checks: write`, no OIDC) -> build (read-only, no OIDC/write) -> publisher (Environment, publisher OIDC role) -> one validation job (Environment, operator OIDC role, check-write). Local workflow/controller contract covered; hosted current-candidate run pending.
-- [x] Give only the validation job shared `aws-testing-environment` concurrency with `queue: max` and no active cancellation. Keep publication outside lock without pruning images. Set validation timeout 65 minutes; queue waiting is separate. Pin actions by reviewed commit SHA. Local parsed workflow contract passes; hosted runtime proof pending.
-- [x] Implement locked `validate`: recheck identities -> verify account/state/ownership -> reconcile -> assign/persist generation -> saved plan/apply -> reset/deploy/readiness/E2E -> retrieve reports -> finalize only this attempt's check. Candidate/latest-attempt checks precede owned success. Implementation has local external-boundary stories only; actual mutation, host transport and current-candidate check remain pending.
+- [x] Write failing stories for skipped prerequisites, failed apply/reset/readiness/E2E, corrupt/missing/empty reports, cancelled finalizer, stale candidate at each checkpoint, duplicate request and older completion. Assert success requires every stage and recognized executed tests, not just exit zero.
+- [x] Run focused controller/runtime tests; confirm new outcome stories fail before wiring. Independent findings and real action/provider shapes were observed RED-to-GREEN; the final full suite passed 215 tests.
+- [x] Implement workflow jobs: request (`contents/pull-requests/actions: read`, `checks: write`, no OIDC) -> build (read-only, no OIDC/write) -> publisher (Environment, publisher OIDC role) -> one validation job (Environment, operator OIDC role, check-write). Local contract and existing-host current-candidate run `37385125026` passed.
+- [x] Give only the validation job shared `aws-testing-environment` concurrency with `queue: max` and no active cancellation. Keep publication outside lock without pruning images. Set validation timeout 65 minutes; queue waiting is separate. Pin actions by reviewed commit SHA. Local contract and hosted existing-host runtime passed; queue-race proof remains pending.
+- [x] Implement locked `validate`: recheck identities -> verify account/state/ownership -> reconcile -> assign/persist generation -> saved plan/apply -> reset/deploy/readiness/E2E -> retrieve reports -> finalize only this attempt's check. Candidate/latest-attempt checks precede owned success. Local stories and actual existing-host mutation/transport/current-candidate owned success passed; interruption and fresh-host recovery remain pending.
   Independent `verify-publication` now authenticates this exact trusted-main
   run/attempt/three successful prerequisites/receipt artifact and digest, binds all
   request fields/five fixed image digests and fixture bytes, and rechecks candidate
   before create-only evidence. Runtime stage now consumes authenticated receipt
   and fixture through fixed host transport; historical real GitHub receipt check
   is not current-candidate authorization/runtime evidence. Deployed transport and
-  live current-candidate validation remain pending.
-- [ ] Validate reports as bounded inert data: known suite names, expected current test count (`ItemsE2ETest`: three API tests; `RestAssuredLoggingTest`: one logging regression), no failures/errors and no all-skipped outcome; reject unsafe paths/links/XML external entities, malformed results or false zero-test success. Upload only sanitized records/reports/bounded logs with at least 14-day retention; never credentials/state/plans or raw environment dumps.
+  live existing-host current-candidate validation passed `37385125026`.
+- [x] Validate reports as bounded inert data: known suite names, expected current test count (`ItemsE2ETest`: three API tests; `RestAssuredLoggingTest`: one logging regression), no failures/errors and no all-skipped outcome; reject unsafe paths/links/XML external entities, malformed results or false zero-test success. Upload only sanitized records/reports/bounded logs with at least 14-day retention; never credentials/state/plans or raw environment dumps.
   Independent `verify-reports` content parser and rejection stories now pass:
   uncompressed flat tar, two known suites/four unique cases, matching zero-failure/
   error/skip counters, bounded payloads and no entity/link/path acceptance. The local
   validation flow now binds report transport/stages and rechecks candidate/latest
-  attempt; hosted current-candidate execution/evidence proof remains pending.
-- [x] Add always-run outcome/evidence handling for rejected build/publication/deployment stages; failure before locked job completes accepted request non-success. Cancellation leaves pending/non-success and reconciliation evidence. Finalizer preserves owned completed success and cannot update another attempt. Local workflow contract only; hosted proof pending.
-- [ ] Run focused suites, `actionlint` with support for current `queue` syntax, Terraform checks and an actual manual trial. Push/update/CI completion must start no AWS workflow. Trial success/failure must attach to the candidate from Task 2, without a second reviewer click.
-- [ ] Commit workflow/controller/docs: `feat(e2e): add manual AWS validation workflow`.
+  attempt; hosted existing-host execution/evidence proof passed `37385125026`.
+- [x] Add always-run outcome/evidence handling for rejected build/publication/deployment stages; failure before locked job completes accepted request non-success. Cancellation leaves pending/non-success and reconciliation evidence. Finalizer preserves owned completed success and cannot update another attempt. Hosted provision/artifact failures and existing-host success passed; cancellation scenarios remain pending.
+- [x] Run focused suites, `actionlint` with support for current `queue` syntax, Terraform checks and an actual manual trial. Push/update/CI completion must start no AWS workflow. Trial success/failure must attach to the candidate from Task 2, without a second reviewer click. Exact owned success, four tests, ZIP digest/lifetime and current generation verified for `37385125026`; both prior owned failures remain failure.
+- [x] Commit workflow/controller/docs: `feat(e2e): add manual AWS validation workflow`. PRs #93–#95 integrated after guarded exact-head CI; first current-candidate success verified. Queue/interruption/protection scenarios remain Task 8 obligations.
   Coherent local batch independently reviewed; five findings observed RED-to-GREEN.
   Final combined automation: 172 tests passed in 219.656s. Actual production-path
   Compose/UID/reset/E2E passed in 91.055s; lints, isolated bootstrap mock assertions
-  and documentation links passed. Hosted current-candidate proof remains pending.
+  and documentation links passed. Hosted existing-host current-candidate proof
+  subsequently passed `37385125026`.
   PR #93 integrated at `e0fa8db` after all six PR CI jobs passed. An inspected
   exact saved bootstrap plan applied only the two narrow host S3 transport grants;
   actual policy readback matched and Free/Active plan remained unchanged. The
-  disposable trial PR is refreshed; current-candidate runtime proof is next.
+  disposable trial PR supplied that proof; remaining acceptance follows below.
 
 ### Task 7: Add generation-safe disposal and automatic recreation
 
@@ -246,10 +247,10 @@ extend controller tests and operational disposal/recovery instructions.
 **Consumes:** Fixed Terraform root/key, current generation pointer and Task 5 reconciliation.
 **Produces:** Verified deletion/no-op outcome, preserved bootstrap and reusable recovery record.
 
-- [ ] Write failing stories for stale generation after queueing, unknown ownership, wrong account/root, absent verified environment, missing/corrupt state with surviving resources, partial destroy and safe retry. Assert state/bootstrap/roles/images/secrets remain.
-- [ ] Run focused tests; confirm disposal behavior failures before implementation.
-- [ ] Add only `workflow_dispatch` with generation and confirmation inputs; require trusted `main` and authorized dispatch/rerun actor before AWS access. Use the same Environment/operator role and exact concurrency group/settings as validation; disposal timeout 30 minutes including 20-minute destroy bound.
-- [ ] Implement locked disposal: reconcile -> compare generation -> verify ownership/state -> inspect saved destroy plan -> apply exact plan -> wait and verify recorded resource IDs absent -> record leftovers or successful no-op. Preserve generation/history after destroy; no account-wide sweep.
+- [x] Write failing stories for stale generation after queueing, unknown ownership, wrong account/root, absent verified environment, missing/corrupt state with surviving resources, partial destroy and safe retry. Assert state/bootstrap/roles/images/secrets remain.
+- [x] Run focused tests; confirm disposal behavior failures before implementation. Independent review's seven reproductions and actual provider-ID regression were fixed RED-to-GREEN; combined local gate passed.
+- [x] Add only `workflow_dispatch` with generation and confirmation inputs; require trusted `main` and authorized dispatch/rerun actor before AWS access. Use the same Environment/operator role and exact concurrency group/settings as validation; disposal timeout 30 minutes including 20-minute destroy bound.
+- [x] Implement locked disposal: reconcile -> compare generation -> verify ownership/state -> inspect saved destroy plan -> apply exact plan -> wait and verify recorded resource IDs absent -> record leftovers or successful no-op. Preserve generation/history after destroy; no account-wide sweep. Live disposal `37386672473` passed retained-state/receipt/host termination and protected-resource preservation verification.
 - [ ] Prove live disposal waiting behind E2E, stale queued disposal rejection, repeated verified no-op, partial-delete recovery and next manual validation's recreation with clean state. Active inspection tunnel cannot veto disposal.
 - [ ] Run focused suites, workflow/Terraform checks and recreation E2E; commit: `feat(e2e): add generation-safe AWS disposal`.
 
@@ -261,16 +262,33 @@ extend controller tests and operational disposal/recovery instructions.
   affected stories passing. After the provider ENI tag-ID shape correction, the
   fresh coordinator suite passed 214 tests in 317.056s; changed lint/format, both
   workflow/queue checks, three isolated Terraform mock suites and documentation
-  checks passed. Ready for integration; real disposal/recreation and required-check
-  proofs remain pending.
+  checks passed. Integrated in PR #94; actual disposal/no-op later passed.
+  Completed recreation and final required-check protection remain pending.
   The first runtime trial's exact owner migration pointer shape is now
   covered, with unknown purpose/fields/status still rejected. The provider-proven
   ENI `Generation` tag deletion grant passed bootstrap mock assertions RED-to-GREEN;
   exact inspected saved policy apply/readback passed after PR #94's six CI jobs and
-  guarded integration at `f452665`; account remains Free/Active. Task 7 hosted proofs
-  remain pending. Local results and policy readback do not complete the live contract.
+  guarded integration at `f452665`; account remains Free/Active. Hosted disposal/no-op
+  passed; recreation/queue/partial-recovery remain pending. Local results and
+  policy readback do not complete the live contract.
 
 ### Task 8: Run acceptance trials and enable required merge protection
+
+#### Active lifecycle recovery prerequisite
+
+- [x] Independently verify live disposal `37386672473`: immutable receipt,
+  retained empty state, recorded-resource absence and protected-resource/Free-plan preservation.
+- [x] Verify repeat disposal `37425374077` is a no-op with unchanged pointer/state.
+- [x] Reproduce fresh-creation failure `37425471560` from sanitized actual raw
+  Terraform output shapes; accept absent or literal-false `sensitive` locally
+  while retaining strict identity/type/unknown-field refusals (RED-to-GREEN).
+- [ ] Complete consolidated local verification and integrate the output correction.
+- [ ] Review and implement an explicit stranded-creation recovery procedure for
+  the schema-2 provisioning pointer. Ordinary validation/disposal refuse it;
+  preserve failed checks/history, reconcile exact state/resources/operations,
+  and never rewrite state/pointer or blindly retry the original create apply.
+- [ ] Prove fresh-host setup, reset/four-test E2E, retained evidence and a new
+  current/latest owned success after reviewed recovery.
 
 **Files:** Update `docs/TESTING-ENVIRONMENT.md`, testing strategy, root/module AGENTS
 and plan checkboxes/issues with actual evidence. Configure GitHub protection only after proofs.
@@ -280,6 +298,10 @@ and plan checkboxes/issues with actual evidence. Configure GitHub protection onl
 - [ ] Record pass/fail and evidence link for every acceptance scenario A1–A33; distinguish local story tests from real GitHub/AWS proof. Run concurrent PRs/disposal, retries, identity changes, cancellation, clean-state and failure trials without introducing automatic deployment.
 - [ ] Verify image retention cannot prune currently inspected/deployed digests: exclude active-retention tags from expiration and protect both previous and incoming images during replacement. Move retention protection under lock only when the recorded deployed generation actually changes, including failed validation left for inspection; release obsolete protection after reconciliation. Confirm disposed-state retention remains bounded. Record measured costs/capacity, AMI/tool versions and actual policies/settings.
 - [ ] Document owner prerequisites and two `AWS-StartPortForwardingSession` examples using `dpm-profile`, region and verified instance ID for gateway `10000`/frontend `5173`. Show the current-generation record before inspection, after replacement, and after tunnel failure.
+  The runbook now provides plugin prerequisites, both forwards and current-record
+  selection/reconnect flow. Coordinator technical proof passed gateway `UP` and
+  frontend HTML through real owner SSM sessions, followed by exact session cleanup.
+  Owner UI walkthrough and replacement-specific reconnection proof remain pending.
 - [ ] Record recovery flows for stale state lock, corrupt/missing state, partial apply/destroy, lost command IDs and manual drift. Recovery restores operation, never synthesizes validation success from host health.
 - [ ] Configure `main` required existing CI contexts plus **AWS validation**, strict up-to-date branches and administrator enforcement; no bypass/merge queue. Verify missing, pending, failed, stale, skipped and older-result cases with real trial PRs, plus success allowing merge only for the tested candidate.
 - [ ] Run appropriate final checks once: automation suites, Terraform fmt/validate/test, actionlint, hadolint for changed Dockerfiles, affected module-root tests/frontend checks and final hosted E2E. Report unresolved failure evidence rather than marking delivery complete.
@@ -304,14 +326,16 @@ and plan checkboxes/issues with actual evidence. Configure GitHub protection onl
 
 ## Issues and resolutions
 
-- [ ] **Retained-evidence action/API adapter:** trial `37382173568` passed cloud
+- [x] **Retained-evidence action/API adapter:** trial `37382173568` passed cloud
   runtime/four tests/cleanup but refused finalization because action output is bare
   hex while API digest is `sha256:`. Its actual 14-day artifact also falls one second
   short of the strict lifetime minimum. Local regressions reproduced both failures;
   workflow prefix normalization and 15-day requested retention are GREEN without
   loosening downstream checks. Combined suite passed 215 tests in 321.545s; changed
-  lint/format/workflow/whitespace passed. CI and a new hosted trial precede closure.
-  The prior required AWS check remains failure.
+  lint/format/workflow/whitespace passed. PR #95 integrated after six CI jobs passed;
+  corrected trial `37385125026` passed exact owned candidate success, ZIP checksum,
+  actual retention, four tests/cleanup and current-generation checks. The two prior
+  failed required checks remain failure. This closes only the adapter issue.
 
 - [x] **Operator plan proof recovered:** trial `37243793027` authorized actors/
   OIDC but failed its protected plan phase, without apply or app mutation. Initial
