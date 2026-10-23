@@ -12,6 +12,9 @@ You are staff engineer with a lot of experience and always propose modern archit
 - Always be super skeptical of my ideas — be devil's advocate. Always ask why, how, and whether there is a better way. Always propose alternatives. Be ruthless and direct, not a yes man.
 - Keep secrets and sensitive information safe. Never expose them in code, logs, documentation, or interactive sessions. If you need to use a secret internally, do so; but when showing anything to me that involves it, always substitute a placeholder (e.g., `<db-admin-password>`).
 - Before you act, think first! Check what the user asked for — answer if it is only a question, act if it is a command. If you are not sure, ask for clarification. Always ask for clarification if the request is ambiguous or unclear.
+- Be 100% sure you are on the same wave with the human intention!
+- Always be pragmatic - choose the simplest solution, but still robust! Double charging a client is not acceptable, just to make the design easier!
+
 
 ## Self-improving
 When you:
@@ -33,8 +36,19 @@ You **MUST** be watching about these, as self-improving is a core mechanism to a
 ## Preferences
 - Prefer explaining with flows instead of separate files. That will make it easier to understand and maintain. If a flow is too complex, break it down into smaller flows.
 - Always start explaining on a higher level (concept) and go into details in the next paragraphs. Do not start with details and then explain the concept. That will make it harder to understand and maintain.
-- When explaining, prefer text diagrams and arrows instead of some nested bullets, or comma separated steps. Show independent, parallel, related executions on them
-- Be concise and on the point. Avoid long paragraphs and unnecessary details. If you need to explain a complex concept, break it down into smaller parts and explain each part separately. Better to explain something in 4 iterations instead of dumping 150 lines of explanation, so I have to write separate list with questions until reading
+
+- If you need to explain a complex concept, break it down into smaller parts and explain each part separately. Better to explain something in 4 iterations instead of dumping 150 lines of explanation, so I have to write separate list with questions until reading
+
+
+## Style for answering to human
+
+- Concise and on the point
+- Avoid unnecessary details
+- Simple sentenses with simple words, short lines
+- Give concrete examples - file, line, example flow, not just vague high level explanation
+- Explain for fast readers
+- Text diagrams and arrows
+- Keep cognitive load low
 
 
 ## Documentation Maintenance
@@ -43,9 +57,12 @@ You **MUST** be watching about these, as self-improving is a core mechanism to a
 On each change you MUST update the files related to the respective microservice, so they are ABSOLUTELY independent and only know about each other on an architectural level.**
 
 1. This file (`AGENTS.md`) if the change affects project-wide documentation
-2. All referenced documentation files affected by the change (see sections below)
-3. All files referenced by those files (recursive update through the entire reference chain)
-4. All service-level `AGENTS.md` files in each microservice directory (e.g., `Auth/AGENTS.md`, `Items/AGENTS.md`, etc.)
+1. All referenced documentation files affected by the change (see sections below)
+1. All files referenced by those files (recursive update through the entire reference chain)
+1. All service-level `AGENTS.md` files in each microservice directory (e.g., `Auth/AGENTS.md`, `Items/AGENTS.md`, etc.)
+1. Always update the most specific file! For instance, if something is related to service X only, add it there, not in the main AGENTS.md that is always read!
+1. Be super sceptical and think super carefully before updating documentation - it MUST be on the precise place and not too broad or too overfitted
+
 
 **Documentation must always stay in sync. Propagate updates through the entire documentation tree.**
 
@@ -54,185 +71,40 @@ On each change you MUST update the files related to the respective microservice,
 ## Maven usage
 When using Maven commands you MUST use the Maven wrapper (`./mvnw`) inside the service's folder you are working on — never from a parent or sibling directory. Always run from the target service's root folder (e.g., `Items/`, `Auth/`).
 
-## Before Committing
-**ALWAYS run tests first** — see [docs/TESTING_STRATEGY.md](./docs/TESTING_STRATEGY.md) for which tests to run. Never commit without passing tests.
-1. Run unit + integration tests for the affected service from its directory: `./mvnw clean verify`
-2. If available, also run E2E tests from `e2e-tests/`: `./mvnw clean test`
-3. Only commit if ALL tests pass.
-
-## GitHub Actions CI
-
-The unfiltered `push` and `pull_request` events run three independent jobs with
-read-only repository access. No job waits for another, so an image build still
-runs when Java or frontend verification fails.
-
-```text
-push or pull_request
-  -> Java jobs: Auth | API Gateway | common -> Items
-  -> Frontend: Node 24 -> npm ci -> lint -> production build
-  -> Images and PR E2E: build four application images
-       -> pull_request only: Compose -> readiness -> API E2E -> evidence -> cleanup
-```
-
-Java uses three explicit Temurin 25 jobs. Auth and API Gateway each run `./mvnw --batch-mode clean
-verify` from their own module root. The `common -> Items` job runs
-`common/./mvnw --batch-mode clean install`, then `Items/./mvnw --batch-mode
-clean verify`, on the same runner. Frontend uses Node 24 with `npm ci`,
-`npm run lint`, and `npm run build` from `frontend/`; it has no current
-unit-test script.
-
-On every push and PR, the independent image job runs this root Compose command:
-
-```bash
-docker compose build auth-service items-service api-gateway frontend
-```
-
-It builds Auth, Items, API Gateway, and frontend images from source. `common`
-is library-only. The images are neither published nor deployed. Image packaging
-does not prove tests passed: Java Dockerfiles use `-DskipTests`, and the
-frontend image starts Vite development mode rather than creating the production
-bundle. Docker build cache, Java/frontend job caches, and the PR E2E host Maven
-repository are separate; no cache or images are transferred between jobs.
-
-Only pull requests continue on the image job's runner, where the just-built
-images are available. The sequence is: set up Java 25 without a Maven cache ->
-`docker compose up -d --no-build --wait --wait-timeout 300` -> bounded gateway
-`/actuator/health` and frontend `/` HTTP probes -> API E2E from `e2e-tests/`
-with `E2E_BASE_URL=http://localhost:10000` -> reports and diagnostics ->
-`docker compose down -v --remove-orphans` under `always()`.
-
-The Java jobs always upload narrowly scoped Surefire/Failsafe reports under
-the `java-test-reports-auth`, `java-test-reports-api-gateway`, and
-`java-test-reports-common-items` artifact names; PR E2E uploads
-`pr-e2e-test-reports`. PR diagnostics always show a bounded Compose status and,
-on failure, bounded application logs with credential-bearing lines redacted.
-Cleanup is always attempted for PR Compose runs. Current E2E covers the three
-API tests through the gateway, Auth, and Items. It does not browser-test the
-frontend or directly test each infrastructure service or administrative UI.
-
-To reproduce the CI checks locally, keep every Maven wrapper invocation at its
-module root:
-
-```bash
-(cd Auth && ./mvnw --batch-mode clean verify)
-(cd api-gateway && ./mvnw --batch-mode clean verify)
-(cd common && ./mvnw --batch-mode clean install)
-(cd Items && ./mvnw --batch-mode clean verify)
-(cd frontend && npm ci && npm run lint && npm run build)
-docker compose build auth-service items-service api-gateway frontend
-docker compose up -d --no-build --wait --wait-timeout 300
-gateway_port="$(docker compose port api-gateway 10000 | awk -F: '{print $NF}')"
-frontend_port="$(docker compose port frontend 5173 | awk -F: '{print $NF}')"
-gateway_url="http://127.0.0.1:${gateway_port}"
-frontend_url="http://127.0.0.1:${frontend_port}"
-deadline=$((SECONDS + 120))
-until curl --fail --silent --show-error "${gateway_url}/actuator/health"; do
-  (( SECONDS >= deadline )) && exit 1
-  sleep 5
-done
-deadline=$((SECONDS + 120))
-until curl --fail --silent --show-error "${frontend_url}/"; do
-  (( SECONDS >= deadline )) && exit 1
-  sleep 5
-done
-(cd e2e-tests && E2E_BASE_URL="${gateway_url}" ./mvnw --batch-mode clean test)
-docker compose down -v --remove-orphans
-```
-
-The Compose startup, readiness, E2E, diagnostics, and cleanup commands are
-PR-only CI behavior; running them locally is optional when an affected change
-needs full-stack validation. The hosted workflow deliberately uses canonical
-`localhost:10000` and `localhost:5173` on clean runners. The local snippet
-instead queries the active published Compose ports, so it works with both those
-defaults and generated worktree ports without sourcing `.env` into the shell.
-
-## Quick Reference
-
-### Services & Ports
-
-| Service | Port | Java Version | Maven Wrapper | Depends On |
-|---------|------|-------------|---------------|------------|
-| Auth | 9001 | 25 | Yes | — |
-| Items | 9000 | 25 | Yes | common |
-| API Gateway | 10000 | 25 | Yes | — |
-| Common | — | 25 | Yes | — |
-| Frontend | 5173 | — | No | — |
-| E2E Tests | — | — | Yes | — |
-
-## Starting Services Locally
-
-### Create a worktree
-
-```bash
-wtc <name> [true|false] [-b [<ref>]] [--branch <branch>] [--name <dir-name>]
-```
-
-`wtc` is the persisted Bash function in the dotfiles checkout. It runs the
-repository's `scripts/create-worktree.py` when present, then changes the
-calling shell into the new worktree by default. Use `wtc <name> false` to keep
-the current directory. Direct use of the Python command is also supported, but
-an external Python process cannot change its caller's directory.
-
-The command first runs `git pull --ff-only` on the current checkout, then
-validates the request, creates the branch and worktree directory, verifies that
-the selected base uses the worktree Compose variables, atomically writes a
-managed `.env` block with the Compose project, slot, and ten unique host ports,
-then prints the start command. The current checkout must have an upstream that
-can be fast-forwarded; no merge or rebase is attempted. The worktree directory
-defaults to the name; a relative name resolves against the main checkout's
-`<repository>-worktrees/` directory and an absolute path is used as-is.
-`-b` (`--base`) accepts a commit or branch name and defaults to `main`; bare
-`-b` branches from the current branch. `--branch` overrides the branch name.
-Existing local branches and target paths are rejected. The allocator checks the
-slot's complete 20-port block, so ten additional offsets remain reserved for
-future services. It does not start containers or create volumes.
-Use `wtc` instead of a bare `git worktree add`; for repositories without the
-local script, the fallback creates the same `<repository>-worktrees/<name>`
-directory on branch `<name>` with plain Git, without fast-forwarding and
-without Compose port allocation.
 
 ### Multi-worktree guide
 
 See [docs/MULTI_WORKTREE.md](./docs/MULTI_WORKTREE.md) for port isolation,
 failure recovery, and teardown.
 
-### Build and start
-
-```bash
-# Build every application image from the current source and start the full stack.
-docker compose up -d --build
-```
-
-`docker build` builds one image only. Use the Compose command above for the complete local stack: it builds Auth, Items, API Gateway, and frontend, then starts those containers plus the database and infrastructure containers.
-
-All services, databases, Redis, Kafka, and the frontend are defined in `docker-compose.yml`. The Auth, Items, and API Gateway Dockerfiles compile their applications in a Maven build stage; the frontend image installs its dependencies and copies the current source. The frontend auto-connects to the API gateway via `VITE_API_URL=http://localhost:<GATEWAY_PORT>` (set by Compose `environment:`).
-
-`--build` uses Docker's cache for unchanged layers and rebuilds layers affected by source changes. It is not a test command; run the service Maven or npm tests separately when needed. For a simple stop/restart without changes, use `docker compose down` / `docker compose up -d`.
-
-> **Build contexts:** Items uses the repository root as its context because it builds the `common` library first. Auth and API Gateway use their service directories. `common` is a library, not a separate deployable Compose service.
-
-## Script Development
-
-All new and changed repository automation must follow
-[docs/SCRIPT_GUIDELINES.md](./docs/SCRIPT_GUIDELINES.md). Scripts must expose a
-short top-down flow, use plain domain names, and avoid indirection or legacy
-compatibility without a current requirement. Treat growing size and shell
-complexity as signals to simplify the design or choose a more readable
-language, not as reasons to add layers.
-
 ## Git Workflow
 
 See [docs/GIT_WORKFLOW.md](./docs/GIT_WORKFLOW.md) for branch naming and
 commit message conventions.
 
-## Dockerfile Conventions
+## Specification-driven development
 
-1. **Self-contained application builds** — Java service Dockerfiles use multi-stage builds and run Maven inside Docker, eliminating a host-side `./mvnw package` prerequisite. Use the repository root as the context when a service depends on another project (e.g., Items → common).
-2. **Cache mounts** — Always use `--mount=type=cache,target=/root/.m2,id=maven-repo` on RUN lines that invoke Maven. Use an explicit `id=` so mounts are shared across RUN steps.
-3. **Base image tags** — Pin to a specific Alpine version (e.g., `eclipse-temurin:25.0.1_8-jre-alpine-3.23`), not a floating tag.
-4. **COPY granularity** — When a RUN step processes an entire directory tree, use `COPY dir/ dir/` (directory-level) not file-level COPY. File-level COPY is only justified when it creates a distinct layer that can be cached independently of sibling RUN steps. If all files feed a single RUN, use the simplest COPY possible.
-5. **Healthchecks** — Use `curl -f <actuator-endpoint> || exit 1`, not raw `curl` and not business endpoints.
-6. **`hadolint`** — Run `hadolint` on any changed Dockerfile before committing. Configuration is in `.hadolint.yaml`.
+Migration is in progress. Specification coverage is incomplete; specs are not
+yet the project-wide source of truth.
+
+- Read relevant specs and inspect existing code before changing behavior.
+- Use [spec/README.md](./spec/README.md) for navigation and the workflow.
+- `spec/domains/` and `spec/architecture/` hold documented current behavior;
+  `spec/changes/` holds proposed or approved changes.
+- Approved change specs define intended behavior, not proof of delivery.
+- Do not change approved contracts without human approval. Report conflicts
+  between specs, code and existing documentation before deciding how to proceed.
+- Missing specifications do not mean missing requirements.
+
+# Subagent strategy
+
+Always start the appropriate model for the task. Ideally:
+
+- Luna model on max thinking for investigations inside the repo, web searches, etc
+- Sol model on medium thinking for specification, planning and their reviews
+- Terra on medium thinking for code review and tricky investigations
+
+In case you decides the above recommendations are not appropriate you are free to choose an appropriate model
 
 ## Maven Build Dependencies & Parallel Builds
 
@@ -258,7 +130,7 @@ See [docs/API_DESIGN.md](./docs/API_DESIGN.md) for:
 - Gateway exception: public, unversioned info endpoints (e.g., `/api/product-info`) when no service owns the data
 
 ## Testing Strategy
-ALWAYS read this file before designing or writing tests!
+ALWAYS read this file before designing, writing tests or improving tests!
 
 See [docs/TESTING_STRATEGY.md](./docs/TESTING_STRATEGY.md) for:
 - When to run tests
@@ -281,10 +153,3 @@ See [docs/DEBUG_INFO.md](./docs/DEBUG_INFO.md) for:
 See [docs/CONCEPTS_TO_TRY.md](./docs/CONCEPTS_TO_TRY.md) for:
 - Experimental concepts to explore (which are the target for future spikes)
 - Future improvements
-
-## Planning
-
-- Add all plans in [planning](./planning/) folder
-- Use the following name pattern `<feature-name>-PLAN.md`, for example `Migrating-auth-service-to-ddd-PLAN.md`
-- In each plan create tasks to be done and when done put ticks on them, so I know what is implemented, what has left, etc.
-- Create list with issues also - mainly technological (closed ports, things to be set up, etc). For the issues which are solved put green tick on them and explain how they are fixed briefly. In that way I will know what are the issues which left after the implementation
