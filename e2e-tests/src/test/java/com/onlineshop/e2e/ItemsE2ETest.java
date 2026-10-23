@@ -19,7 +19,7 @@ class ItemsE2ETest extends BaseTest {
     void testAuthenticatedItemsFlow() {
         // Generate random username to avoid conflicts
         String randomUsername = "testuser_" + UUID.randomUUID().toString().substring(0, 8);
-        String password = System.getenv().getOrDefault("E2E_TEST_PASSWORD", UUID.randomUUID().toString());
+        String password = "testPassword123";
 
         // Step 1: Create/Register user
         Map<String, String> registerRequest = Map.of(
